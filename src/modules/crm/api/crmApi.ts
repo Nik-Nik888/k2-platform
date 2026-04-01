@@ -1,7 +1,12 @@
 import { supabase } from '@lib/supabase';
+import { useAuthStore } from '@store/authStore';
 import type { Client, Order, OrderStatus } from '@shared/types';
 
-const ORG_ID = '00000000-0000-0000-0000-000000000001'; // Временно, пока нет авторизации
+function getOrgId(): string {
+  const org = useAuthStore.getState().organization;
+  if (!org) throw new Error('Организация не загружена');
+  return org.id;
+}
 
 // ─── Клиенты ────────────────────────────────────────────
 
@@ -9,7 +14,7 @@ export async function fetchClients(): Promise<Client[]> {
   const { data, error } = await supabase
     .from('clients')
     .select('*')
-    .eq('org_id', ORG_ID)
+    .eq('org_id', getOrgId())
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -24,7 +29,7 @@ export async function createClient(
 ): Promise<Client | null> {
   const { data, error } = await supabase
     .from('clients')
-    .insert({ ...client, org_id: ORG_ID })
+    .insert({ ...client, org_id: getOrgId() })
     .select()
     .single();
 
@@ -41,7 +46,7 @@ export async function fetchOrders(): Promise<Order[]> {
   const { data, error } = await supabase
     .from('orders')
     .select('*')
-    .eq('org_id', ORG_ID)
+    .eq('org_id', getOrgId())
     .order('updated_at', { ascending: false });
 
   if (error) {
@@ -49,7 +54,6 @@ export async function fetchOrders(): Promise<Order[]> {
     return [];
   }
 
-  // Преобразуем формат из БД в наш тип
   return (data ?? []).map((row) => ({
     ...row,
     total_cost: row.total_cost ? Number(row.total_cost) : null,
@@ -63,7 +67,7 @@ export async function createOrder(
   const { data, error } = await supabase
     .from('orders')
     .insert({
-      org_id: ORG_ID,
+      org_id: getOrgId(),
       client_id: order.client_id,
       status: order.status,
       balcony_type: order.balcony_type,
