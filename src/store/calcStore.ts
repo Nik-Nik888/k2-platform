@@ -2,6 +2,16 @@ import { create } from 'zustand';
 import { loadCalcData } from '@modules/calculator/api/calcApi';
 import type { CalcDB } from '@modules/calculator/api/calcApi';
 
+// ── Типы ────────────────────────────────────────────────
+export interface FurnitureItem {
+  catSelections: Record<number, number | null>; // catId → optId
+}
+
+export interface WindowItem {
+  h: number;
+  w: number;
+}
+
 interface CalcState {
   db: CalcDB | null;
   isLoading: boolean;
@@ -24,6 +34,23 @@ interface CalcState {
   getDir: (tabId: string) => string;
   getQty: (tabId: string, catId: number, matId: string) => number | undefined;
   getSel: (tabId: string) => Record<string, unknown>;
+
+  // ── Блочные размеры (остекление) ──
+  getBlockDims: (tabId: string, key: string) => { height: number; length: number };
+  setBlockDim: (tabId: string, key: string, dimKey: string, value: number) => void;
+
+  // ── Окна (массив) ──
+  getWindows: (tabId: string) => WindowItem[];
+  setWindows: (tabId: string, windows: WindowItem[]) => void;
+  addWindow: (tabId: string) => void;
+  removeWindow: (tabId: string, index: number) => void;
+  updateWindow: (tabId: string, index: number, key: 'h' | 'w', value: number) => void;
+
+  // ── Мебель (массив позиций) ──
+  getFurniture: (tabId: string) => FurnitureItem[];
+  addFurniture: (tabId: string) => void;
+  removeFurniture: (tabId: string, index: number) => void;
+  updateFurnitureCat: (tabId: string, index: number, catId: number, optId: number | null) => void;
 }
 
 export const useCalcStore = create<CalcState>((set, get) => ({
@@ -132,5 +159,92 @@ export const useCalcStore = create<CalcState>((set, get) => ({
 
   getSel: (tabId) => {
     return get().sel[tabId] || {};
+  },
+
+  // ── Блочные размеры (остекление: _glazingDims, _bbDims, _winDims, _roofDims, _sidingDims) ──
+  getBlockDims: (tabId, key) => {
+    const d = (get().sel[tabId] || {})[key] as Record<string, number> | undefined;
+    return { height: d?.height || 0, length: d?.length || 0 };
+  },
+
+  setBlockDim: (tabId, key, dimKey, value) => {
+    set((s) => {
+      const tabSel = s.sel[tabId] || {};
+      const cur = (tabSel[key] as Record<string, number>) || {};
+      return {
+        sel: {
+          ...s.sel,
+          [tabId]: { ...tabSel, [key]: { ...cur, [dimKey]: value } },
+        },
+      };
+    });
+  },
+
+  // ── Окна (массив) ──
+  getWindows: (tabId) => {
+    const w = (get().sel[tabId] || {})._windows as WindowItem[] | undefined;
+    return w || [{ h: 1400, w: 1200 }];
+  },
+
+  setWindows: (tabId, windows) => {
+    set((s) => ({
+      sel: { ...s.sel, [tabId]: { ...s.sel[tabId], _windows: windows } },
+    }));
+  },
+
+  addWindow: (tabId) => {
+    const cur = get().getWindows(tabId);
+    get().setWindows(tabId, [...cur, { h: 1400, w: 1200 }]);
+  },
+
+  removeWindow: (tabId, index) => {
+    const cur = get().getWindows(tabId);
+    get().setWindows(tabId, cur.filter((_, i) => i !== index));
+  },
+
+  updateWindow: (tabId, index, key, value) => {
+    const cur = [...get().getWindows(tabId)];
+    cur[index] = { ...cur[index], [key]: value };
+    get().setWindows(tabId, cur);
+  },
+
+  // ── Мебель (массив позиций) ──
+  getFurniture: (tabId) => {
+    const f = (get().sel[tabId] || {})._furnitureItems as FurnitureItem[] | undefined;
+    return f || [];
+  },
+
+  addFurniture: (tabId) => {
+    const cur = get().getFurniture(tabId);
+    set((s) => ({
+      sel: {
+        ...s.sel,
+        [tabId]: { ...s.sel[tabId], _furnitureItems: [...cur, { catSelections: {} }] },
+      },
+    }));
+  },
+
+  removeFurniture: (tabId, index) => {
+    const cur = get().getFurniture(tabId);
+    set((s) => ({
+      sel: {
+        ...s.sel,
+        [tabId]: { ...s.sel[tabId], _furnitureItems: cur.filter((_, i) => i !== index) },
+      },
+    }));
+  },
+
+  updateFurnitureCat: (tabId, index, catId, optId) => {
+    const cur = [...get().getFurniture(tabId)];
+    cur[index] = {
+      ...cur[index],
+      catSelections: { ...cur[index].catSelections, [catId]: optId },
+    };
+    set((s) => ({
+      sel: {
+        ...s.sel,
+        [tabId]: { ...s.sel[tabId], _furnitureItems: cur },
+      },
+    }));
   },
 }));
