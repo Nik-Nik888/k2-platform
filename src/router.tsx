@@ -30,6 +30,7 @@ export const router = createBrowserRouter([
       { path: 'visualizer', element: <VisualizerPage /> },
       { path: 'glazing', element: <GlazingPage /> },
       { path: 'calculator', element: <CalculatorPage /> },
+      { path: 'calculator/:orderId', element: <CalculatorPage /> },
       { path: 'estimates', element: <EstimatesPage /> },
       { path: 'warehouse', element: <WarehousePage /> },
       { path: 'billing', element: <BillingPage /> },

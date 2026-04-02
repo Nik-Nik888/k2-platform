@@ -87,107 +87,58 @@ function AddClientModal({
         </div>
 
         <div className="p-5 space-y-4">
-          {/* Имя */}
           <div>
             <label className="text-sm font-medium text-gray-700 mb-1.5 block">Имя *</label>
-            <input
-              type="text"
-              className="input"
-              placeholder="Иванов Сергей Петрович"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              autoFocus
-            />
+            <input type="text" className="input" placeholder="Иванов Сергей Петрович"
+              value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
           </div>
-
-          {/* Телефон */}
           <div>
             <label className="text-sm font-medium text-gray-700 mb-1.5 block">Телефон *</label>
-            <input
-              type="tel"
-              className="input"
-              placeholder="+7 (900) 123-45-67"
-              value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
-            />
+            <input type="tel" className="input" placeholder="+7 (900) 123-45-67"
+              value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           </div>
-
-          {/* Email и адрес */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="text-sm font-medium text-gray-700 mb-1.5 block">Email</label>
-              <input
-                type="email"
-                className="input"
-                placeholder="email@mail.ru"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-              />
+              <input type="email" className="input" placeholder="email@mail.ru"
+                value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
             </div>
             <div>
               <label className="text-sm font-medium text-gray-700 mb-1.5 block">Источник</label>
-              <select
-                className="input"
-                value={form.source}
-                onChange={(e) => setForm({ ...form, source: e.target.value as LeadSource })}
-              >
+              <select className="input" value={form.source}
+                onChange={(e) => setForm({ ...form, source: e.target.value as LeadSource })}>
                 {Object.entries(SOURCE_LABELS).map(([val, label]) => (
                   <option key={val} value={val}>{label}</option>
                 ))}
               </select>
             </div>
           </div>
-
-          {/* Адрес */}
           <div>
             <label className="text-sm font-medium text-gray-700 mb-1.5 block">Адрес</label>
-            <input
-              type="text"
-              className="input"
-              placeholder="ул. Минина 25, кв. 14"
-              value={form.address}
-              onChange={(e) => setForm({ ...form, address: e.target.value })}
-            />
+            <input type="text" className="input" placeholder="ул. Минина 25, кв. 14"
+              value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
           </div>
-
-          {/* Тип балкона */}
           <div>
             <label className="text-sm font-medium text-gray-700 mb-1.5 block">Тип объекта</label>
-            <select
-              className="input"
-              value={form.balconyType}
-              onChange={(e) => setForm({ ...form, balconyType: e.target.value as BalconyType })}
-            >
+            <select className="input" value={form.balconyType}
+              onChange={(e) => setForm({ ...form, balconyType: e.target.value as BalconyType })}>
               {Object.entries(BALCONY_LABELS).map(([val, label]) => (
                 <option key={val} value={val}>{label}</option>
               ))}
             </select>
           </div>
-
-          {/* Заметки */}
           <div>
             <label className="text-sm font-medium text-gray-700 mb-1.5 block">Заметки</label>
-            <textarea
-              className="input min-h-[80px] resize-none"
-              placeholder="Что интересует клиента..."
-              value={form.notes}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
-            />
+            <textarea className="input min-h-[80px] resize-none" placeholder="Что интересует клиента..."
+              value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
           </div>
         </div>
 
         <div className="sticky bottom-0 bg-white border-t border-gray-100 px-5 py-4 flex gap-3 rounded-b-2xl">
           <button onClick={onClose} className="btn-secondary flex-1">Отмена</button>
-          <button
-            onClick={handleSubmit}
-            disabled={!form.name.trim() || !form.phone.trim() || saving}
-            className="btn-primary flex-1"
-          >
-            {saving ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /> Сохранение...</>
-            ) : (
-              <><Plus className="w-4 h-4" /> Создать</>
-            )}
+          <button onClick={handleSubmit} disabled={!form.name.trim() || !form.phone.trim() || saving}
+            className="btn-primary flex-1">
+            {saving ? (<><Loader2 className="w-4 h-4 animate-spin" /> Сохранение...</>) : (<><Plus className="w-4 h-4" /> Создать</>)}
           </button>
         </div>
       </div>
@@ -197,32 +148,15 @@ function AddClientModal({
 
 // ─── Карточка заказа ────────────────────────────────────
 function OrderCard({
-  order,
-  client,
-  stageColor,
-  isDragging,
-  isJustDropped,
-  isSelected,
-  onDragStart,
-  onDragEnd,
-  onClick,
+  order, client, stageColor, isDragging, isJustDropped, isSelected,
+  onDragStart, onDragEnd, onClick,
 }: {
-  order: Order;
-  client: Client | undefined;
-  stageColor: string;
-  isDragging: boolean;
-  isJustDropped: boolean;
-  isSelected: boolean;
-  onDragStart: (e: React.DragEvent) => void;
-  onDragEnd: () => void;
-  onClick: () => void;
+  order: Order; client: Client | undefined; stageColor: string;
+  isDragging: boolean; isJustDropped: boolean; isSelected: boolean;
+  onDragStart: (e: React.DragEvent) => void; onDragEnd: () => void; onClick: () => void;
 }) {
   return (
-    <div
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      onClick={onClick}
+    <div draggable onDragStart={onDragStart} onDragEnd={onDragEnd} onClick={onClick}
       className="relative bg-white rounded-xl border p-3.5 transition-all duration-200 group select-none"
       style={{
         cursor: isDragging ? 'grabbing' : 'grab',
@@ -231,41 +165,28 @@ function OrderCard({
         borderColor: isSelected ? stageColor : isJustDropped ? stageColor : '#F3F4F6',
         boxShadow: isJustDropped
           ? `0 0 0 3px ${stageColor}20, 0 4px 12px rgba(0,0,0,0.08)`
-          : isSelected
-          ? `0 0 0 2px ${stageColor}30`
-          : '0 1px 3px rgba(0,0,0,0.04)',
-      }}
-    >
+          : isSelected ? `0 0 0 2px ${stageColor}30` : '0 1px 3px rgba(0,0,0,0.04)',
+      }}>
       <div className="absolute top-2.5 right-2.5 opacity-0 group-hover:opacity-100 transition-opacity">
         <GripVertical className="w-3.5 h-3.5 text-gray-300" />
       </div>
-
       <div className="pr-5">
-        <p className="text-sm font-semibold text-gray-900 truncate">
-          {client?.name ?? 'Загрузка...'}
-        </p>
-        <p className="text-xs text-gray-500 mt-0.5">
-          {BALCONY_LABELS[order.balcony_type] ?? order.balcony_type}
-        </p>
+        <p className="text-sm font-semibold text-gray-900 truncate">{client?.name ?? 'Загрузка...'}</p>
+        <p className="text-xs text-gray-500 mt-0.5">{BALCONY_LABELS[order.balcony_type] ?? order.balcony_type}</p>
       </div>
-
       <div className="mt-2.5 space-y-1">
         {client?.address && (
           <p className="text-xs text-gray-400 flex items-center gap-1.5">
-            <MapPin className="w-3 h-3" />
-            <span className="truncate">{client.address}</span>
+            <MapPin className="w-3 h-3" /><span className="truncate">{client.address}</span>
           </p>
         )}
         {order.scheduled_date && (
           <p className="text-xs text-gray-400 flex items-center gap-1.5">
             <Calendar className="w-3 h-3" />
-            {new Date(order.scheduled_date).toLocaleDateString('ru-RU', {
-              day: 'numeric', month: 'short',
-            })}
+            {new Date(order.scheduled_date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
           </p>
         )}
       </div>
-
       {order.total_cost && (
         <div className="mt-2.5 pt-2.5 border-t border-gray-50">
           <p className="text-sm font-bold" style={{ color: stageColor }}>
@@ -296,9 +217,7 @@ function OrderDetail({
         <div className="sticky top-0 bg-white border-b border-gray-100 px-5 py-4 flex items-center justify-between z-10">
           <div className="flex items-center gap-2.5">
             <span className="w-3 h-3 rounded-full" style={{ backgroundColor: currentStage?.color }} />
-            <h2 className="font-bold text-gray-900 text-lg">
-              {client?.name ?? 'Заказ'}
-            </h2>
+            <h2 className="font-bold text-gray-900 text-lg">{client?.name ?? 'Заказ'}</h2>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100">
             <X className="w-5 h-5 text-gray-500" />
@@ -392,7 +311,8 @@ function OrderDetail({
                 Перевести в «{nextStage.label}» <ChevronRight className="w-4 h-4" />
               </button>
             )}
-            <button className="btn-secondary w-full">Открыть в калькуляторе</button>
+            <button onClick={() => { onClose(); window.location.href = '/calculator/' + order.id; }}
+              className="btn-secondary w-full">Открыть в калькуляторе</button>
           </div>
         </div>
 
@@ -417,11 +337,8 @@ export function CrmPage() {
   const [justDropped, setJustDropped] = useState<string | null>(null);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useEffect(() => { loadData(); }, [loadData]);
 
-  // ── Drag handlers ──
   const handleDragStart = (e: React.DragEvent, orderId: string) => {
     setDragId(orderId);
     e.dataTransfer.effectAllowed = 'move';
@@ -472,23 +389,16 @@ export function CrmPage() {
     setDragId(null); setDragOverCol(null); setDropIndicator(null);
   };
 
-  // ── Создание клиента + заказа ──
   const handleCreateClient = async (
     clientData: Omit<Client, 'id' | 'org_id' | 'created_at'>,
-    notes: string,
-    balconyType: BalconyType,
+    notes: string, balconyType: BalconyType,
   ) => {
     const newClient = await addClient(clientData);
     if (newClient) {
       await addOrder({
-        client_id: newClient.id,
-        status: 'lead',
-        balcony_type: balconyType,
+        client_id: newClient.id, status: 'lead', balcony_type: balconyType,
         dimensions: { length: 3000, width: 900, height: 2600, parapet_height: 1000, floor: 1, has_roof: false },
-        total_cost: null,
-        assigned_to: null,
-        scheduled_date: null,
-        notes: notes || null,
+        total_cost: null, assigned_to: null, scheduled_date: null, notes: notes || null,
       });
       setShowAddClient(false);
     }
@@ -497,7 +407,6 @@ export function CrmPage() {
   const selectedOrder = orders.find((o) => o.id === selectedOrderId);
   const selectedClient = selectedOrder ? getClientById(selectedOrder.client_id) : undefined;
 
-  // ── Загрузка ──
   if (isLoading && orders.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -509,15 +418,12 @@ export function CrmPage() {
 
   return (
     <div className="space-y-4">
-      {/* Ошибка */}
       {error && (
         <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
-          <AlertCircle className="w-4 h-4 shrink-0" />
-          {error}
+          <AlertCircle className="w-4 h-4 shrink-0" />{error}
         </div>
       )}
 
-      {/* Заголовок */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">CRM</h1>
@@ -529,12 +435,10 @@ export function CrmPage() {
           </p>
         </div>
         <button className="btn-primary" onClick={() => setShowAddClient(true)}>
-          <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">Новый клиент</span>
+          <Plus className="w-4 h-4" /><span className="hidden sm:inline">Новый клиент</span>
         </button>
       </div>
 
-      {/* Пустое состояние */}
       {orders.length === 0 && !isLoading && (
         <div className="card p-12 text-center">
           <Users className="w-12 h-12 text-gray-300 mx-auto" />
@@ -548,7 +452,6 @@ export function CrmPage() {
         </div>
       )}
 
-      {/* Канбан-доска */}
       {orders.length > 0 && (
         <div className="flex gap-4 overflow-x-auto pb-4 -mx-4 px-4 lg:-mx-6 lg:px-6" style={{ minHeight: 480 }}>
           {STAGES.map((stage) => {
@@ -614,7 +517,6 @@ export function CrmPage() {
         </div>
       )}
 
-      {/* Детали заказа */}
       {selectedOrder && (
         <OrderDetail order={selectedOrder} client={selectedClient}
           onClose={() => selectOrder(null)}
@@ -626,7 +528,6 @@ export function CrmPage() {
           }} />
       )}
 
-      {/* Модалка добавления клиента */}
       {showAddClient && (
         <AddClientModal onClose={() => setShowAddClient(false)} onSubmit={handleCreateClient} />
       )}
