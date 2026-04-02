@@ -10,6 +10,7 @@ import { GlazingPage } from '@modules/glazing/pages/GlazingPage';
 import { CalculatorPage } from '@modules/calculator/pages/CalculatorPage';
 import { EstimatesPage } from '@modules/estimates/pages/EstimatesPage';
 import { WarehousePage } from '@modules/warehouse/pages/WarehousePage';
+import { MaterialsPage } from '@modules/materials/pages/MaterialsPage';
 import { BillingPage } from '@modules/billing/pages/BillingPage';
 
 export const router = createBrowserRouter([
@@ -33,6 +34,7 @@ export const router = createBrowserRouter([
       { path: 'calculator/:orderId', element: <CalculatorPage /> },
       { path: 'estimates', element: <EstimatesPage /> },
       { path: 'warehouse', element: <WarehousePage /> },
+      { path: 'materials', element: <MaterialsPage /> },
       { path: 'billing', element: <BillingPage /> },
       { path: 'settings', element: <SettingsPage /> },
     ],

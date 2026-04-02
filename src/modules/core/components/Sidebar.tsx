@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   X,
   Mountain,
+  Database,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { label: 'Остекление', path: '/glazing', icon: PanelTop },
   { label: 'Калькулятор', path: '/calculator', icon: Calculator },
   { label: 'Сметы', path: '/estimates', icon: FileText },
+  { label: 'Материалы', path: '/materials', icon: Database },
   { label: 'Склад', path: '/warehouse', icon: Warehouse },
   { label: 'Биллинг', path: '/billing', icon: CreditCard },
 ];
