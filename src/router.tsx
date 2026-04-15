@@ -11,6 +11,7 @@ import { CalculatorPage } from '@modules/calculator/pages/CalculatorPage';
 import { EstimatesPage } from '@modules/estimates/pages/EstimatesPage';
 import { WarehousePage } from '@modules/warehouse/pages/WarehousePage';
 import { MaterialsPage } from '@modules/materials/pages/MaterialsPage';
+import { CabinetPage } from '@modules/cabinet/pages/CabinetPage';
 import { BillingPage } from '@modules/billing/pages/BillingPage';
 
 export const router = createBrowserRouter([
@@ -35,6 +36,7 @@ export const router = createBrowserRouter([
       { path: 'estimates', element: <EstimatesPage /> },
       { path: 'warehouse', element: <WarehousePage /> },
       { path: 'materials', element: <MaterialsPage /> },
+      { path: 'cabinet', element: <CabinetPage /> },
       { path: 'billing', element: <BillingPage /> },
       { path: 'settings', element: <SettingsPage /> },
     ],

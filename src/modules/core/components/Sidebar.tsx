@@ -14,6 +14,7 @@ import {
   X,
   Mountain,
   Database,
+  Columns3,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -25,6 +26,7 @@ const NAV_ITEMS = [
   { label: 'Сметы', path: '/estimates', icon: FileText },
   { label: 'Материалы', path: '/materials', icon: Database },
   { label: 'Склад', path: '/warehouse', icon: Warehouse },
+  { label: 'Шкафы', path: '/cabinet', icon: Columns3 },
   { label: 'Биллинг', path: '/billing', icon: CreditCard },
 ];
 
