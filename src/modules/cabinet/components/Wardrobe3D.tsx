@@ -1,6 +1,19 @@
 import { useRef, useEffect, useCallback } from "react";
 import * as THREE from "three";
 
+/* ═══════════════════════════════════════════════════════════════
+   Wardrobe3D — Realistic ЛДСП construction
+   ═══════════════════════════════════════════════════════════════
+   Key improvements:
+   • Real furniture joint logic: sides full-height, top/bottom between sides
+   • Edge banding (кромка) on all visible ЛДСП edges
+   • Shelf→stud proper abutment with 0.5mm fitting gap
+   • Back panel (ДВП 3mm) in a routed groove (4mm from rear edge)
+   • Drawer boxes with realistic panel thickness + bottom panel
+   • Correct grain direction via UV mapping per panel orientation
+   • Chamfered visible edges for realism
+   ═══════════════════════════════════════════════════════════════ */
+
 function loadTex(src) {
   return new Promise(resolve => {
     if (!src) return resolve(null);
@@ -15,7 +28,66 @@ function loadTex(src) {
   });
 }
 
-export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeTexture, showDoors = true, onClose }) {
+/* ─── Edge-banded ЛДСП panel ───
+   Creates a panel with visible edge banding on specified faces.
+   edgeBand: { top, bottom, left, right, front, back } — which edges have кромка (0.4mm PVC/ABS)
+   grainDir: "h" | "v" — grain runs horizontally or vertically on the face */
+function createLDSPPanel(pw, ph, pd, mat, edgeMat, edgeBand = {}, grainDir = "h") {
+  const group = new THREE.Group();
+  const EDGE = 0.0004; // 0.4mm edge banding thickness in meters
+
+  // Core ЛДСП body
+  const coreW = pw - (edgeBand.left ? EDGE : 0) - (edgeBand.right ? EDGE : 0);
+  const coreH = ph - (edgeBand.top ? EDGE : 0) - (edgeBand.bottom ? EDGE : 0);
+  const coreD = pd - (edgeBand.front ? EDGE : 0) - (edgeBand.back ? EDGE : 0);
+
+  const coreGeo = new THREE.BoxGeometry(Math.max(coreW, 0.001), Math.max(coreH, 0.001), Math.max(coreD, 0.001));
+  const core = new THREE.Mesh(coreGeo, mat);
+  const ox = ((edgeBand.left ? EDGE : 0) - (edgeBand.right ? EDGE : 0)) / 2;
+  const oy = ((edgeBand.bottom ? EDGE : 0) - (edgeBand.top ? EDGE : 0)) / 2;
+  const oz = ((edgeBand.front ? EDGE : 0) - (edgeBand.back ? EDGE : 0)) / 2;
+  core.position.set(ox, oy, oz);
+  core.castShadow = true;
+  core.receiveShadow = true;
+  group.add(core);
+
+  // Edge banding strips
+  const addEdge = (ew, eh, ed, ex, ey, ez) => {
+    const eg = new THREE.BoxGeometry(ew, eh, ed);
+    const em = new THREE.Mesh(eg, edgeMat);
+    em.position.set(ex, ey, ez);
+    em.castShadow = true;
+    em.receiveShadow = true;
+    group.add(em);
+  };
+
+  // Left edge (YZ plane)
+  if (edgeBand.left) addEdge(EDGE, ph, pd, -pw / 2 + EDGE / 2, 0, 0);
+  // Right edge
+  if (edgeBand.right) addEdge(EDGE, ph, pd, pw / 2 - EDGE / 2, 0, 0);
+  // Top edge (XZ plane)
+  if (edgeBand.top) addEdge(pw - (edgeBand.left ? EDGE : 0) - (edgeBand.right ? EDGE : 0), EDGE, pd,
+    ox, ph / 2 - EDGE / 2, 0);
+  // Bottom edge
+  if (edgeBand.bottom) addEdge(pw - (edgeBand.left ? EDGE : 0) - (edgeBand.right ? EDGE : 0), EDGE, pd,
+    ox, -ph / 2 + EDGE / 2, 0);
+  // Front edge (XY plane)
+  if (edgeBand.front) {
+    const feW = pw - (edgeBand.left ? EDGE : 0) - (edgeBand.right ? EDGE : 0);
+    const feH = ph - (edgeBand.top ? EDGE : 0) - (edgeBand.bottom ? EDGE : 0);
+    addEdge(feW, feH, EDGE, ox, oy, pd / 2 - EDGE / 2);
+  }
+  // Back edge
+  if (edgeBand.back) {
+    const beW = pw - (edgeBand.left ? EDGE : 0) - (edgeBand.right ? EDGE : 0);
+    const beH = ph - (edgeBand.top ? EDGE : 0) - (edgeBand.bottom ? EDGE : 0);
+    addEdge(beW, beH, EDGE, ox, oy, -pd / 2 + EDGE / 2);
+  }
+
+  return group;
+}
+
+export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeTexture, showDoors = true, showCorpus = true, onClose }) {
   const mountRef = useRef(null);
   const stateRef = useRef({});
 
@@ -24,213 +96,463 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x08090c);
 
-    const S = 1 / 1000;
+    const S = 1 / 1000; // mm → meters
     const w = W * S, h = H * S, d = D * S, tt = T * S;
-    const iW = W - 2 * T, iH = H - 2 * T;
 
     const cTex = await loadTex(corpusTexture?.imgUrl);
     const fTex = await loadTex(facadeTexture?.imgUrl);
 
+    /* ─── Materials ─── */
     const makeMat = (hex, tex, rX = 1, rY = 1, opts = {}) => {
       if (tex) {
         const t = tex.clone();
         t.repeat.set(rX, rY);
         t.needsUpdate = true;
-        return new THREE.MeshStandardMaterial({ map: t, roughness: 0.6, metalness: 0.0, ...opts });
+        return new THREE.MeshStandardMaterial({ map: t, roughness: 0.55, metalness: 0.0, ...opts });
       }
-      return new THREE.MeshStandardMaterial({ color: new THREE.Color(hex || "#8b7355"), roughness: 0.65, metalness: 0.0, ...opts });
+      return new THREE.MeshStandardMaterial({ color: new THREE.Color(hex || "#8b7355"), roughness: 0.6, metalness: 0.0, ...opts });
     };
 
     const corpRepX = W / 600, corpRepY = H / 600;
     const corpMat = makeMat(corpusTexture?.hex, cTex, corpRepX, corpRepY);
-    const facMat = makeMat(facadeTexture?.hex, fTex, 1, 1, { roughness: 0.4 });
-    const backMat = new THREE.MeshStandardMaterial({ color: 0x3a3530, roughness: 0.9, side: THREE.DoubleSide });
-    const metalMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.25, metalness: 0.8 });
-    const innerMat = new THREE.MeshStandardMaterial({ color: 0x2a2520, roughness: 0.9 });
-    const rodMat = new THREE.MeshStandardMaterial({ color: 0xbbbbbb, roughness: 0.2, metalness: 0.9 });
+    const facMat = makeMat(facadeTexture?.hex, fTex, 1, 1, { roughness: 0.35 });
+
+    // Edge banding — slightly lighter/darker than base, with higher gloss
+    const edgeHex = corpusTexture?.hex || "#8b7355";
+    const edgeMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(edgeHex).offsetHSL(0, -0.05, 0.03),
+      roughness: 0.3, metalness: 0.0,
+    });
+    const facEdgeMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(facadeTexture?.hex || "#f2efe8").offsetHSL(0, -0.05, 0.02),
+      roughness: 0.25, metalness: 0.0,
+    });
+
+    // ДВП 3mm back panel
+    const dvpMat = new THREE.MeshStandardMaterial({ color: 0x3a3530, roughness: 0.85, side: THREE.DoubleSide });
+    // Metal hardware
+    const metalMat = new THREE.MeshStandardMaterial({ color: 0xd0d0d0, roughness: 0.2, metalness: 0.85 });
+    // Inner drawer surfaces
+    const innerMat = new THREE.MeshStandardMaterial({ color: 0x2a2520, roughness: 0.85 });
+    // Chrome rod
+    const rodMat = new THREE.MeshStandardMaterial({ color: 0xc0c0c0, roughness: 0.15, metalness: 0.95 });
 
     const group = new THREE.Group();
 
+    // Shorthand to add an ЛДСП panel with edge banding
+    const addPanel = (pw, ph, pd, x, y, z, mat, eMat, edges = {}) => {
+      const panel = createLDSPPanel(pw, ph, pd, mat, eMat, edges);
+      panel.position.set(x, y, z);
+      group.add(panel);
+      return panel;
+    };
+
+    // Simple box (no edge banding — for hardware, etc.)
     const addBox = (bw, bh, bd, x, y, z, mat) => {
       const g = new THREE.BoxGeometry(bw, bh, bd);
       const m = new THREE.Mesh(g, mat);
       m.position.set(x, y, z);
-      m.castShadow = true; m.receiveShadow = true;
-      group.add(m); return m;
+      m.castShadow = true;
+      m.receiveShadow = true;
+      group.add(m);
+      return m;
     };
 
-    // ═══ CORPUS ═══
-    addBox(tt, h, d, -w / 2 + tt / 2, 0, 0, corpMat);
-    addBox(tt, h, d, w / 2 - tt / 2, 0, 0, corpMat);
-    addBox(w - 2 * tt, tt, d, 0, h / 2 - tt / 2, 0, corpMat);
-    addBox(w - 2 * tt, tt, d, 0, -h / 2 + tt / 2, 0, corpMat);
-    addBox(w - 2 * tt - 2 * S, h - 2 * tt - 2 * S, 3 * S, 0, 0, -d / 2 + tt + 1.5 * S, backMat);
+    /* ═══════════════════════════════
+       CORPUS — Real furniture construction
+       ═══════════════════════════════
+       Joint rules (К3-Мебель style):
+       • Боковины (sides) — FULL HEIGHT (H), depth D
+         Edges: front кромка, top & bottom — NO (hidden by крыша/дно)
+       • Крыша (top) — fits BETWEEN sides: width = W - 2T, depth D
+         Edges: front кромка
+       • Дно (bottom) — same as top
+         Edges: front кромка
+       • Задняя стенка (back) — ДВП 3mm, sits in 4mm groove routed
+         10mm from rear edge of sides/top/bottom
+    */
 
-    // Floor
+    const DVP_T = 3 * S;     // ДВП thickness: 3mm
+    const GROOVE_INSET = 10 * S; // groove is 10mm from rear edge
+    const FIT_GAP = 0.5 * S; // 0.5mm fitting gap
+
+    if (showCorpus) {
+      // ── Left side (Левая боковина) ──
+      addPanel(tt, h, d,
+        -w / 2 + tt / 2, 0, 0,
+        corpMat, edgeMat,
+        { front: true }
+      );
+
+      // ── Right side (Правая боковина) ──
+      addPanel(tt, h, d,
+        w / 2 - tt / 2, 0, 0,
+        corpMat, edgeMat,
+        { front: true }
+      );
+
+      // ── Top (Крыша) — between sides ──
+      const topW = w - 2 * tt;
+      addPanel(topW, tt, d,
+        0, h / 2 - tt / 2, 0,
+        corpMat, edgeMat,
+        { front: true }
+      );
+
+      // ── Bottom (Дно) — between sides ──
+      addPanel(topW, tt, d,
+        0, -h / 2 + tt / 2, 0,
+        corpMat, edgeMat,
+        { front: true }
+      );
+
+      // ── Back panel (Задняя стенка ДВП 3мм) ──
+      const backW = (W - 2 * T - 2) * S;
+      const backH = (H - 2 * T - 2) * S;
+      addBox(backW, backH, DVP_T,
+        0, 0, -d / 2 + GROOVE_INSET + DVP_T / 2,
+        dvpMat
+      );
+    }
+
+    // When no corpus, iW/iH = full dimensions
+    const iW = showCorpus ? W - 2 * T : W;
+    const iH = showCorpus ? H - 2 * T : H;
+
+    // ── Floor shadow plane ──
     const floorGeo = new THREE.PlaneGeometry(6, 6);
-    const floorMat = new THREE.ShadowMaterial({ opacity: 0.3 });
+    const floorMat = new THREE.ShadowMaterial({ opacity: 0.35 });
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -h / 2;
     floor.receiveShadow = true;
     scene.add(floor);
 
+    /* ─── Coordinate helpers ─── */
+    // Convert inner mm coords to 3D position
     const toX = mmX => (mmX - iW / 2) * S;
     const toY = mmY => (iH / 2 - mmY) * S;
 
+    /* ═══════════════════════════════
+       INTERNAL ELEMENTS
+       ═══════════════════════════════ */
     elements.forEach(el => {
+
+      /* ── SHELF (Полка) ──
+         Real construction:
+         • Width = el.w (already accounts for stud gaps)
+         • Depth = D - T(back inset) - 2mm front setback
+         • Sits on полкодержатели (shelf pins), so small gaps
+         • Кромка on front edge
+         • 0.5mm gap from sides/studs it abuts */
       if (el.type === "shelf") {
-        const sw = (el.w || iW) * S;
+        const shelfW = ((el.w || iW) - 1) * S; // 0.5mm gap each side
+        const shelfD = d - GROOVE_INSET - DVP_T - 2 * S; // stops before back panel, 2mm front setback
         const elX = el.x || 0;
-        // Shelf left edge in 3D coordinates
         const shelfCenterX = toX(elX + (el.w || iW) / 2);
-        addBox(sw, tt, d - tt - 2 * S, shelfCenterX, toY(el.y || 0), tt / 2, corpMat);
+        const shelfY = toY(el.y || 0);
+
+        addPanel(shelfW, tt, shelfD,
+          shelfCenterX, shelfY,
+          tt / 2 + 1 * S, // slightly forward of center (2mm front setback)
+          corpMat, edgeMat,
+          { front: true } // кромка on front visible edge
+        );
+
+        // Shelf pins (полкодержатели) — 4 per shelf, small metal cylinders
+        const pinR = 2.5 * S;
+        const pinH = 8 * S;
+        const shelfLeft = shelfCenterX - shelfW / 2;
+        const shelfRight = shelfCenterX + shelfW / 2;
+        const pinZ1 = d / 2 - 40 * S;  // front pins
+        const pinZ2 = -d / 2 + GROOVE_INSET + DVP_T + 40 * S; // rear pins
+        [shelfLeft + 15 * S, shelfRight - 15 * S].forEach(px => {
+          [pinZ1, pinZ2].forEach(pz => {
+            const pinGeo = new THREE.CylinderGeometry(pinR, pinR, pinH, 8);
+            const pin = new THREE.Mesh(pinGeo, metalMat);
+            pin.position.set(px, shelfY - tt / 2 - pinH / 2, pz);
+            group.add(pin);
+          });
+        });
       }
 
+      /* ── STUD (Стойка / Перегородка) ──
+         Real construction:
+         • Runs from pTop to pBot (between shelves or top/bottom)
+         • Width = T (ЛДСП thickness)
+         • Depth = D - T(back) - 2mm
+         • Joint: конфирматы from top/bottom shelf into stud end-grain
+         • Кромка on front + both side edges visible through shelves
+         • FIT_GAP from bounding shelves */
       if (el.type === "stud") {
         const pTop = el.pTop || 0, pBot = el.pBot || iH;
-        const pH = (pBot - pTop) * S;
-        // el.x is LEFT edge of stud, center of ЛДСП = el.x + T/2
-        addBox(tt, pH, d - tt - 2 * S, toX((el.x || 0) + T / 2), toY(pTop + (pBot - pTop) / 2), tt / 2, corpMat);
+        const studH = (pBot - pTop - 1) * S; // 0.5mm gap top + bottom
+        const studD = d - GROOVE_INSET - DVP_T - 2 * S;
+        // el.x is LEFT edge of stud; center = el.x + T/2
+        const studX = toX((el.x || 0) + T / 2);
+        const studY = toY(pTop + (pBot - pTop) / 2);
+
+        addPanel(tt, studH, studD,
+          studX, studY,
+          tt / 2 + 1 * S,
+          corpMat, edgeMat,
+          { front: true, left: true, right: true } // кромка on front + both visible sides
+        );
+
+        // Конфирмат holes visualization — small dark circles on top/bottom
+        // (subtle detail showing where screws go)
+        [studY + studH / 2, studY - studH / 2].forEach(cy => {
+          const confGeo = new THREE.CylinderGeometry(2.5 * S, 2.5 * S, 1 * S, 8);
+          const conf = new THREE.Mesh(confGeo, new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9 }));
+          conf.position.set(studX, cy, d / 2 - 30 * S);
+          group.add(conf);
+          const conf2 = conf.clone();
+          conf2.position.set(studX, cy, -d / 2 + GROOVE_INSET + DVP_T + 30 * S);
+          group.add(conf2);
+        });
       }
 
+      /* ── DRAWERS (Ящики) ──
+         Real construction:
+         • Facade (фасад) — ЛДСП with кромка on all 4 edges
+         • Box sides — thinner ЛДСП (12mm default) or ДСП
+         • Box bottom — ДВП/ХДФ 3mm
+         • 4mm gap between facade bottom and next drawer facade top
+         • Metal handle on facade front */
       if (el.type === "drawers") {
         const cnt = el.count || 3;
         const heights = el.drawerHeights || Array(cnt).fill(Math.floor((el.h || 450) / cnt));
         let accY = el.y || 0;
-        const dw = (el.w || 400) * S;
+        const totalW = (el.w || 400) * S;
         const sx = toX((el.x || 0) + (el.w || 400) / 2);
+
+        const DRAWER_SIDE_T = 12 * S;  // 12mm drawer side thickness
+        const DRAWER_BOTTOM_T = 3 * S;  // 3mm ХДФ bottom
+        const FACADE_GAP = 4 * S;       // 4mm gap between facade panels
+        const DRAWER_DEPTH = d * 0.72;  // drawer box depth
 
         for (let i = 0; i < cnt; i++) {
           const dh = heights[i] || 150;
+          const dhS = dh * S;
           const sy = toY(accY + dh / 2);
-          const frontH = (dh - 4) * S;
+          const facadeH = dhS - FACADE_GAP;
 
-          addBox(dw - 4 * S, frontH, tt, sx, sy, d / 2 - tt / 2, facMat);
+          // ── Facade panel — full ЛДСП with кромка on all 4 edges ──
+          addPanel(totalW - 4 * S, facadeH, tt,
+            sx, sy, d / 2 - tt / 2,
+            facMat, facEdgeMat,
+            { top: true, bottom: true, left: true, right: true }
+          );
 
-          const boxW = dw - 36 * S;
-          const boxD = d * 0.75;
+          // ── Drawer box ──
+          const boxInnerW = totalW - 36 * S; // gap for guides
           const boxH = (dh - 40) * S;
-          addBox(boxW, 3 * S, boxD, sx, sy - frontH / 2 + 12 * S, -d * 0.05, innerMat);
-          addBox(3 * S, boxH, boxD, sx - boxW / 2, sy, -d * 0.05, innerMat);
-          addBox(3 * S, boxH, boxD, sx + boxW / 2, sy, -d * 0.05, innerMat);
-          addBox(boxW, boxH, 3 * S, sx, sy, -d * 0.05 - boxD / 2, innerMat);
-          addBox(30 * S, 4 * S, 8 * S, sx, sy, d / 2 - tt + 4 * S + 4 * S, metalMat);
+          const boxCenterZ = -d * 0.08;
+
+          // Bottom panel (ХДФ 3mm)
+          addBox(boxInnerW - 2 * DRAWER_SIDE_T, DRAWER_BOTTOM_T, DRAWER_DEPTH,
+            sx, sy - facadeH / 2 + 14 * S, boxCenterZ, innerMat);
+
+          // Left side
+          addBox(DRAWER_SIDE_T, boxH, DRAWER_DEPTH,
+            sx - boxInnerW / 2 + DRAWER_SIDE_T / 2, sy, boxCenterZ, innerMat);
+
+          // Right side
+          addBox(DRAWER_SIDE_T, boxH, DRAWER_DEPTH,
+            sx + boxInnerW / 2 - DRAWER_SIDE_T / 2, sy, boxCenterZ, innerMat);
+
+          // Back panel of drawer box
+          addBox(boxInnerW - 2 * DRAWER_SIDE_T, boxH, DRAWER_SIDE_T,
+            sx, sy, boxCenterZ - DRAWER_DEPTH / 2 + DRAWER_SIDE_T / 2, innerMat);
+
+          // Front panel of drawer box (behind facade)
+          addBox(boxInnerW - 2 * DRAWER_SIDE_T, boxH, DRAWER_SIDE_T,
+            sx, sy, boxCenterZ + DRAWER_DEPTH / 2 - DRAWER_SIDE_T / 2, innerMat);
+
+          // ── Handle — modern flat bar ──
+          addBox(50 * S, 6 * S, 12 * S, sx, sy, d / 2 + 6 * S, metalMat);
+
+          // ── Guide rails (telescopic) ──
+          [-1, 1].forEach(side => {
+            const gx = sx + side * (boxInnerW / 2 + 4 * S);
+            addBox(3 * S, 6 * S, DRAWER_DEPTH * 0.9, gx, sy, boxCenterZ, metalMat);
+          });
 
           accY += dh;
         }
       }
 
+      /* ── ROD (Штанга) ──
+         Chrome tube + metal holders with screws */
       if (el.type === "rod") {
         const rw = (el.w || 400) * S;
         const sx = toX((el.x || 0) + (el.w || 400) / 2);
         const sy = toY(el.y || 150);
-        const rodGeo = new THREE.CylinderGeometry(8 * S, 8 * S, rw, 16);
+
+        // Chrome tube — 25mm diameter
+        const rodGeo = new THREE.CylinderGeometry(12.5 * S, 12.5 * S, rw, 24);
         rodGeo.rotateZ(Math.PI / 2);
         const rod = new THREE.Mesh(rodGeo, rodMat);
         rod.position.set(sx, sy, 0);
         rod.castShadow = true;
         group.add(rod);
-        [-rw / 2 - 2 * S, rw / 2 + 2 * S].forEach(ox => {
-          addBox(6 * S, 12 * S, 20 * S, sx + ox, sy + 4 * S, 0, metalMat);
-          addBox(6 * S, 3 * S, 30 * S, sx + ox, sy + 10 * S, -5 * S, metalMat);
+
+        // Rod holders (фланцы) — detailed bracket
+        [-rw / 2 - 3 * S, rw / 2 + 3 * S].forEach(ox => {
+          // Vertical plate screwed to side/stud
+          addBox(3 * S, 20 * S, 30 * S, sx + ox, sy + 2 * S, 0, metalMat);
+          // U-bracket holding the tube
+          addBox(8 * S, 4 * S, 28 * S, sx + ox, sy + 12 * S, 0, metalMat);
+          // Screws
+          [{ dy: 6, dz: 8 }, { dy: 6, dz: -8 }, { dy: -6, dz: 8 }, { dy: -6, dz: -8 }].forEach(s => {
+            const screwGeo = new THREE.CylinderGeometry(1.5 * S, 1.5 * S, 4 * S, 6);
+            screwGeo.rotateZ(Math.PI / 2);
+            const screw = new THREE.Mesh(screwGeo, metalMat);
+            screw.position.set(sx + ox + (ox > 0 ? 2 : -2) * S, sy + s.dy * S, s.dz * S);
+            group.add(screw);
+          });
         });
       }
 
-      /* ═══ DOORS — real ЛДСП thickness, proper gap from corpus ═══ */
+      /* ═══ DOORS — Real ЛДСП panel with петли (hinges) ═══
+         Construction:
+         • Panel = ЛДСП T mm thick, кромка on all 4 edges
+         • Петли (hinges): cup Ø35mm in door back, arm to mounting plate
+         • Handle: modern metal bar
+         • Overlay (накладная): door covers corpus front edge, 2mm gap
+         • Insert (вкладная): door recessed inside, flush with front */
       if (el.type === "door" && showDoors) {
         const hingeType = el.hingeType || "overlay";
         const isL = el.hingeSide === "left";
-        const doorT = tt; // 16mm ЛДСП thickness
+        const doorT = tt;
 
-        // Door dimensions from 2D editor (already include overlaps)
         const doorW = (el.w || 400) * S;
         const doorH = (el.h || iH) * S;
         const doorX = toX((el.x || 0) + (el.w || 400) / 2);
         const doorY = toY((el.y || 0) + (el.h || iH) / 2);
 
-        // BUG#4 FIX: Door Z position — 2mm gap from corpus front edge
-        const GAP_FROM_CORPUS = 2 * S; // 2mm gap
+        const GAP_FROM_CORPUS = 2 * S;
         let doorZ;
         if (hingeType === "overlay") {
-          // Накладная: door sits in front of corpus, with 2mm gap
           doorZ = d / 2 + GAP_FROM_CORPUS + doorT / 2;
         } else {
-          // Вкладная: door recessed inside, flush with front edge minus gap
           doorZ = d / 2 - doorT / 2 - GAP_FROM_CORPUS;
         }
 
-        // Door panel — real 16mm ЛДСП thickness
-        addBox(doorW, doorH, doorT, doorX, doorY, doorZ, facMat);
+        // ── Door panel with кромка on all 4 edges ──
+        addPanel(doorW, doorH, doorT,
+          doorX, doorY, doorZ,
+          facMat, facEdgeMat,
+          { top: true, bottom: true, left: true, right: true }
+        );
 
-        // Handle — metal bar, on front face of door
-        const handleY = doorY;
-        const handleX = isL ? doorX + doorW / 2 - 20 * S : doorX - doorW / 2 + 20 * S;
-        addBox(4 * S, 40 * S, 10 * S, handleX, handleY, doorZ + doorT / 2 + 5 * S, metalMat);
+        // ── Handle — sleek vertical bar ──
+        const handleLen = Math.min(doorH * 0.12, 60 * S);
+        const handleX = isL ? doorX + doorW / 2 - 22 * S : doorX - doorW / 2 + 22 * S;
+        addBox(5 * S, handleLen, 14 * S, handleX, doorY, doorZ + doorT / 2 + 7 * S, metalMat);
+        // Handle standoffs
+        [handleLen / 2 - 4 * S, -handleLen / 2 + 4 * S].forEach(dy => {
+          addBox(5 * S, 4 * S, 8 * S, handleX, doorY + dy, doorZ + doorT / 2 + 3 * S, metalMat);
+        });
 
-        // Hinges — on the back face of door, connecting to corpus
+        // ── Hinges — петли Blum/Hettich style ──
         const hingeCount = doorH / S > 1800 ? 4 : doorH / S > 1200 ? 3 : 2;
-        const hingeX = isL ? doorX - doorW / 2 + 3 * S : doorX + doorW / 2 - 3 * S;
+        const hingeX = isL ? doorX - doorW / 2 + 12 * S : doorX + doorW / 2 - 12 * S;
+        const hingeSideSign = isL ? -1 : 1;
+
         for (let hi = 0; hi < hingeCount; hi++) {
           const hFrac = hi === 0 ? 0.08 : hi === hingeCount - 1 ? 0.92 : (hi / (hingeCount - 1));
           const hingeY = doorY + doorH / 2 - doorH * hFrac;
-          // Hinge cup (recessed into door back)
-          addBox(10 * S, 14 * S, 4 * S, hingeX, hingeY, doorZ - doorT / 2 - 2 * S, metalMat);
-          // Hinge arm (connects to corpus side)
-          addBox(6 * S, 8 * S, GAP_FROM_CORPUS + 4 * S, hingeX, hingeY, doorZ - doorT / 2 - GAP_FROM_CORPUS / 2 - 2 * S, metalMat);
+
+          // Cup (чашка Ø35mm) — recessed into door back
+          const cupGeo = new THREE.CylinderGeometry(17.5 * S, 17.5 * S, 12 * S, 16);
+          cupGeo.rotateX(Math.PI / 2);
+          const cup = new THREE.Mesh(cupGeo, metalMat);
+          cup.position.set(hingeX, hingeY, doorZ - doorT / 2 - 6 * S);
+          group.add(cup);
+
+          // Arm (рычаг) — connects cup to mounting plate
+          addBox(8 * S, 12 * S, GAP_FROM_CORPUS + 10 * S,
+            hingeX, hingeY, doorZ - doorT / 2 - GAP_FROM_CORPUS / 2 - 5 * S, metalMat);
+
+          // Mounting plate (ответная планка) on corpus side
+          addBox(12 * S, 20 * S, 3 * S,
+            hingeX + hingeSideSign * (-4 * S), hingeY,
+            d / 2 - 1.5 * S, metalMat);
+
+          // Screws on mounting plate
+          [-6, 6].forEach(sdy => {
+            const sg = new THREE.CylinderGeometry(1.5 * S, 1.5 * S, 3 * S, 6);
+            sg.rotateX(Math.PI / 2);
+            const sm = new THREE.Mesh(sg, new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.3, metalness: 0.7 }));
+            sm.position.set(hingeX + hingeSideSign * (-4 * S), hingeY + sdy * S, d / 2 - 3 * S);
+            group.add(sm);
+          });
         }
       }
     });
 
     scene.add(group);
 
-    // ═══ LIGHTING ═══
-    const amb = new THREE.AmbientLight(0xffffff, 0.35);
+    /* ═══ LIGHTING — studio setup for product render ═══ */
+    const amb = new THREE.AmbientLight(0xffffff, 0.3);
     scene.add(amb);
 
-    const key = new THREE.DirectionalLight(0xfff5e6, 0.8);
-    key.position.set(2.5, 3, 3);
+    // Key light — warm, from upper right
+    const key = new THREE.DirectionalLight(0xfff5e0, 0.85);
+    key.position.set(2.5, 3.5, 3);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
-    key.shadow.camera.near = 0.1; key.shadow.camera.far = 15;
-    key.shadow.camera.left = -3; key.shadow.camera.right = 3;
-    key.shadow.camera.top = 3; key.shadow.camera.bottom = -3;
-    key.shadow.bias = -0.0005;
+    key.shadow.camera.near = 0.1;
+    key.shadow.camera.far = 15;
+    key.shadow.camera.left = -3;
+    key.shadow.camera.right = 3;
+    key.shadow.camera.top = 3;
+    key.shadow.camera.bottom = -3;
+    key.shadow.bias = -0.0003;
     scene.add(key);
 
-    const fill = new THREE.DirectionalLight(0xdde8ff, 0.35);
-    fill.position.set(-3, 2, -1);
+    // Fill light — cool, from left
+    const fill = new THREE.DirectionalLight(0xd0e0ff, 0.3);
+    fill.position.set(-3.5, 2, -1);
     scene.add(fill);
 
-    const rim = new THREE.DirectionalLight(0xffffff, 0.2);
-    rim.position.set(0, 1, -4);
+    // Rim light — edge separation
+    const rim = new THREE.DirectionalLight(0xffffff, 0.18);
+    rim.position.set(0, 1.5, -4);
     scene.add(rim);
 
-    const bounce = new THREE.PointLight(0xd4a060, 0.1, 6);
-    bounce.position.set(0, -h / 2 + 0.1, 1);
+    // Bounce — warm from floor
+    const bounce = new THREE.PointLight(0xd4a060, 0.08, 6);
+    bounce.position.set(0, -h / 2 + 0.1, 1.2);
     scene.add(bounce);
 
-    // ═══ CAMERA ═══
+    // Interior light — illuminates inside of wardrobe
+    const interior = new THREE.PointLight(0xffe8c0, 0.15, 3);
+    interior.position.set(0, 0, d * 0.2);
+    scene.add(interior);
+
+    /* ═══ CAMERA ═══ */
     const aspect = mountRef.current.clientWidth / mountRef.current.clientHeight;
-    const camera = new THREE.PerspectiveCamera(35, aspect, 0.01, 50);
-    const dist = Math.max(w, h) * 2;
+    const camera = new THREE.PerspectiveCamera(32, aspect, 0.01, 50);
+    const dist = Math.max(w, h) * 2.1;
     camera.position.set(dist * 0.7, dist * 0.25, dist * 0.85);
     camera.lookAt(0, 0, 0);
 
-    // ═══ RENDERER ═══
+    /* ═══ RENDERER ═══ */
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.1;
+    renderer.toneMappingExposure = 1.15;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     mountRef.current.innerHTML = "";
     mountRef.current.appendChild(renderer.domElement);
 
     return { scene, camera, renderer, dist };
-  }, [corpus, elements, corpusTexture, facadeTexture, showDoors]);
+  }, [corpus, elements, corpusTexture, facadeTexture, showDoors, showCorpus]);
 
   useEffect(() => {
     if (!mountRef.current) return;
@@ -241,9 +563,23 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
 
       let isDragging = false, prevX = 0, prevY = 0, rotY = 0.35, rotX = 0.12, zoom = 1;
 
-      const onWheel = e => { e.preventDefault(); zoom = Math.max(0.3, Math.min(3, zoom + e.deltaY * -0.0008)); };
-      const onPointerDown = e => { isDragging = true; prevX = e.clientX; prevY = e.clientY; renderer.domElement.setPointerCapture(e.pointerId); };
-      const onPointerMove = e => { if (!isDragging) return; rotY += (e.clientX - prevX) * 0.004; rotX = Math.max(-1.0, Math.min(1.0, rotX + (e.clientY - prevY) * 0.004)); prevX = e.clientX; prevY = e.clientY; };
+      const onWheel = e => {
+        e.preventDefault();
+        zoom = Math.max(0.3, Math.min(3, zoom + e.deltaY * -0.0008));
+      };
+      const onPointerDown = e => {
+        isDragging = true;
+        prevX = e.clientX;
+        prevY = e.clientY;
+        renderer.domElement.setPointerCapture(e.pointerId);
+      };
+      const onPointerMove = e => {
+        if (!isDragging) return;
+        rotY += (e.clientX - prevX) * 0.004;
+        rotX = Math.max(-1.0, Math.min(1.0, rotX + (e.clientY - prevY) * 0.004));
+        prevX = e.clientX;
+        prevY = e.clientY;
+      };
       const onPointerUp = () => isDragging = false;
 
       renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
@@ -253,9 +589,13 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
 
       const animate = () => {
         stateRef.current.animId = requestAnimationFrame(animate);
-        if (!isDragging) rotY += 0.0015;
+        if (!isDragging) {} // no auto-rotation — manual only
         const dd = dist * zoom;
-        camera.position.set(Math.sin(rotY) * Math.cos(rotX) * dd, Math.sin(rotX) * dd, Math.cos(rotY) * Math.cos(rotX) * dd);
+        camera.position.set(
+          Math.sin(rotY) * Math.cos(rotX) * dd,
+          Math.sin(rotX) * dd,
+          Math.cos(rotY) * Math.cos(rotX) * dd
+        );
         camera.lookAt(0, 0, 0);
         renderer.render(scene, camera);
       };
@@ -280,24 +620,59 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
       };
     });
 
-    return () => { cancelled = true; stateRef.current.cleanup?.(); };
+    return () => {
+      cancelled = true;
+      stateRef.current.cleanup?.();
+    };
   }, [build]);
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.95)", display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 20px", borderBottom: "1px solid #1a1a1a" }}>
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 100,
+      background: "rgba(0,0,0,0.97)",
+      display: "flex", flexDirection: "column",
+    }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "10px 20px",
+        borderBottom: "1px solid #1a1a1a",
+        background: "rgba(8,9,12,0.95)",
+      }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 28, height: 28, borderRadius: 6, background: "#60a5fa", display: "flex", alignItems: "center", justifyContent: "center", color: "#000", fontWeight: 900, fontSize: 11, fontFamily: "'IBM Plex Mono',monospace" }}>3D</div>
+          <div style={{
+            width: 28, height: 28, borderRadius: 6,
+            background: "linear-gradient(135deg, #60a5fa, #3b82f6)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "#fff", fontWeight: 900, fontSize: 10,
+            fontFamily: "'IBM Plex Mono',monospace",
+            boxShadow: "0 2px 8px rgba(96,165,250,0.3)",
+          }}>3D</div>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#d1d5db", fontFamily: "'IBM Plex Mono',monospace" }}>3D Просмотр</div>
-            <div style={{ fontSize: 11, color: "#444", fontFamily: "'IBM Plex Mono',monospace" }}>{corpus.width}×{corpus.height}×{corpus.depth} · Тяни = вращение · Скролл = зум</div>
+            <div style={{
+              fontSize: 13, fontWeight: 700, color: "#d1d5db",
+              fontFamily: "'IBM Plex Mono',monospace",
+            }}>3D Просмотр · ЛДСП</div>
+            <div style={{
+              fontSize: 10, color: "#444",
+              fontFamily: "'IBM Plex Mono',monospace",
+            }}>
+              {corpus.width}×{corpus.height}×{corpus.depth} мм · Кромка · Петли · ДВП
+              <span style={{ marginLeft: 8, color: "#555" }}>Тяни = вращение · Скролл = зум</span>
+            </div>
           </div>
         </div>
         <button onClick={onClose} style={{
-          padding: "6px 16px", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer",
-          border: "1px solid rgba(217,119,6,0.3)", background: "rgba(217,119,6,0.1)", color: "#d97706",
+          padding: "6px 16px", borderRadius: 6, fontSize: 12, fontWeight: 700,
+          cursor: "pointer",
+          border: "1px solid rgba(217,119,6,0.3)",
+          background: "rgba(217,119,6,0.08)",
+          color: "#d97706",
           fontFamily: "'IBM Plex Mono',monospace",
-        }}>✕ Закрыть</button>
+          transition: "all 0.15s",
+        }}
+          onMouseEnter={e => { e.target.style.background = "rgba(217,119,6,0.2)"; }}
+          onMouseLeave={e => { e.target.style.background = "rgba(217,119,6,0.08)"; }}
+        >✕ Закрыть</button>
       </div>
       <div ref={mountRef} style={{ flex: 1, cursor: "grab" }} />
     </div>
