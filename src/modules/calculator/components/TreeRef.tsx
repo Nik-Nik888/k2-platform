@@ -1,9 +1,9 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { supabase } from '@lib/supabase';
 import { useAuthStore } from '@store/authStore';
 import { TABS, CALC_MODE_LABELS, parseDims } from '@modules/calculator/api/calcApi';
 import type { CalcDB, Material, Category, CategoryOption, OptionMaterial } from '@modules/calculator/api/calcApi';
-import { ChevronRight, Plus, Trash2, Pencil, X, Save, Package } from 'lucide-react';
+import { ChevronRight, Plus, Trash2, Pencil, X, Save, Package, BookmarkPlus, Bookmark } from 'lucide-react';
 import { NumberInput } from './primitives';
 
 // ════════════════════════════════════════════════════════
@@ -160,6 +160,86 @@ function ModalEditBinding({ binding, onSave, onClose }: {
 // TreeRef — основной компонент справочника
 // ════════════════════════════════════════════════════════
 
+// Структура записи в items шаблона
+interface TemplateItem {
+  material_id: string;
+  quantity: number;
+  visible: boolean;
+  calc_mode: string;
+}
+
+// ── Модалка сохранения шаблона ──
+function ModalSaveTemplate({ optionName, hiddenCount, onSave, onClose }: {
+  optionName: string;
+  hiddenCount: number;
+  onSave: (name: string) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState('');
+  return (
+    <Modal title={`Сохранить шаблон из «${optionName}»`} onClose={onClose}>
+      <div className="space-y-3">
+        <div className="text-xs text-gray-500 bg-surface-50 rounded-lg p-3">
+          Будут сохранены <b>{hiddenCount}</b> скрытых материалов как шаблон.
+          Потом сможешь применить этот шаблон к любому другому варианту.
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 font-semibold uppercase mb-1 block">Название шаблона</label>
+          <input className="input text-sm" placeholder="Например: «Рейка каркас 500мм»"
+            value={name} onChange={(e) => setName(e.target.value)} autoFocus
+            onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) onSave(name.trim()); }} />
+        </div>
+        <div className="flex gap-2 mt-2">
+          <button onClick={() => { if (name.trim()) onSave(name.trim()); }}
+            disabled={!name.trim()}
+            className="btn-primary flex-1 disabled:opacity-50">Сохранить</button>
+          <button onClick={onClose} className="btn-secondary flex-1">Отмена</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Модалка выбора шаблона для применения ──
+function ModalPickTemplate({ optionName, templates, onApply, onDelete, onClose }: {
+  optionName: string;
+  templates: Array<{ id: string; name: string; items: TemplateItem[]; created_at: string }>;
+  onApply: (tmplId: string) => void;
+  onDelete: (tmplId: string, tmplName: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal title={`Применить шаблон к «${optionName}»`} onClose={onClose}>
+      <div className="space-y-2">
+        {templates.length === 0 && (
+          <div className="text-sm text-gray-400 text-center py-6">
+            Нет сохранённых шаблонов.<br />
+            Используй «Сохранить как шаблон» на любом варианте со скрытыми материалами.
+          </div>
+        )}
+        {templates.map((t) => (
+          <div key={t.id} className="flex items-center gap-2 p-2.5 rounded-lg bg-surface-50 border border-surface-200 hover:border-brand-300 transition-colors">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-gray-800 truncate">{t.name}</div>
+              <div className="text-[11px] text-gray-400">
+                {t.items.length} позиций · {new Date(t.created_at).toLocaleDateString('ru')}
+              </div>
+            </div>
+            <button onClick={() => onApply(t.id)}
+              className="text-xs text-brand-600 bg-brand-50 px-2.5 py-1.5 rounded-lg hover:bg-brand-100 font-medium">
+              Применить
+            </button>
+            <button onClick={() => onDelete(t.id, t.name)}
+              className="text-gray-300 hover:text-red-500 p-1">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
 export function TreeRef({ db, refresh, notify }: {
   db: CalcDB;
   refresh: () => void;
@@ -167,9 +247,25 @@ export function TreeRef({ db, refresh, notify }: {
 }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [modal, setModal] = useState<Record<string, unknown> | null>(null);
+  const [templates, setTemplates] = useState<Array<{
+    id: string; name: string; items: TemplateItem[]; created_at: string;
+  }>>([]);
 
   const tog = (key: string) => setExpanded((p) => ({ ...p, [key]: !p[key] }));
   const isOpen = (key: string) => !!expanded[key];
+
+  // ── Загрузка шаблонов из БД ──
+  const loadTemplates = useCallback(async () => {
+    const orgId = useAuthStore.getState().organization?.id;
+    if (!orgId) return;
+    const { data, error } = await supabase.from('hidden_templates')
+      .select('*').eq('org_id', orgId).order('created_at', { ascending: false });
+    if (error) { notify('Ошибка загрузки шаблонов: ' + error.message); return; }
+    setTemplates(data || []);
+  }, [notify]);
+
+  // Загружаем шаблоны один раз при маунте
+  useEffect(() => { loadTemplates(); }, [loadTemplates]);
 
   // Группировка данных
   const tabCats = useMemo(() => {
@@ -258,6 +354,63 @@ export function TreeRef({ db, refresh, notify }: {
     refresh();
   };
 
+  // ── Шаблоны скрытых материалов ──
+
+  // Сохраняет скрытые материалы варианта как шаблон
+  const saveTemplate = async (optionId: number, name: string) => {
+    const orgId = useAuthStore.getState().organization?.id;
+    if (!orgId) { notify('Ошибка: организация не загружена'); return; }
+    const hiddenMats = (optMats[optionId] || []).filter((om) => !om.visible);
+    if (hiddenMats.length === 0) {
+      notify('Нет скрытых материалов для сохранения');
+      return;
+    }
+    const items: TemplateItem[] = hiddenMats.map((om) => ({
+      material_id: om.material_id,
+      quantity: om.quantity,
+      visible: false,
+      calc_mode: om.calc_mode || 'fixed',
+    }));
+    const { error } = await supabase.from('hidden_templates').insert({
+      org_id: orgId, name, items,
+    });
+    if (error) { notify('Ошибка: ' + error.message); return; }
+    notify(`Шаблон «${name}» сохранён (${items.length} поз.)`);
+    loadTemplates();
+  };
+
+  // Применяет шаблон к варианту: копирует все его позиции в option_materials
+  // поверх существующих. Существующие скрытые не удаляет — если в шаблоне
+  // уже есть такой material_id, вставится дубликат. Это сознательное решение:
+  // пусть пользователь сам удалит лишнее, чем мы что-то сотрём неожиданно.
+  const applyTemplate = async (optionId: number, tmplId: string) => {
+    const orgId = useAuthStore.getState().organization?.id;
+    if (!orgId) { notify('Ошибка: организация не загружена'); return; }
+    const tmpl = templates.find((t) => t.id === tmplId);
+    if (!tmpl) { notify('Шаблон не найден'); return; }
+    const rows = tmpl.items.map((it) => ({
+      option_id: optionId,
+      material_id: it.material_id,
+      quantity: it.quantity,
+      visible: it.visible,
+      calc_mode: it.calc_mode,
+      org_id: orgId,
+    }));
+    const { error } = await supabase.from('option_materials').insert(rows);
+    if (error) { notify('Ошибка: ' + error.message); return; }
+    notify(`Применён шаблон «${tmpl.name}» (${rows.length} поз.)`);
+    refresh();
+  };
+
+  // Удаляет шаблон
+  const deleteTemplate = async (tmplId: string, tmplName: string) => {
+    if (!confirm(`Удалить шаблон «${tmplName}»?`)) return;
+    const { error } = await supabase.from('hidden_templates').delete().eq('id', tmplId);
+    if (error) { notify('Ошибка: ' + error.message); return; }
+    notify('Шаблон удалён');
+    loadTemplates();
+  };
+
   return (
     <div>
       <div className="text-xs text-gray-400 mb-3 flex items-center gap-1.5">
@@ -322,9 +475,15 @@ export function TreeRef({ db, refresh, notify }: {
                                     {hiddenCount > 0 && <span className="text-amber-500 ml-1">🔒{hiddenCount}</span>}
                                   </span>
                                   <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'binding', optionId: opt.id, optionName: opt.name }); }}
-                                    className="text-gray-300 hover:text-brand-500 p-0.5"><Plus className="w-3 h-3" /></button>
+                                    className="text-gray-300 hover:text-brand-500 p-0.5" title="Добавить материал"><Plus className="w-3 h-3" /></button>
+                                  <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'pickTemplate', optionId: opt.id, optionName: opt.name }); }}
+                                    className="text-gray-300 hover:text-brand-500 p-0.5" title="Применить шаблон"><Bookmark className="w-3 h-3" /></button>
+                                  {hiddenCount > 0 && (
+                                    <button onClick={(e) => { e.stopPropagation(); setModal({ type: 'saveTemplate', optionId: opt.id, optionName: opt.name, hiddenCount }); }}
+                                      className="text-gray-300 hover:text-amber-500 p-0.5" title="Сохранить скрытые как шаблон"><BookmarkPlus className="w-3 h-3" /></button>
+                                  )}
                                   <button onClick={(e) => { e.stopPropagation(); delOption(opt.id, opt.name); }}
-                                    className="text-gray-300 hover:text-red-500 p-0.5"><Trash2 className="w-3 h-3" /></button>
+                                    className="text-gray-300 hover:text-red-500 p-0.5" title="Удалить вариант"><Trash2 className="w-3 h-3" /></button>
                                 </div>
 
                                 {isOpen(oKey) && (
@@ -406,6 +565,23 @@ export function TreeRef({ db, refresh, notify }: {
         <ModalEditBinding
           binding={modal.binding as OptionMaterial}
           onSave={(id, qty, vis, cm) => { updateBinding(id, qty, vis, cm); setModal(null); }}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal?.type === 'saveTemplate' && (
+        <ModalSaveTemplate
+          optionName={modal.optionName as string}
+          hiddenCount={modal.hiddenCount as number}
+          onSave={(name) => { saveTemplate(modal.optionId as number, name); setModal(null); }}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal?.type === 'pickTemplate' && (
+        <ModalPickTemplate
+          optionName={modal.optionName as string}
+          templates={templates}
+          onApply={(tmplId) => { applyTemplate(modal.optionId as number, tmplId); setModal(null); }}
+          onDelete={(tmplId, tmplName) => { deleteTemplate(tmplId, tmplName); }}
           onClose={() => setModal(null)}
         />
       )}
