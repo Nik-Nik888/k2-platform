@@ -46,6 +46,27 @@ function calcByModeNum(
     else { strips = Math.floor(hMm / baseQty) + 1; stripLen = wMm; }
     return toSht(strips * stripLen / 1000, mat);
   }
+  if (mode === 'step_whole') {
+    // Нестыкуемые рейки: целое число реек на каждую полосу отдельно.
+    const dir = direction || 'vertical';
+    let strips: number, stripLen: number;
+    if (dir === 'vertical') { strips = Math.floor(wMm / baseQty) + 1; stripLen = hMm; }
+    else { strips = Math.floor(hMm / baseQty) + 1; stripLen = wMm; }
+    const md = parseDims(mat?.description);
+    const matLenM = md.d > 0 ? md.d / 1000 : 0;
+    if (matLenM <= 0) return strips; // нет длины материала — возвращаем хотя бы число полос
+    const perStrip = Math.ceil((stripLen / 1000) / matLenM);
+    return strips * perStrip;
+  }
+  // ⟂-режимы: каркас под отделку — направление инвертировано
+  if (mode === 'step_cross') {
+    const inverted = (direction || 'vertical') === 'vertical' ? 'horizontal' : 'vertical';
+    return calcByModeNum(baseQty, 'step', mat, hMm, wMm, inverted);
+  }
+  if (mode === 'step_whole_cross') {
+    const inverted = (direction || 'vertical') === 'vertical' ? 'horizontal' : 'vertical';
+    return calcByModeNum(baseQty, 'step_whole', mat, hMm, wMm, inverted);
+  }
   if (mode === 'area_sheet') {
     const md = parseDims(mat?.description);
     const ma = md.d * md.s / 1e6;
@@ -303,6 +324,22 @@ export function doCalc(
                 if (direction === 'vertical') { strips = Math.floor(effW / base) + 1; stripLen = effH; }
                 else { strips = Math.floor(effH / base) + 1; stripLen = effW; }
                 autoQty = toSht(strips * stripLen / 1000, mat);
+              } else if (mode === 'step_whole' && effH > 0 && effW > 0) {
+                // Нестыкуемые рейки: целая рейка на каждую полосу
+                let strips: number, stripLen: number;
+                if (direction === 'vertical') { strips = Math.floor(effW / base) + 1; stripLen = effH; }
+                else { strips = Math.floor(effH / base) + 1; stripLen = effW; }
+                const md = parseDims(mat.description);
+                const matLenM = md.d > 0 ? md.d / 1000 : 0;
+                if (matLenM > 0) {
+                  const perStrip = Math.ceil((stripLen / 1000) / matLenM);
+                  autoQty = strips * perStrip;
+                } else {
+                  autoQty = strips;
+                }
+              } else if ((mode === 'step_cross' || mode === 'step_whole_cross') && effH > 0 && effW > 0) {
+                // ⟂-режимы: переиспользуем calcByModeNum, он сам инвертирует direction
+                autoQty = calcByModeNum(base, mode, mat, effH, effW, direction);
               } else if (mode === 'area_sheet' && effArea > 0) {
                 const md = parseDims(mat.description);
                 const matA = md.d * md.s / 1e6;

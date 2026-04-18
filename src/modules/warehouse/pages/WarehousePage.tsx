@@ -5,6 +5,7 @@ import {
   fetchStock, fetchMovements, createMovement, updateMinQuantity, deleteStockItem,
 } from '@modules/warehouse/api/warehouseApi';
 import type { StockItem, StockMovement, MovementType } from '@modules/warehouse/api/warehouseApi';
+import { NumberInput } from '@modules/calculator/components/primitives';
 import {
   Package, AlertTriangle, TrendingDown, ArrowDownToLine, ArrowUpFromLine,
   Loader2, X, Search, Plus, Trash2, Edit3, History, BarChart3,
@@ -73,8 +74,7 @@ function MovementModal({ type, materials, onClose, onSave }: {
           </div>
           <div>
             <label className="text-xs text-gray-500 font-semibold uppercase mb-1 block">Количество</label>
-            <input type="number" min="0" className="input text-sm" value={qty || ''}
-              onChange={(e) => setQty(Number(e.target.value) || 0)} />
+            <NumberInput value={qty} onChange={setQty} allowFloat />
           </div>
           <div>
             <label className="text-xs text-gray-500 font-semibold uppercase mb-1 block">Комментарий</label>
@@ -135,13 +135,11 @@ function AddStockModal({ materials, onClose, onSave }: {
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="text-xs text-gray-500 font-semibold uppercase mb-1 block">Начальный остаток</label>
-              <input type="number" min="0" className="input text-sm" value={qty || ''}
-                onChange={(e) => setQty(Number(e.target.value) || 0)} />
+              <NumberInput value={qty} onChange={setQty} allowFloat />
             </div>
             <div className="flex-1">
               <label className="text-xs text-gray-500 font-semibold uppercase mb-1 block">Минимум</label>
-              <input type="number" min="0" className="input text-sm" value={minQty || ''}
-                onChange={(e) => setMinQty(Number(e.target.value) || 0)} />
+              <NumberInput value={minQty} onChange={setMinQty} allowFloat />
             </div>
           </div>
           <div className="flex gap-2">
@@ -370,9 +368,12 @@ export function WarehousePage() {
                           <span className="text-xs text-gray-400 ml-1">{item.material?.unit}</span>
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <input type="number" min="0" value={item.min_quantity || ''}
-                            onChange={(e) => handleUpdateMin(item.id, Number(e.target.value) || 0)}
-                            className="w-14 text-right text-xs font-mono border border-surface-200 rounded px-1.5 py-1 bg-white outline-none focus:border-brand-500" />
+                          <NumberInput
+                            value={item.min_quantity || 0}
+                            onChange={(v) => handleUpdateMin(item.id, v)}
+                            allowFloat
+                            className="w-14 text-right text-xs font-mono border border-surface-200 rounded px-1.5 py-1 bg-white outline-none focus:border-brand-500"
+                          />
                         </td>
                         <td className="px-4 py-3 text-right text-xs text-gray-400 font-mono hidden sm:table-cell">
                           {item.material?.price ? item.material.price + '₽' : '—'}

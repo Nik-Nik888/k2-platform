@@ -4,6 +4,7 @@ import { useAuthStore } from '@store/authStore';
 import {
   Plus, X, Search, Loader2, Trash2, Edit3, FolderPlus,
 } from 'lucide-react';
+import { NumberInput } from '@modules/calculator/components/primitives';
 
 // ── Типы ────────────────────────────────────────────────
 interface MatCategory {
@@ -147,8 +148,7 @@ function MaterialModal({ item, categories, onClose, onSave }: {
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="text-xs text-gray-500 font-semibold uppercase mb-1 block">Цена, ₽</label>
-              <input type="number" min="0" step="0.01" className="input text-sm" value={form.price || ''}
-                onChange={(e) => setForm({ ...form, price: Number(e.target.value) || 0 })} />
+              <NumberInput value={form.price} onChange={(p) => setForm({ ...form, price: p })} allowFloat />
             </div>
             <div className="flex-1">
               <label className="text-xs text-gray-500 font-semibold uppercase mb-1 block">Единица</label>
@@ -425,14 +425,15 @@ export function MaterialsPage() {
                       </td>
                       <td className="px-4 py-3 text-center text-xs text-gray-500">{item.unit}</td>
                       <td className="px-4 py-3 text-right">
-                        <input type="number" min="0" step="0.01"
-                          value={item.price || ''}
-                          onChange={(e) => {
-                            const p = Number(e.target.value) || 0;
+                        <NumberInput
+                          value={item.price}
+                          onChange={(p) => {
                             setItems((prev) => prev.map((m) => m.id === item.id ? { ...m, price: p } : m));
+                            handlePriceUpdate(item.id, p);
                           }}
-                          onBlur={(e) => handlePriceUpdate(item.id, Number(e.target.value) || 0)}
-                          className="w-20 text-right text-sm font-mono font-bold text-accent-500 border border-transparent hover:border-surface-300 focus:border-brand-500 rounded-lg px-2 py-1 bg-transparent outline-none focus:bg-white transition-colors" />
+                          allowFloat
+                          className="w-20 text-right text-sm font-mono font-bold text-accent-500 border border-transparent hover:border-surface-300 focus:border-brand-500 rounded-lg px-2 py-1 bg-transparent outline-none focus:bg-white transition-colors"
+                        />
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

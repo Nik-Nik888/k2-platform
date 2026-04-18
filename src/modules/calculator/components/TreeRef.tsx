@@ -4,6 +4,7 @@ import { useAuthStore } from '@store/authStore';
 import { TABS, CALC_MODE_LABELS, parseDims } from '@modules/calculator/api/calcApi';
 import type { CalcDB, Material, Category, CategoryOption, OptionMaterial } from '@modules/calculator/api/calcApi';
 import { ChevronRight, Plus, Trash2, Pencil, X, Save, Package } from 'lucide-react';
+import { NumberInput } from './primitives';
 
 // ════════════════════════════════════════════════════════
 // Модальные окна
@@ -80,8 +81,7 @@ function ModalAddBinding({ title, materials, onSave, onClose }: {
         <div className="flex gap-3">
           <div className="flex-1">
             <label className="text-xs text-gray-500 font-semibold uppercase mb-1 block">Количество</label>
-            <input type="number" className="input text-sm" value={qty}
-              onChange={(e) => setQty(Number(e.target.value) || 0)} />
+            <NumberInput value={qty} onChange={setQty} allowFloat />
           </div>
           <div className="flex-1">
             <label className="text-xs text-gray-500 font-semibold uppercase mb-1 block">Режим расчёта</label>
@@ -123,8 +123,7 @@ function ModalEditBinding({ binding, onSave, onClose }: {
         <div className="flex gap-3">
           <div className="flex-1">
             <label className="text-xs text-gray-500 font-semibold uppercase mb-1 block">Количество</label>
-            <input type="number" className="input text-sm" value={qty}
-              onChange={(e) => setQty(Number(e.target.value) || 0)} />
+            <NumberInput value={qty} onChange={setQty} allowFloat />
           </div>
           <div className="flex-1">
             <label className="text-xs text-gray-500 font-semibold uppercase mb-1 block">Режим расчёта</label>

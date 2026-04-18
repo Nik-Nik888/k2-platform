@@ -130,6 +130,9 @@ export const CALC_MODE_LABELS: Record<string, string> = {
   fixed: '🔢фикс.',
   per_sqm: '📐м²',
   step: '📊шаг',
+  step_whole: '📏шаг(цел)',
+  step_cross: '📊шаг⟂',
+  step_whole_cross: '📏шаг(цел)⟂',
   area_sheet: '📐лист',
 };
 
@@ -181,6 +184,42 @@ export function calcByMode(
     const totalM = strips * stripLen / 1000;
     const sht = toSht(totalM);
     return { qty: sht, hint: 'шаг ' + stepMm + 'мм → ' + strips + 'полос × ' + (stripLen / 1000).toFixed(1) + 'м = ' + totalM.toFixed(1) + 'п.м. → ' + sht + 'шт.' };
+  }
+  if (mode === 'step_whole') {
+    // Режим для нестыкуемых планок/реек: каждую полосу считаем отдельно,
+    // из одной рейки можно отрезать только целое число кусков нужной длины.
+    // Разделяй экономию с соседней полосой нельзя — остаток уходит в отход.
+    if (baseQty <= 0) return { qty: 0, hint: '' };
+    const stepMm = baseQty;
+    let strips: number, stripLen: number;
+    if (direction === 'vertical') { strips = Math.floor(wMm / stepMm) + 1; stripLen = hMm; }
+    else { strips = Math.floor(hMm / stepMm) + 1; stripLen = wMm; }
+    if (matLen <= 0) {
+      // Если длина материала не задана — падаем на старое поведение
+      const sht = strips;
+      return { qty: sht, hint: 'шаг ' + stepMm + 'мм → ' + strips + ' полос (укажите длину материала)' };
+    }
+    // Сколько реек нужно на одну полосу (с округлением вверх, без стыковки)
+    const perStrip = Math.ceil((stripLen / 1000) / matLen);
+    const sht = strips * perStrip;
+    return {
+      qty: sht,
+      hint: 'шаг ' + stepMm + 'мм → ' + strips + ' полос × '
+        + perStrip + ' рейка(и) по ' + matLen.toFixed(1) + 'м = ' + sht + 'шт.',
+    };
+  }
+  // ⟂-режимы: каркас под отделку. Считается как обычный step/step_whole,
+  // но направление перевёрнуто относительно отделки. Например: вагонка
+  // горизонтально → каркас (рейка) автоматически считается вертикально.
+  if (mode === 'step_cross') {
+    const inverted = direction === 'vertical' ? 'horizontal' : 'vertical';
+    const r = calcByMode(baseQty, 'step', mat, hMm, wMm, inverted);
+    return { qty: r.qty, hint: '⟂ ' + r.hint };
+  }
+  if (mode === 'step_whole_cross') {
+    const inverted = direction === 'vertical' ? 'horizontal' : 'vertical';
+    const r = calcByMode(baseQty, 'step_whole', mat, hMm, wMm, inverted);
+    return { qty: r.qty, hint: '⟂ ' + r.hint };
   }
   if (mode === 'area_sheet') {
     const matAreaSqm = md.d * md.s / 1e6;

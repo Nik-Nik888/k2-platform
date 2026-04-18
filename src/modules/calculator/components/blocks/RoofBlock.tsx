@@ -1,5 +1,5 @@
 import { useCalcStore } from '@store/calcStore';
-import { CALC_MODE_LABELS, calcMatQty, parseDims } from '@modules/calculator/api/calcApi';
+import { CALC_MODE_LABELS, calcByMode, calcMatQty } from '@modules/calculator/api/calcApi';
 import type { Category, OptionMaterial } from '@modules/calculator/api/calcApi';
 import { NI } from '../primitives';
 import { MatRow } from '../MatRow';
@@ -55,30 +55,14 @@ export function RoofBlock({ tabId, cat, visibleMats, hiddenMats }: {
               if (isRemoved(tabId, cat.id, om.id)) return null;
               const base = om.quantity || 0;
               const mode = om.calc_mode || 'fixed';
-              const toSht = (pm: number) => {
-                if (pm <= 0) return 0;
-                const md = parseDims(om.materials?.description);
-                return md.d > 0 ? Math.ceil(pm / (md.d / 1000)) : Math.ceil(pm);
-              };
-              let qty = base;
-              if (mode === 'perim') qty = toSht(base * rP);
-              else if (mode === 'per_sqm') qty = Math.ceil(base * rA);
-              else if (mode === 'width') qty = toSht(base * rW);
-              else if (mode === 'height') qty = toSht(base * rH);
-              else if (mode === 'step') {
-                const st = Math.floor(rd.length / base) + 1;
-                const sl = rd.height;
-                qty = toSht(st * sl / 1000);
-              } else if (mode === 'area_sheet') {
-                const md = parseDims(om.materials?.description);
-                const ma = md.d * md.s / 1e6;
-                if (ma > 0) qty = Math.ceil(rA / ma * 1.1 * base);
-              }
+              // Универсальный расчёт через calcByMode — поддерживает все режимы
+              // включая step_whole, step_cross, step_whole_cross
+              const r = calcByMode(base, mode, om.materials, rd.height, rd.length, 'horizontal');
               const uq = getQty(tabId, cat.id, om.material_id);
-              const q = uq !== undefined ? uq : qty;
+              const q = uq !== undefined ? uq : r.qty;
 
               return (
-                <MatRow key={om.id} om={om} qty={q} hint="" modeLabel={CALC_MODE_LABELS[mode] || ''}
+                <MatRow key={om.id} om={om} qty={q} hint={r.hint} modeLabel={CALC_MODE_LABELS[mode] || ''}
                   isHidden={true} isRemoved={false}
                   onQtyChange={(v) => setQty(tabId, cat.id, om.material_id, v)}
                   onToggleRemove={() => toggleRemove(tabId, cat.id, om.id)} />
