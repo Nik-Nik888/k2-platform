@@ -32,6 +32,7 @@ export interface OptionMaterial {
   quantity: number;
   visible: boolean;
   calc_mode: string;
+  cross_direction: boolean; // true = направление поперёк отделки (для каркаса)
   materials?: Material;
 }
 
@@ -121,19 +122,19 @@ export function calcInsulation(areaSqm: number): number {
   return Math.ceil(areaSqm / sheetArea);
 }
 
-// Режимы расчёта
+// Режимы расчёта.
+// 'step' — умная резка рейки на равные части (1/2, 1/3, 1/4...) с учётом
+// стыковки если полоса длиннее рейки. Направление инвертируется через
+// отдельный флаг cross_direction (не через отдельный режим).
 export const CALC_MODE_LABELS: Record<string, string> = {
-  perim: '📐периметр',
-  width: '↔низ',
-  width_top: '↔верх',
-  height: '↕бок×2',
-  fixed: '🔢фикс.',
-  per_sqm: '📐м²',
-  step: '📊шаг',
-  step_whole: '📏шаг(цел)',
-  step_cross: '📊шаг⟂',
-  step_whole_cross: '📏шаг(цел)⟂',
-  area_sheet: '📐лист',
+  perim: '📐 периметр',
+  width: '↔ низ',
+  width_top: '↔ верх',
+  height: '↕ бок×2',
+  fixed: '🔢 фикс.',
+  per_sqm: '📐 м²',
+  step: '📊 шаг расстановки',
+  area_sheet: '📐 лист',
 };
 
 export interface CalcResult {
@@ -141,9 +142,77 @@ export interface CalcResult {
   hint: string;
 }
 
+// ══════════════════════════════════════════════════════════
+// calcRails — универсальный расчёт реек для шага расстановки.
+//
+// Логика:
+// 1. Считаем полосы: stripsCount = floor(поперечный размер / шаг) + 1
+// 2. Для каждой полосы длиной stripLen нужен материал длиной railLen.
+// 3. Если полоса помещается в рейку (stripLen ≤ railLen):
+//    - Рейку можно порезать на РАВНЫЕ части: 1/1, 1/2, 1/3, ...
+//    - Берём самую короткую часть, которой хватит: ceil(railLen / stripLen) частей с рейки
+//    - Одной рейки хватит на floor(railLen / stripLen) полос
+//    - Итого реек: ceil(полос / часть_на_рейку)
+// 4. Если полоса больше рейки (stripLen > railLen):
+//    - На каждую полосу идёт ≥1 целая рейка плюс остаток.
+//    - Для остатка — тот же алгоритм (рекурсивно).
+//
+// Возвращает { qty: число реек, hint: текстовое объяснение }.
+// ══════════════════════════════════════════════════════════
+export function calcRails(
+  stripsCount: number,
+  stripLenMm: number,
+  railLenMm: number
+): { qty: number; hint: string } {
+  if (stripsCount <= 0 || stripLenMm <= 0) {
+    return { qty: 0, hint: '' };
+  }
+  if (railLenMm <= 0) {
+    // Длина рейки неизвестна — fallback: одна рейка на полосу
+    return { qty: stripsCount, hint: '⚠️ укажите длину рейки; принято 1 рейка/полоса' };
+  }
+
+  // Случай 1: полоса ≤ рейки — можно делить рейку на части
+  if (stripLenMm <= railLenMm) {
+    const partsPerRail = Math.floor(railLenMm / stripLenMm);
+    const rails = Math.ceil(stripsCount / partsPerRail);
+    const partLen = (stripLenMm / 1000).toFixed(2);
+    const railLenM = (railLenMm / 1000).toFixed(1);
+    return {
+      qty: rails,
+      hint: `${stripsCount} полос × ${partLen}м; рейка ${railLenM}м даёт ${partsPerRail} часть(ей) → ${rails} рейк${rails === 1 ? 'а' : 'и'}`,
+    };
+  }
+
+  // Случай 2: полоса длиннее рейки — нужна стыковка
+  // На каждую полосу: целая рейка + остаток. Остаток считаем рекурсивно.
+  const fullRailsPerStrip = Math.floor(stripLenMm / railLenMm);
+  const remainderLen = stripLenMm - fullRailsPerStrip * railLenMm;
+  const fullRails = stripsCount * fullRailsPerStrip;
+
+  if (remainderLen <= 0) {
+    // Полоса делится на целые рейки без остатка
+    return {
+      qty: fullRails,
+      hint: `${stripsCount} полос × ${fullRailsPerStrip} целых реек = ${fullRails} шт.`,
+    };
+  }
+
+  // Для остатков применяем ту же логику (они помещаются в рейку)
+  const remainderResult = calcRails(stripsCount, remainderLen, railLenMm);
+  const total = fullRails + remainderResult.qty;
+  const remM = (remainderLen / 1000).toFixed(2);
+
+  return {
+    qty: total,
+    hint: `${stripsCount} полос × (${fullRailsPerStrip} целых + остаток ${remM}м): ${fullRails} целых + ${remainderResult.qty} на остатки = ${total} шт.`,
+  };
+}
+
 export function calcByMode(
   baseQty: number, mode: string, mat: Material | undefined,
-  hMm: number, wMm: number, direction: string
+  hMm: number, wMm: number, direction: string,
+  crossDirection = false
 ): CalcResult {
   if (!baseQty || baseQty <= 0) return { qty: 0, hint: '' };
   const hM = hMm / 1000;
@@ -152,7 +221,8 @@ export function calcByMode(
   const areaSqm = hM * wM;
 
   const md = parseDims(mat?.description);
-  const matLen = md.d > 0 ? md.d / 1000 : 0;
+  const matLenMm = md.d > 0 ? md.d : 0;
+  const matLen = matLenMm / 1000;
 
   const toSht = (pm: number) => {
     if (pm <= 0) return 0;
@@ -176,50 +246,25 @@ export function calcByMode(
     return { qty: q, hint: baseQty + '/м² × ' + areaSqm.toFixed(2) + 'м² = ' + q + 'шт.' };
   }
   if (mode === 'step') {
-    if (baseQty <= 0) return { qty: 0, hint: '' };
+    // Шаг расстановки. Если crossDirection=true — направление инвертируется
+    // (каркас под чистовую отделку идёт поперёк).
     const stepMm = baseQty;
+    const effDir = crossDirection
+      ? (direction === 'vertical' ? 'horizontal' : 'vertical')
+      : direction;
+
     let strips: number, stripLen: number;
-    if (direction === 'vertical') { strips = Math.floor(wMm / stepMm) + 1; stripLen = hMm; }
-    else { strips = Math.floor(hMm / stepMm) + 1; stripLen = wMm; }
-    const totalM = strips * stripLen / 1000;
-    const sht = toSht(totalM);
-    return { qty: sht, hint: 'шаг ' + stepMm + 'мм → ' + strips + 'полос × ' + (stripLen / 1000).toFixed(1) + 'м = ' + totalM.toFixed(1) + 'п.м. → ' + sht + 'шт.' };
-  }
-  if (mode === 'step_whole') {
-    // Режим для нестыкуемых планок/реек: каждую полосу считаем отдельно,
-    // из одной рейки можно отрезать только целое число кусков нужной длины.
-    // Разделяй экономию с соседней полосой нельзя — остаток уходит в отход.
-    if (baseQty <= 0) return { qty: 0, hint: '' };
-    const stepMm = baseQty;
-    let strips: number, stripLen: number;
-    if (direction === 'vertical') { strips = Math.floor(wMm / stepMm) + 1; stripLen = hMm; }
-    else { strips = Math.floor(hMm / stepMm) + 1; stripLen = wMm; }
-    if (matLen <= 0) {
-      // Если длина материала не задана — падаем на старое поведение
-      const sht = strips;
-      return { qty: sht, hint: 'шаг ' + stepMm + 'мм → ' + strips + ' полос (укажите длину материала)' };
+    if (effDir === 'vertical') {
+      strips = Math.floor(wMm / stepMm) + 1;
+      stripLen = hMm;
+    } else {
+      strips = Math.floor(hMm / stepMm) + 1;
+      stripLen = wMm;
     }
-    // Сколько реек нужно на одну полосу (с округлением вверх, без стыковки)
-    const perStrip = Math.ceil((stripLen / 1000) / matLen);
-    const sht = strips * perStrip;
-    return {
-      qty: sht,
-      hint: 'шаг ' + stepMm + 'мм → ' + strips + ' полос × '
-        + perStrip + ' рейка(и) по ' + matLen.toFixed(1) + 'м = ' + sht + 'шт.',
-    };
-  }
-  // ⟂-режимы: каркас под отделку. Считается как обычный step/step_whole,
-  // но направление перевёрнуто относительно отделки. Например: вагонка
-  // горизонтально → каркас (рейка) автоматически считается вертикально.
-  if (mode === 'step_cross') {
-    const inverted = direction === 'vertical' ? 'horizontal' : 'vertical';
-    const r = calcByMode(baseQty, 'step', mat, hMm, wMm, inverted);
-    return { qty: r.qty, hint: '⟂ ' + r.hint };
-  }
-  if (mode === 'step_whole_cross') {
-    const inverted = direction === 'vertical' ? 'horizontal' : 'vertical';
-    const r = calcByMode(baseQty, 'step_whole', mat, hMm, wMm, inverted);
-    return { qty: r.qty, hint: '⟂ ' + r.hint };
+
+    const r = calcRails(strips, stripLen, matLenMm);
+    const prefix = crossDirection ? '⟂ поперёк отделки: ' : '';
+    return { qty: r.qty, hint: prefix + `шаг ${stepMm}мм → ` + r.hint };
   }
   if (mode === 'area_sheet') {
     const matAreaSqm = md.d * md.s / 1e6;

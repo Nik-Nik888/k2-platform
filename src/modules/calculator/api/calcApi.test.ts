@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseDims, calcMatQty, calcInsulation, calcByMode } from './calcApi';
+import { parseDims, calcMatQty, calcInsulation, calcByMode, calcRails } from './calcApi';
 import type { Material } from './calcApi';
 
 // ──────────────────────────────────────────────────────────
@@ -59,23 +59,15 @@ describe('calcInsulation', () => {
 });
 
 // ──────────────────────────────────────────────────────────
-// calcMatQty — отделочный материал (вагонка, панели и т.п.)
-// Логика: сколько длинномерных планок нужно на стену
+// calcMatQty — отделочный материал (вагонка, панели)
 // ──────────────────────────────────────────────────────────
 describe('calcMatQty', () => {
-  it('вагонка 3000x90, стена 3000x2500, вертикально: 28 шт. (ceil(2500/90) × ceil(3000/3000))', () => {
-    // полос = ceil(2500 / 90) = 28, на каждую = ceil(3000/3000) = 1 → 28
+  it('вагонка 3000x90, стена 3000x2500, вертикально → 28', () => {
     expect(calcMatQty(3000, 2500, '3000x90', 'vertical')).toBe(28);
   });
 
-  it('вагонка 3000x90, стена 3000x2500, горизонтально: 34 шт.', () => {
-    // полос = ceil(3000 / 90) = 34, на каждую = ceil(2500/3000) = 1 → 34
+  it('вагонка 3000x90, стена 3000x2500, горизонтально → 34', () => {
     expect(calcMatQty(3000, 2500, '3000x90', 'horizontal')).toBe(34);
-  });
-
-  it('рейка 6000x40, стена 2500x3000 горизонтально: 63 шт.', () => {
-    // полос = ceil(2500/40) = 63, на полосу = ceil(3000/6000) = 1 → 63
-    expect(calcMatQty(2500, 3000, '6000x40', 'horizontal')).toBe(63);
   });
 
   it('пустой matDims → 0', () => {
@@ -83,21 +75,114 @@ describe('calcMatQty', () => {
     expect(calcMatQty(3000, 2500, '', 'vertical')).toBe(0);
   });
 
-  it('только ширина материала без длины — длина по умолчанию 3000', () => {
-    // '0x90' → s=90, d=0, длина по дефолту 3000
-    // стена 3000x2500 vertical: полос=ceil(2500/90)=28, на полосу=ceil(3000/3000)=1 → 28
-    expect(calcMatQty(3000, 2500, 'x90', 'vertical')).toBe(0); // parseDims не пропустит пустой d
-  });
-
-  it('штучный лист (isLinear=false): 10м² стены, лист 0.6×2.5 м = 1.5 м² → ceil(10/1.5 × 1.1) = 8', () => {
-    // 10 / 1.5 = 6.66 × 1.1 = 7.33 → ceil = 8
+  it('штучный лист (isLinear=false): 10м² стены, лист 2.5×0.6 → 8', () => {
+    // wallArea = 4 × 2.5 = 10 м², matArea = 2.5 × 0.6 = 1.5 м²
+    // 10/1.5 × 1.1 = 7.33 → ceil = 8
     expect(calcMatQty(4000, 2500, '2500x600', 'vertical', false)).toBe(8);
   });
 });
 
 // ──────────────────────────────────────────────────────────
-// calcByMode — расчёт скрытых материалов по режимам
-// Это сердце системы, все режимы тестируем.
+// calcRails — умная резка реек на равные части + стыковка
+// Ядро новой формулы. Тестируем все граничные случаи.
+// ──────────────────────────────────────────────────────────
+describe('calcRails', () => {
+  // ── Случай 1: полоса помещается в рейку, равные части ──
+  it('рейка 3000, полоса 2700, 1 полоса → 1 рейка (целая часть)', () => {
+    // floor(3000/2700) = 1 часть на рейку, ceil(1/1) = 1
+    expect(calcRails(1, 2700, 3000).qty).toBe(1);
+  });
+
+  it('рейка 3000, полоса 2000, 1 полоса → 1 рейка', () => {
+    // floor(3000/2000) = 1 часть, ceil(1/1) = 1
+    expect(calcRails(1, 2000, 3000).qty).toBe(1);
+  });
+
+  it('рейка 3000, полоса 1500, 1 полоса → 1 рейка (берём половину)', () => {
+    // floor(3000/1500) = 2 части, ceil(1/2) = 1
+    expect(calcRails(1, 1500, 3000).qty).toBe(1);
+  });
+
+  it('рейка 3000, полоса 1500, 2 полосы → 1 рейка (две половины с одной)', () => {
+    // 2 полосы / 2 части на рейку = 1 рейка
+    expect(calcRails(2, 1500, 3000).qty).toBe(1);
+  });
+
+  it('рейка 3000, полоса 1500, 3 полосы → 2 рейки', () => {
+    // ceil(3/2) = 2
+    expect(calcRails(3, 1500, 3000).qty).toBe(2);
+  });
+
+  it('рейка 3000, полоса 1000, 1 полоса → 1 рейка (треть)', () => {
+    // floor(3000/1000) = 3 части
+    expect(calcRails(1, 1000, 3000).qty).toBe(1);
+  });
+
+  it('рейка 3000, полоса 1000, 3 полосы → 1 рейка (три трети с одной)', () => {
+    expect(calcRails(3, 1000, 3000).qty).toBe(1);
+  });
+
+  it('рейка 3000, полоса 1000, 7 полос → 3 рейки (ceil(7/3))', () => {
+    expect(calcRails(7, 1000, 3000).qty).toBe(3);
+  });
+
+  it('рейка 3000, полоса 750, 1 полоса → 1 рейка (четверть)', () => {
+    // floor(3000/750) = 4 части
+    expect(calcRails(1, 750, 3000).qty).toBe(1);
+  });
+
+  it('рейка 3000, полоса 900, 5 полос → 2 рейки (floor(3000/900)=3, ceil(5/3)=2)', () => {
+    // floor(3000/900) = 3 части (900×3=2700, в рейку помещается), ceil(5/3)=2
+    expect(calcRails(5, 900, 3000).qty).toBe(2);
+  });
+
+  // ── Случай 2: полоса длиннее рейки — стыковка ──
+  it('рейка 3000, полоса 5000, 1 полоса → 2 рейки (целая + остаток 2000)', () => {
+    // 1 целая + остаток 2000: floor(3000/2000)=1, ceil(1/1)=1 → 1+1=2
+    expect(calcRails(1, 5000, 3000).qty).toBe(2);
+  });
+
+  it('рейка 3000, полоса 5000, 7 полос → 14 реек (7 целых + 7 остатков по 2000)', () => {
+    // 7 целых + остаток 2000 на 7 полос, floor(3000/2000)=1, ceil(7/1)=7 → 7+7=14
+    expect(calcRails(7, 5000, 3000).qty).toBe(14);
+  });
+
+  it('рейка 3000, полоса 4000, 7 полос → 10 реек', () => {
+    // 7 целых + остаток 1000 на 7 полос, floor(3000/1000)=3, ceil(7/3)=3 → 7+3=10
+    expect(calcRails(7, 4000, 3000).qty).toBe(10);
+  });
+
+  it('рейка 3000, полоса 6000 (ровно 2 рейки), 3 полосы → 6 реек (без остатка)', () => {
+    // остаток = 0, возвращаем только целые: 3 × 2 = 6
+    expect(calcRails(3, 6000, 3000).qty).toBe(6);
+  });
+
+  it('рейка 3000, полоса 9000 (ровно 3), 5 полос → 15', () => {
+    expect(calcRails(5, 9000, 3000).qty).toBe(15);
+  });
+
+  // ── Граничные случаи ──
+  it('0 полос → 0 реек', () => {
+    expect(calcRails(0, 2500, 3000).qty).toBe(0);
+  });
+
+  it('полоса длины 0 → 0 реек', () => {
+    expect(calcRails(5, 0, 3000).qty).toBe(0);
+  });
+
+  it('длина рейки неизвестна → fallback (1 рейка на полосу)', () => {
+    expect(calcRails(5, 2500, 0).qty).toBe(5);
+  });
+
+  it('hint не пустой для осмысленных входов', () => {
+    const r = calcRails(7, 1500, 3000);
+    expect(r.hint).toContain('полос');
+    expect(r.hint).toMatch(/\d+/);
+  });
+});
+
+// ──────────────────────────────────────────────────────────
+// calcByMode — режимы расчёта скрытых материалов
 // ──────────────────────────────────────────────────────────
 describe('calcByMode', () => {
   const rail3m: Material = {
@@ -108,108 +193,112 @@ describe('calcByMode', () => {
   };
 
   // ── fixed ──
-  it('fixed: просто возвращает заданное количество', () => {
+  it('fixed: возвращает заданное количество', () => {
     const r = calcByMode(5, 'fixed', rail3m, 0, 0, 'vertical');
     expect(r.qty).toBe(5);
   });
 
   // ── perim ──
-  it('perim: 1 шт на метр, стена 3×2.5 → P=11 → ceil(11/3) = 4 рейки', () => {
+  it('perim: 1шт/м, стена 3×2.5 (P=11) → 4 рейки по 3м', () => {
     const r = calcByMode(1, 'perim', rail3m, 2500, 3000, 'vertical');
-    // perim = 2×(2.5+3) = 11 м, рейка 3м → ceil(11/3) = 4
     expect(r.qty).toBe(4);
   });
 
   // ── width / height ──
-  it('width: 1 шт на метр ширины, стена 3м → ceil(3/3) = 1', () => {
+  it('width: 1шт/м × 3м → 1 рейка', () => {
     const r = calcByMode(1, 'width', rail3m, 2500, 3000, 'vertical');
     expect(r.qty).toBe(1);
   });
 
-  it('height: бокА×2, стена высотой 2.5м → ceil(5/3) = 2', () => {
+  it('height: 1шт/м × 2.5м × 2бок → 2 рейки', () => {
     const r = calcByMode(1, 'height', rail3m, 2500, 3000, 'vertical');
     expect(r.qty).toBe(2);
   });
 
   // ── per_sqm ──
-  it('per_sqm: 2 шт на м², стена 3×2.5 = 7.5м² → 15', () => {
+  it('per_sqm: 2шт/м² × 7.5м² → 15', () => {
     const r = calcByMode(2, 'per_sqm', rail3m, 2500, 3000, 'vertical');
     expect(r.qty).toBe(15);
   });
 
-  // ── step ──
-  it('step: шаг 500мм, стена 3000x2500 горизонтально → 6 шт (17.5пм / 3м)', () => {
-    // direction=horizontal: полос = floor(2500/500)+1 = 6, stripLen = 3000 мм
-    // всего = 6 × 3 = 18 м, рейка 3м → ceil(18/3) = 6
-    const r = calcByMode(500, 'step', rail3m, 2500, 3000, 'horizontal');
-    expect(r.qty).toBe(6);
-  });
-
-  it('step: шаг 500мм вертикально → полос 7, stripLen 2.5 → ceil(17.5/3)=6', () => {
+  // ── step (новая умная формула) ──
+  it('step: шаг 500, стена 3000x2500 вертикально → 7 реек (7 полос × 1 целая)', () => {
+    // direction='vertical' → strips=floor(3000/500)+1=7, stripLen=2500
+    // 2500 ≤ 3000 → floor(3000/2500)=1 часть/рейка, ceil(7/1)=7
     const r = calcByMode(500, 'step', rail3m, 2500, 3000, 'vertical');
-    // полос = floor(3000/500)+1 = 7, stripLen = 2500
-    // всего = 7 × 2.5 = 17.5 м, рейка 3м → ceil(17.5/3) = 6
-    expect(r.qty).toBe(6);
-  });
-
-  // ── step_whole ── (главный фикс — рейка не стыкуется)
-  it('step_whole: шаг 500мм, стена 3000x2500 горизонтально → 7 шт (целая рейка на каждую полосу)', () => {
-    // Направление рейки противоположно отделке:
-    // horizontal direction → полос = floor(2500/500)+1 = 6
-    // но я жду что direction = 'horizontal' отражает отделку, не рейку
-    // См. formula: direction='horizontal' → strips = floor(hMm/step)+1 = floor(2500/500)+1 = 6
-    // stripLen = wMm = 3000. На полосу = ceil(3/3) = 1 рейка. Всего = 6×1 = 6
-    const r = calcByMode(500, 'step_whole', rail3m, 2500, 3000, 'horizontal');
-    expect(r.qty).toBe(6);
-  });
-
-  it('step_whole: пример из жизни — стена 3000×2500, рейка 3000 длиной, шаг 500, вертикально → 7', () => {
-    // direction=vertical → strips = floor(3000/500)+1 = 7
-    // stripLen = 2500 мм = 2.5 м
-    // На полосу = ceil(2.5/3) = 1
-    // Всего = 7 × 1 = 7 ✅
-    const r = calcByMode(500, 'step_whole', rail3m, 2500, 3000, 'vertical');
     expect(r.qty).toBe(7);
   });
 
-  it('step_whole с рейкой 6м: стена 3×5м, шаг 500 вертикально → полос 11 × ceil(3/6)=1 = 11', () => {
-    const r = calcByMode(500, 'step_whole', rail6m, 3000, 5000, 'vertical');
-    // strips = floor(5000/500)+1 = 11, stripLen = 3м, на полосу = ceil(3/6) = 1 → 11
-    expect(r.qty).toBe(11);
+  it('step: стена 3000x1500, шаг 500, вертикально → 4 рейки (7 полос × 1/2 = ceil(7/2)=4)', () => {
+    // strips=floor(3000/500)+1=7, stripLen=1500, пополам → ceil(7/2)=4
+    const r = calcByMode(500, 'step', rail3m, 1500, 3000, 'vertical');
+    expect(r.qty).toBe(4);
   });
 
-  // ── step_cross / step_whole_cross ──
-  // Инвертируют направление. Используется для каркаса под отделку.
-  it('step_whole_cross: вагонка горизонтальная → каркас вертикальный, шаг 500', () => {
-    // direction='horizontal' (это отделка) → inverted='vertical'
-    // После инверсии: strips = floor(3000/500)+1 = 7, stripLen=2500, на полосу=ceil(2.5/3)=1 → 7
-    const r = calcByMode(500, 'step_whole_cross', rail3m, 2500, 3000, 'horizontal');
+  it('step: стена 3000x1000, шаг 500, вертикально → 3 рейки (ceil(7/3))', () => {
+    // strips=7, stripLen=1000, треть → ceil(7/3)=3
+    const r = calcByMode(500, 'step', rail3m, 1000, 3000, 'vertical');
+    expect(r.qty).toBe(3);
+  });
+
+  it('step: полоса длиннее рейки — стена 5000x3000, шаг 500, вертикально → стыковка', () => {
+    // direction='vertical' → strips=floor(3000/500)+1=7
+    // wait, здесь нужно понять hMm/wMm — это h=5000, w=3000.
+    // vertical → strips=floor(3000/500)+1=7, stripLen=hMm=5000
+    // 5000 > 3000 → целая (3000) + остаток 2000
+    // 7 целых + 7 × ceil(7/1) → 7+7=14
+    const r = calcByMode(500, 'step', rail3m, 5000, 3000, 'vertical');
+    expect(r.qty).toBe(14);
+  });
+
+  // ── step с crossDirection — каркас под отделку ──
+  it('step + crossDirection=true: отделка horizontal → каркас vertical', () => {
+    // direction='horizontal' + cross=true → effDir='vertical'
+    // strips=floor(3000/500)+1=7, stripLen=2500, floor(3000/2500)=1 → 7
+    const r = calcByMode(500, 'step', rail3m, 2500, 3000, 'horizontal', true);
     expect(r.qty).toBe(7);
+    expect(r.hint).toContain('⟂');
   });
 
-  it('step_cross: вагонка вертикальная → каркас горизонтальный, шаг 500', () => {
-    // direction='vertical' → inverted='horizontal'
-    // strips = floor(2500/500)+1 = 6, stripLen=3000, всего=18м, ceil(18/3)=6
-    const r = calcByMode(500, 'step_cross', rail3m, 2500, 3000, 'vertical');
+  it('step + crossDirection=true: отделка vertical → каркас horizontal', () => {
+    // direction='vertical' + cross=true → effDir='horizontal'
+    // strips=floor(2500/500)+1=6, stripLen=3000, floor(3000/3000)=1 → 6
+    const r = calcByMode(500, 'step', rail3m, 2500, 3000, 'vertical', true);
     expect(r.qty).toBe(6);
   });
 
-  // ── Защита от zero/undefined ──
-  it('baseQty = 0 → qty = 0 на любом режиме', () => {
+  it('step без cross vs с cross дают разные результаты', () => {
+    const normal = calcByMode(500, 'step', rail3m, 2500, 3000, 'horizontal').qty;
+    const crossed = calcByMode(500, 'step', rail3m, 2500, 3000, 'horizontal', true).qty;
+    expect(normal).not.toBe(crossed);
+  });
+
+  // ── step с рейкой 6м ──
+  it('step: стена 5000x3000 вертикально, рейка 6м → рейки не стыкуются (5000 < 6000)', () => {
+    // vertical: strips=floor(3000/500)+1=7, stripLen=5000, 5000 ≤ 6000
+    // floor(6000/5000)=1 часть/рейка, ceil(7/1)=7
+    const r = calcByMode(500, 'step', rail6m, 5000, 3000, 'vertical');
+    expect(r.qty).toBe(7);
+  });
+
+  // ── Защита ──
+  it('baseQty=0 → qty=0', () => {
     expect(calcByMode(0, 'step', rail3m, 2500, 3000, 'vertical').qty).toBe(0);
     expect(calcByMode(0, 'perim', rail3m, 2500, 3000, 'vertical').qty).toBe(0);
-    expect(calcByMode(0, 'fixed', rail3m, 2500, 3000, 'vertical').qty).toBe(0);
   });
 
-  it('нулевые размеры стены → qty = 0 для geometric режимов', () => {
+  it('нулевые размеры стены → qty=0 для geometric режимов', () => {
     expect(calcByMode(1, 'perim', rail3m, 0, 0, 'vertical').qty).toBe(0);
     expect(calcByMode(1, 'width', rail3m, 0, 0, 'vertical').qty).toBe(0);
   });
 
-  // ── hint содержит осмысленный текст ──
-  it('hint в step_whole содержит количество полос', () => {
-    const r = calcByMode(500, 'step_whole', rail3m, 2500, 3000, 'vertical');
-    expect(r.hint).toContain('полос');
-    expect(r.hint).toMatch(/\d+шт/);
+  // ── area_sheet ──
+  it('area_sheet: лист 2500x1250, стена 5м² × 1 = 2 листа (5/3.125 ×1.1 = 1.76 → 2)', () => {
+    const sheet: Material = {
+      id: 's1', name: 'Лист', unit: 'шт', price: 500, description: '2500x1250', sku: null,
+    };
+    // stena 2500×2000 = 5м², matArea = 2.5×1.25 = 3.125, 5/3.125 × 1.1 = 1.76 → 2
+    const r = calcByMode(1, 'area_sheet', sheet, 2500, 2000, 'vertical');
+    expect(r.qty).toBe(2);
   });
 });

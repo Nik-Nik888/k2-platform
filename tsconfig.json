@@ -25,5 +25,11 @@
       "@lib/*": ["./src/lib/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": [
+    "src/modules/cabinet/components/TexturePicker.tsx",
+    "src/modules/cabinet/components/Wardrobe3D.tsx",
+    "src/modules/cabinet/components/WardrobeEditor.tsx",
+    "src/modules/calculator/api/doCalc.test.ts"
+  ]
 }

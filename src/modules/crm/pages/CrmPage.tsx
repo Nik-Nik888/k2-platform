@@ -6,6 +6,7 @@ import {
   Phone, Mail, MapPin, Calendar, Plus, X,
   ChevronRight, GripVertical, Loader2, AlertCircle, Users,
 } from 'lucide-react';
+import ClientInstallments from '@modules/installments/components/ClientInstallments';
 
 // ─── Этапы канбана ──────────────────────────────────────
 const STAGES: { status: OrderStatus; label: string; color: string; bg: string }[] = [
@@ -34,10 +35,6 @@ const SOURCE_LABELS: Record<LeadSource, string> = {
   phone: 'Звонок',
   other: 'Другое',
 };
-
-function formatDimensions(d: Order['dimensions']) {
-  return `${d.length / 1000}×${d.width / 1000}м, ${d.floor} эт.`;
-}
 
 // ─── Модалка добавления клиента + заказа ────────────────
 function AddClientModal({
@@ -250,6 +247,10 @@ function OrderDetail({
                 </p>
               </div>
             </div>
+          )}
+
+          {client && (
+            <ClientInstallments clientId={client.id} onClose={onClose} />
           )}
 
           <div>

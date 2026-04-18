@@ -1,5 +1,5 @@
 import {
-  TABS, SURFACE_IDS, parseDims, calcMatQty, calcInsulation,
+  TABS, SURFACE_IDS, parseDims, calcMatQty, calcInsulation, calcByMode,
 } from '@modules/calculator/api/calcApi';
 import type { CalcDB, Material } from '@modules/calculator/api/calcApi';
 import type { FurnitureItem, WindowItem } from '@store/calcStore';
@@ -25,56 +25,13 @@ function toSht(pm: number, mat: Material | undefined): number {
 }
 
 // ── Универсальный расчёт по calc_mode ───────────────────
+// Тонкая обёртка над calcByMode из calcApi — возвращает только число
+// (без hint). Используется внутри doCalc, где hint не нужен.
 function calcByModeNum(
   baseQty: number, mode: string, mat: Material | undefined,
-  hMm: number, wMm: number, direction?: string
+  hMm: number, wMm: number, direction?: string, crossDirection = false
 ): number {
-  if (!baseQty || baseQty <= 0) return 0;
-  const hM = hMm / 1000;
-  const wM = wMm / 1000;
-  const perimM = hM > 0 && wM > 0 ? 2 * (hM + wM) : 0;
-  const areaSqm = hM * wM;
-
-  if (mode === 'fixed') return baseQty;
-  if (mode === 'width' || mode === 'width_top') return toSht(baseQty * wM, mat);
-  if (mode === 'height') return toSht(baseQty * hM * 2, mat);
-  if (mode === 'per_sqm') return Math.ceil(baseQty * areaSqm);
-  if (mode === 'step') {
-    const dir = direction || 'vertical';
-    let strips: number, stripLen: number;
-    if (dir === 'vertical') { strips = Math.floor(wMm / baseQty) + 1; stripLen = hMm; }
-    else { strips = Math.floor(hMm / baseQty) + 1; stripLen = wMm; }
-    return toSht(strips * stripLen / 1000, mat);
-  }
-  if (mode === 'step_whole') {
-    // Нестыкуемые рейки: целое число реек на каждую полосу отдельно.
-    const dir = direction || 'vertical';
-    let strips: number, stripLen: number;
-    if (dir === 'vertical') { strips = Math.floor(wMm / baseQty) + 1; stripLen = hMm; }
-    else { strips = Math.floor(hMm / baseQty) + 1; stripLen = wMm; }
-    const md = parseDims(mat?.description);
-    const matLenM = md.d > 0 ? md.d / 1000 : 0;
-    if (matLenM <= 0) return strips; // нет длины материала — возвращаем хотя бы число полос
-    const perStrip = Math.ceil((stripLen / 1000) / matLenM);
-    return strips * perStrip;
-  }
-  // ⟂-режимы: каркас под отделку — направление инвертировано
-  if (mode === 'step_cross') {
-    const inverted = (direction || 'vertical') === 'vertical' ? 'horizontal' : 'vertical';
-    return calcByModeNum(baseQty, 'step', mat, hMm, wMm, inverted);
-  }
-  if (mode === 'step_whole_cross') {
-    const inverted = (direction || 'vertical') === 'vertical' ? 'horizontal' : 'vertical';
-    return calcByModeNum(baseQty, 'step_whole', mat, hMm, wMm, inverted);
-  }
-  if (mode === 'area_sheet') {
-    const md = parseDims(mat?.description);
-    const ma = md.d * md.s / 1e6;
-    if (ma > 0 && areaSqm > 0) return Math.ceil(areaSqm / ma * 1.1 * baseQty);
-    return baseQty;
-  }
-  // perim (default)
-  return toSht(baseQty * perimM, mat);
+  return calcByMode(baseQty, mode, mat, hMm, wMm, direction || 'vertical', crossDirection).qty;
 }
 
 // ════════════════════════════════════════════════════════
@@ -320,26 +277,9 @@ export function doCalc(
               else if (mode === 'height' && effHM > 0) autoQty = toSht(base * effHM * 2, mat);
               else if (mode === 'per_sqm' && effArea > 0) autoQty = Math.ceil(base * effArea);
               else if (mode === 'step' && effH > 0 && effW > 0) {
-                let strips: number, stripLen: number;
-                if (direction === 'vertical') { strips = Math.floor(effW / base) + 1; stripLen = effH; }
-                else { strips = Math.floor(effH / base) + 1; stripLen = effW; }
-                autoQty = toSht(strips * stripLen / 1000, mat);
-              } else if (mode === 'step_whole' && effH > 0 && effW > 0) {
-                // Нестыкуемые рейки: целая рейка на каждую полосу
-                let strips: number, stripLen: number;
-                if (direction === 'vertical') { strips = Math.floor(effW / base) + 1; stripLen = effH; }
-                else { strips = Math.floor(effH / base) + 1; stripLen = effW; }
-                const md = parseDims(mat.description);
-                const matLenM = md.d > 0 ? md.d / 1000 : 0;
-                if (matLenM > 0) {
-                  const perStrip = Math.ceil((stripLen / 1000) / matLenM);
-                  autoQty = strips * perStrip;
-                } else {
-                  autoQty = strips;
-                }
-              } else if ((mode === 'step_cross' || mode === 'step_whole_cross') && effH > 0 && effW > 0) {
-                // ⟂-режимы: переиспользуем calcByModeNum, он сам инвертирует direction
-                autoQty = calcByModeNum(base, mode, mat, effH, effW, direction);
+                // Шаг расстановки. cross_direction (если true) инвертирует направление
+                // относительно отделки — это каркас под чистовую отделку.
+                autoQty = calcByModeNum(base, 'step', mat, effH, effW, direction, om.cross_direction);
               } else if (mode === 'area_sheet' && effArea > 0) {
                 const md = parseDims(mat.description);
                 const matA = md.d * md.s / 1e6;

@@ -21,7 +21,7 @@ export function HiddenMats({ mats, tabId, catId, hMm, wMm, direction }: {
       <div className="mt-1 space-y-0.5">
         {mats.map((om) => {
           const mode = om.calc_mode || 'fixed';
-          const res = calcByMode(om.quantity || 0, mode, om.materials, hMm, wMm, direction);
+          const res = calcByMode(om.quantity || 0, mode, om.materials, hMm, wMm, direction, om.cross_direction);
           const userQ = getQty(tabId, catId, om.material_id);
           const qty = userQ !== undefined ? userQ : res.qty;
 

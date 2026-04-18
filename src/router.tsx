@@ -13,6 +13,8 @@ import { WarehousePage } from '@modules/warehouse/pages/WarehousePage';
 import { MaterialsPage } from '@modules/materials/pages/MaterialsPage';
 import { CabinetPage } from '@modules/cabinet/pages/CabinetPage';
 import { BillingPage } from '@modules/billing/pages/BillingPage';
+import InstallmentsPage from '@modules/installments/InstallmentsPage';
+import InstallmentDetailPage from '@modules/installments/InstallmentDetailPage';
 
 export const router = createBrowserRouter([
   {
@@ -37,6 +39,8 @@ export const router = createBrowserRouter([
       { path: 'warehouse', element: <WarehousePage /> },
       { path: 'materials', element: <MaterialsPage /> },
       { path: 'cabinet', element: <CabinetPage /> },
+      { path: 'installments', element: <InstallmentsPage /> },
+      { path: 'installments/:id', element: <InstallmentDetailPage /> },
       { path: 'billing', element: <BillingPage /> },
       { path: 'settings', element: <SettingsPage /> },
     ],

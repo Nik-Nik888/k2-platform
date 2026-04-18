@@ -48,13 +48,14 @@ function ModalAddSimple({ title, placeholder, onSave, onClose }: {
 function ModalAddBinding({ title, materials, onSave, onClose }: {
   title: string;
   materials: Material[];
-  onSave: (matId: string, qty: number, visible: boolean, calcMode: string) => void;
+  onSave: (matId: string, qty: number, visible: boolean, calcMode: string, crossDirection: boolean) => void;
   onClose: () => void;
 }) {
   const [matId, setMatId] = useState('');
   const [qty, setQty] = useState(1);
   const [visible, setVisible] = useState(false);
   const [calcMode, setCalcMode] = useState('fixed');
+  const [crossDirection, setCrossDirection] = useState(false);
   const [search, setSearch] = useState('');
 
   // Фильтрация по названию, артикулу и единице — шире чем было в старом коде,
@@ -99,13 +100,23 @@ function ModalAddBinding({ title, materials, onSave, onClose }: {
             </select>
           </div>
         </div>
+        {calcMode === 'step' && (
+          <label className="flex items-start gap-2 cursor-pointer select-none bg-brand-50 border border-brand-100 rounded-lg p-2.5">
+            <input type="checkbox" checked={crossDirection} onChange={(e) => setCrossDirection(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 mt-0.5 flex-shrink-0" />
+            <span className="text-xs text-brand-700">
+              <b>⟂ Для закрепления чистовой отделки</b><br />
+              <span className="text-[11px] text-brand-600">Каркас автоматически считается поперёк отделки</span>
+            </span>
+          </label>
+        )}
         <label className="flex items-center gap-2 cursor-pointer select-none">
           <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)}
             className="w-4 h-4 rounded border-gray-300" />
           <span className="text-sm">Видимый (открытый) материал</span>
         </label>
         <div className="flex gap-2 mt-2">
-          <button onClick={() => { if (matId) onSave(matId, qty, visible, calcMode); }}
+          <button onClick={() => { if (matId) onSave(matId, qty, visible, calcMode, crossDirection); }}
             disabled={!matId}
             className="btn-primary flex-1 disabled:opacity-50">Привязать</button>
           <button onClick={onClose} className="btn-secondary flex-1">Отмена</button>
@@ -117,12 +128,13 @@ function ModalAddBinding({ title, materials, onSave, onClose }: {
 
 function ModalEditBinding({ binding, onSave, onClose }: {
   binding: OptionMaterial;
-  onSave: (id: number, qty: number, visible: boolean, calcMode: string) => void;
+  onSave: (id: number, qty: number, visible: boolean, calcMode: string, crossDirection: boolean) => void;
   onClose: () => void;
 }) {
   const [qty, setQty] = useState(binding.quantity);
   const [visible, setVisible] = useState(binding.visible);
   const [calcMode, setCalcMode] = useState(binding.calc_mode || 'fixed');
+  const [crossDirection, setCrossDirection] = useState(binding.cross_direction || false);
 
   return (
     <Modal title={`Редактировать: ${binding.materials?.name || '?'}`} onClose={onClose}>
@@ -141,13 +153,23 @@ function ModalEditBinding({ binding, onSave, onClose }: {
             </select>
           </div>
         </div>
+        {calcMode === 'step' && (
+          <label className="flex items-start gap-2 cursor-pointer select-none bg-brand-50 border border-brand-100 rounded-lg p-2.5">
+            <input type="checkbox" checked={crossDirection} onChange={(e) => setCrossDirection(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 mt-0.5 flex-shrink-0" />
+            <span className="text-xs text-brand-700">
+              <b>⟂ Для закрепления чистовой отделки</b><br />
+              <span className="text-[11px] text-brand-600">Каркас автоматически считается поперёк отделки</span>
+            </span>
+          </label>
+        )}
         <label className="flex items-center gap-2 cursor-pointer select-none">
           <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)}
             className="w-4 h-4 rounded border-gray-300" />
           <span className="text-sm">Видимый (открытый) материал</span>
         </label>
         <div className="flex gap-2 mt-2">
-          <button onClick={() => onSave(binding.id, qty, visible, calcMode)}
+          <button onClick={() => onSave(binding.id, qty, visible, calcMode, crossDirection)}
             className="btn-primary flex-1">Сохранить</button>
           <button onClick={onClose} className="btn-secondary flex-1">Отмена</button>
         </div>
@@ -166,6 +188,7 @@ interface TemplateItem {
   quantity: number;
   visible: boolean;
   calc_mode: string;
+  cross_direction?: boolean;
 }
 
 // ── Модалка сохранения шаблона ──
@@ -327,20 +350,25 @@ export function TreeRef({ db, refresh, notify }: {
     refresh();
   };
 
-  const addBinding = async (optionId: number, matId: string, qty: number, visible: boolean, calcMode: string) => {
+  const addBinding = async (
+    optionId: number, matId: string, qty: number, visible: boolean, calcMode: string, crossDirection: boolean
+  ) => {
     const orgId = useAuthStore.getState().organization?.id;
     if (!orgId) { notify('Ошибка: организация не загружена'); return; }
     const { error } = await supabase.from('option_materials').insert({
-      option_id: optionId, material_id: matId, quantity: qty, visible, calc_mode: calcMode, org_id: orgId,
+      option_id: optionId, material_id: matId, quantity: qty, visible,
+      calc_mode: calcMode, cross_direction: crossDirection, org_id: orgId,
     });
     if (error) { notify('Ошибка: ' + error.message); return; }
     notify('Материал привязан');
     refresh();
   };
 
-  const updateBinding = async (id: number, qty: number, visible: boolean, calcMode: string) => {
+  const updateBinding = async (
+    id: number, qty: number, visible: boolean, calcMode: string, crossDirection: boolean
+  ) => {
     const { error } = await supabase.from('option_materials').update({
-      quantity: qty, visible, calc_mode: calcMode,
+      quantity: qty, visible, calc_mode: calcMode, cross_direction: crossDirection,
     }).eq('id', id);
     if (error) { notify('Ошибка: ' + error.message); return; }
     notify('Привязка обновлена');
@@ -370,6 +398,7 @@ export function TreeRef({ db, refresh, notify }: {
       quantity: om.quantity,
       visible: false,
       calc_mode: om.calc_mode || 'fixed',
+      cross_direction: om.cross_direction || false,
     }));
     const { error } = await supabase.from('hidden_templates').insert({
       org_id: orgId, name, items,
@@ -394,6 +423,7 @@ export function TreeRef({ db, refresh, notify }: {
       quantity: it.quantity,
       visible: it.visible,
       calc_mode: it.calc_mode,
+      cross_direction: it.cross_direction || false,
       org_id: orgId,
     }));
     const { error } = await supabase.from('option_materials').insert(rows);
@@ -557,14 +587,14 @@ export function TreeRef({ db, refresh, notify }: {
         <ModalAddBinding
           title={`Привязка к «${modal.optionName}»`}
           materials={db.materials}
-          onSave={(matId, qty, vis, cm) => { addBinding(modal.optionId as number, matId, qty, vis, cm); setModal(null); }}
+          onSave={(matId, qty, vis, cm, cd) => { addBinding(modal.optionId as number, matId, qty, vis, cm, cd); setModal(null); }}
           onClose={() => setModal(null)}
         />
       )}
       {modal?.type === 'editBinding' && (
         <ModalEditBinding
           binding={modal.binding as OptionMaterial}
-          onSave={(id, qty, vis, cm) => { updateBinding(id, qty, vis, cm); setModal(null); }}
+          onSave={(id, qty, vis, cm, cd) => { updateBinding(id, qty, vis, cm, cd); setModal(null); }}
           onClose={() => setModal(null)}
         />
       )}

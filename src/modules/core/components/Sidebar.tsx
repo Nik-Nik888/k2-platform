@@ -9,6 +9,7 @@ import {
   FileText,
   Warehouse,
   CreditCard,
+  Wallet,
   Settings,
   ChevronLeft,
   X,
@@ -27,6 +28,7 @@ const NAV_ITEMS = [
   { label: 'Материалы', path: '/materials', icon: Database },
   { label: 'Склад', path: '/warehouse', icon: Warehouse },
   { label: 'Шкафы', path: '/cabinet', icon: Columns3 },
+  { label: 'Рассрочка', path: '/installments', icon: Wallet },
   { label: 'Биллинг', path: '/billing', icon: CreditCard },
 ];
 

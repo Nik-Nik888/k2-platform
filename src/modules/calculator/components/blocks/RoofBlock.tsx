@@ -55,9 +55,9 @@ export function RoofBlock({ tabId, cat, visibleMats, hiddenMats }: {
               if (isRemoved(tabId, cat.id, om.id)) return null;
               const base = om.quantity || 0;
               const mode = om.calc_mode || 'fixed';
-              // Универсальный расчёт через calcByMode — поддерживает все режимы
-              // включая step_whole, step_cross, step_whole_cross
-              const r = calcByMode(base, mode, om.materials, rd.height, rd.length, 'horizontal');
+              // Универсальный расчёт через calcByMode.
+              // cross_direction для крыши тоже поддерживается (каркас поперёк кровли).
+              const r = calcByMode(base, mode, om.materials, rd.height, rd.length, 'horizontal', om.cross_direction);
               const uq = getQty(tabId, cat.id, om.material_id);
               const q = uq !== undefined ? uq : r.qty;
 
