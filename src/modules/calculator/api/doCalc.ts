@@ -413,7 +413,8 @@ export function mergeResults(results: CalcResults): ResultItem[] {
 // ── Генерация PDF (открывает в новом окне для печати) ───
 export function exportPDF(
   results: CalcResults,
-  orderInfo: { order_number: string; address: string; phone: string }
+  orderInfo: { order_number: string; address: string; phone: string },
+  view: 'sections' | 'merged' = 'merged'
 ): void {
   const merged = mergeResults(results);
   const total = merged.reduce((s, r) => s + (r.cost || 0), 0);
@@ -442,30 +443,33 @@ export function exportPDF(
     <span><b>Дата:</b> ${date}</span>
   </div>`;
 
-  // Детальная ведомость по секциям
-  html += '<h2 style="font-size:15px;margin-top:20px">Детальная ведомость</h2>';
-  Object.entries(results).forEach(([tabId, tabItems]) => {
-    if (!tabItems || tabItems.length === 0) return;
-    const tabInfo = TABS.find((t) => t.id === tabId);
-    html += `<div class="section"><h3>${tabInfo?.icon || ''} ${tabInfo?.label || tabId}</h3><table>
-      <tr><th>Материал</th><th class="r">Кол-во</th><th>Ед.</th><th class="r">Цена</th><th class="r">Сумма</th></tr>`;
-    tabItems.forEach((it) => {
-      if (it.isInfo) {
-        html += `<tr style="background:#e8f0fe;font-weight:bold"><td colspan="2">📌 ${it.name}</td><td class="r">${it.qty}</td><td>${it.unit}</td><td class="r">—</td></tr>`;
-      } else {
-        html += `<tr><td>${it.auto ? '🔒 ' : ''}${it.name}</td><td class="r">${Math.round(it.qty * 100) / 100}</td><td>${it.unit}</td><td class="r">${it.price ? it.price + '₽' : '—'}</td><td class="r">${it.cost ? it.cost.toLocaleString('ru') + '₽' : '—'}</td></tr>`;
-      }
+  if (view === 'sections') {
+    // Детальная ведомость по секциям
+    html += '<h2 style="font-size:15px;margin-top:20px">Детальная ведомость</h2>';
+    Object.entries(results).forEach(([tabId, tabItems]) => {
+      if (!tabItems || tabItems.length === 0) return;
+      const tabInfo = TABS.find((t) => t.id === tabId);
+      html += `<div class="section"><h3>${tabInfo?.icon || ''} ${tabInfo?.label || tabId}</h3><table>
+        <tr><th>Материал</th><th class="r">Кол-во</th><th>Ед.</th><th class="r">Цена</th><th class="r">Сумма</th></tr>`;
+      tabItems.forEach((it) => {
+        if (it.isInfo) {
+          html += `<tr style="background:#e8f0fe;font-weight:bold"><td colspan="2">📌 ${it.name}</td><td class="r">${it.qty}</td><td>${it.unit}</td><td class="r">—</td></tr>`;
+        } else {
+          html += `<tr><td>${it.auto ? '🔒 ' : ''}${it.name}</td><td class="r">${Math.round(it.qty * 100) / 100}</td><td>${it.unit}</td><td class="r">${it.price ? it.price + '₽' : '—'}</td><td class="r">${it.cost ? it.cost.toLocaleString('ru') + '₽' : '—'}</td></tr>`;
+        }
+      });
+      html += '</table></div>';
     });
-    html += '</table></div>';
-  });
+  } else {
+    // Сводная ведомость
+    html += '<h2 style="font-size:15px;margin-top:20px">Сводная ведомость</h2><table><tr><th>№</th><th>Материал</th><th class="r">Кол-во</th><th>Ед.</th><th class="r">Цена</th><th class="r">Сумма</th></tr>';
+    merged.forEach((it, i) => {
+      if (it.isInfo) return;
+      html += `<tr><td>${i + 1}</td><td>${it.name}</td><td class="r">${Math.round(it.qty * 100) / 100}</td><td>${it.unit}</td><td class="r">${it.price ? it.price + '₽' : '—'}</td><td class="r">${it.cost ? Math.round(it.cost).toLocaleString('ru') + '₽' : '—'}</td></tr>`;
+    });
+    html += '</table>';
+  }
 
-  // Сводная
-  html += '<h2 style="font-size:15px;margin-top:30px">Сводная ведомость</h2><table><tr><th>№</th><th>Материал</th><th class="r">Кол-во</th><th>Ед.</th><th class="r">Цена</th><th class="r">Сумма</th></tr>';
-  merged.forEach((it, i) => {
-    if (it.isInfo) return;
-    html += `<tr><td>${i + 1}</td><td>${it.name}</td><td class="r">${Math.round(it.qty * 100) / 100}</td><td>${it.unit}</td><td class="r">${it.price ? it.price + '₽' : '—'}</td><td class="r">${it.cost ? Math.round(it.cost).toLocaleString('ru') + '₽' : '—'}</td></tr>`;
-  });
-  html += '</table>';
   html += `<div class="total">ИТОГО: ${total.toLocaleString('ru')} ₽</div>`;
   html += `<br><button onclick="window.print()" style="padding:10px 24px;font-size:14px;cursor:pointer">🖨 Печать</button>`;
   html += `<div style="margin-top:30px;font-size:10px;color:#999;text-align:center">К2 Балкон — ${date}</div></body></html>`;

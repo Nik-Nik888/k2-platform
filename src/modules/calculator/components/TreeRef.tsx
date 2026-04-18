@@ -5,6 +5,7 @@ import { TABS, CALC_MODE_LABELS, parseDims } from '@modules/calculator/api/calcA
 import type { CalcDB, Material, Category, CategoryOption, OptionMaterial } from '@modules/calculator/api/calcApi';
 import { ChevronRight, Plus, Trash2, Pencil, X, Save, Package } from 'lucide-react';
 import { NumberInput } from './primitives';
+import { MaterialPicker } from './MaterialPicker';
 
 // ════════════════════════════════════════════════════════
 // Модальные окна
@@ -51,32 +52,17 @@ function ModalAddBinding({ title, materials, onSave, onClose }: {
   onSave: (matId: string, qty: number, visible: boolean, calcMode: string) => void;
   onClose: () => void;
 }) {
-  const [matId, setMatId] = useState('');
+  const [matId, setMatId] = useState<string | null>(null);
   const [qty, setQty] = useState(1);
   const [visible, setVisible] = useState(false);
   const [calcMode, setCalcMode] = useState('fixed');
-  const [search, setSearch] = useState('');
-
-  const filtered = materials.filter((m) =>
-    m.name.toLowerCase().includes(search.toLowerCase())
-  );
 
   return (
     <Modal title={title} onClose={onClose}>
       <div className="space-y-3">
         <div>
-          <label className="text-xs text-gray-500 font-semibold uppercase mb-1 block">Поиск материала</label>
-          <input className="input text-sm" placeholder="Название..." value={search}
-            onChange={(e) => setSearch(e.target.value)} autoFocus />
-        </div>
-        <div>
           <label className="text-xs text-gray-500 font-semibold uppercase mb-1 block">Материал</label>
-          <select className="input text-sm" value={matId} onChange={(e) => setMatId(e.target.value)}>
-            <option value="">— Выберите —</option>
-            {filtered.map((m) => (
-              <option key={m.id} value={m.id}>{m.name} ({m.unit}{m.price > 0 ? ` · ${m.price}₽` : ''})</option>
-            ))}
-          </select>
+          <MaterialPicker materials={materials} value={matId} onChange={setMatId} />
         </div>
         <div className="flex gap-3">
           <div className="flex-1">
