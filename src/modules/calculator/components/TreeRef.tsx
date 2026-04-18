@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { supabase } from '@lib/supabase';
+import { useAuthStore } from '@store/authStore';
 import { TABS, CALC_MODE_LABELS, parseDims } from '@modules/calculator/api/calcApi';
 import type { CalcDB, Material, Category, CategoryOption, OptionMaterial } from '@modules/calculator/api/calcApi';
 import { ChevronRight, Plus, Trash2, Pencil, X, Save, Package } from 'lucide-react';
@@ -185,8 +186,12 @@ export function TreeRef({ db, refresh, notify }: {
 
   // ── CRUD ──
   const addCategory = async (tabId: string, name: string) => {
+    const orgId = useAuthStore.getState().organization?.id;
+    if (!orgId) { notify('Ошибка: организация не загружена'); return; }
     const maxSort = (tabCats[tabId] || []).reduce((m, c) => Math.max(m, c.sort_order), 0);
-    const { error } = await supabase.from('categories').insert({ tab_id: tabId, name, sort_order: maxSort + 1 });
+    const { error } = await supabase.from('categories').insert({
+      tab_id: tabId, name, sort_order: maxSort + 1, org_id: orgId,
+    });
     if (error) { notify('Ошибка: ' + error.message); return; }
     notify('Категория добавлена');
     refresh();
@@ -201,8 +206,12 @@ export function TreeRef({ db, refresh, notify }: {
   };
 
   const addOption = async (catId: number, name: string) => {
+    const orgId = useAuthStore.getState().organization?.id;
+    if (!orgId) { notify('Ошибка: организация не загружена'); return; }
     const maxSort = (catOpts[catId] || []).reduce((m, o) => Math.max(m, o.sort_order), 0);
-    const { error } = await supabase.from('category_options').insert({ category_id: catId, name, sort_order: maxSort + 1 });
+    const { error } = await supabase.from('category_options').insert({
+      category_id: catId, name, sort_order: maxSort + 1, org_id: orgId,
+    });
     if (error) { notify('Ошибка: ' + error.message); return; }
     notify('Вариант добавлен');
     refresh();
@@ -217,8 +226,10 @@ export function TreeRef({ db, refresh, notify }: {
   };
 
   const addBinding = async (optionId: number, matId: string, qty: number, visible: boolean, calcMode: string) => {
+    const orgId = useAuthStore.getState().organization?.id;
+    if (!orgId) { notify('Ошибка: организация не загружена'); return; }
     const { error } = await supabase.from('option_materials').insert({
-      option_id: optionId, material_id: matId, quantity: qty, visible, calc_mode: calcMode,
+      option_id: optionId, material_id: matId, quantity: qty, visible, calc_mode: calcMode, org_id: orgId,
     });
     if (error) { notify('Ошибка: ' + error.message); return; }
     notify('Материал привязан');

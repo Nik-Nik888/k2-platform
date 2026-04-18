@@ -4,3 +4,6 @@ dist/
 .env.local
 *.log
 .DS_Store
+
+# Одноразовые скрипты миграции — не коммитим в репо
+scripts/

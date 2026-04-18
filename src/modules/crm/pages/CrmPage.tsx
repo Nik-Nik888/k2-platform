@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useCrmStore } from '@store/crmStore';
 import type { OrderStatus, Order, Client, LeadSource, BalconyType } from '@shared/types';
 import {
@@ -208,6 +209,7 @@ function OrderDetail({
   const currentStageIdx = STAGES.findIndex((s) => s.status === order.status);
   const currentStage = STAGES[currentStageIdx];
   const nextStage = STAGES[currentStageIdx + 1];
+  const navigate = useNavigate();
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -311,7 +313,7 @@ function OrderDetail({
                 Перевести в «{nextStage.label}» <ChevronRight className="w-4 h-4" />
               </button>
             )}
-            <button onClick={() => { onClose(); window.location.href = '/calculator/' + order.id; }}
+            <button onClick={() => { onClose(); navigate('/calculator/' + order.id); }}
               className="btn-secondary w-full">Открыть в калькуляторе</button>
           </div>
         </div>

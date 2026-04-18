@@ -6,18 +6,11 @@ import { Loader2, Mountain } from 'lucide-react';
 
 export default function App() {
   const initialize = useAuthStore((s) => s.initialize);
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    console.log('🚀 App: запускаю initialize...');
-    initialize().then(() => {
-      console.log('✅ App: initialize завершён, isAuthenticated =', useAuthStore.getState().isAuthenticated);
-      setReady(true);
-    });
+    initialize().then(() => setReady(true));
   }, []);
-
-  console.log('🔄 App render: ready =', ready, 'isAuthenticated =', isAuthenticated);
 
   if (!ready) {
     return (
