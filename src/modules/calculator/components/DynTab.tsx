@@ -28,7 +28,11 @@ export function DynTab({ tabId }: { tabId: string }) {
   const isGlazing = tabId === 'glazing';
   const isFurniture = tabId === 'furniture';
   const isFloor = tabId === 'floor';
+  const isCeiling = tabId === 'ceiling';
   const isMainWall = tabId === 'main_wall';
+  // Полы и потолок — это горизонтальные плоскости, у них нет "высоты",
+  // только длина × ширина. Подстановка размеров берётся с фасадной стены.
+  const isHorizontal = isFloor || isCeiling;
 
   const dims = getDims(tabId);
   const dir = getDir(tabId);
@@ -69,7 +73,7 @@ export function DynTab({ tabId }: { tabId: string }) {
       {isSurface && (
         <div className="card p-4">
           <div className="flex gap-3 flex-wrap items-end mb-3">
-            <NI label={isFloor ? 'Длина (мм)' : 'Высота (мм)'} value={hMm} onChange={(v) => setDim(tabId, 'height', v)} />
+            <NI label={isHorizontal ? 'Длина (мм)' : 'Высота (мм)'} value={hMm} onChange={(v) => setDim(tabId, 'height', v)} />
             <NI label="Ширина (мм)" value={wMm} onChange={(v) => setDim(tabId, 'length', v)} />
             {rawArea > 0 && (
               <div className="bg-brand-50 text-brand-700 font-mono text-sm font-bold px-3 py-2 rounded-lg mb-1">
@@ -79,13 +83,13 @@ export function DynTab({ tabId }: { tabId: string }) {
           </div>
 
           {/* Подсказки размеров */}
-          {!isFloor && !isMainWall && !hMm && mainH > 0 && (
+          {!isHorizontal && !isMainWall && !hMm && mainH > 0 && (
             <button onClick={() => setDim(tabId, 'height', mainH)}
               className="text-[11px] text-brand-600 bg-brand-50 border border-brand-200 px-2.5 py-1.5 rounded-lg hover:bg-brand-100 transition-colors mb-2 inline-block">
               💡 Высота как на главной: {mainH} мм
             </button>
           )}
-          {isFloor && !hMm && (facadeW > 0 || mainW > 0) && (
+          {isHorizontal && !hMm && (facadeW > 0 || mainW > 0) && (
             <button onClick={() => { setDim(tabId, 'height', facadeW || mainW); setDim(tabId, 'length', blW || 1000); }}
               className="text-[11px] text-brand-600 bg-brand-50 border border-brand-200 px-2.5 py-1.5 rounded-lg hover:bg-brand-100 transition-colors mb-2 inline-block">
               💡 Подставить: {facadeW || mainW} × {blW || 1000} мм
