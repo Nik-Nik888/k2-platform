@@ -929,8 +929,8 @@ export default function WardrobeEditor() {
     } else return;
 
     setElements(prev => adjust([...prev, el]));
-    setSelId(id);
-    setPlaceMode(null);
+    // Не выделяем и не сбрасываем placeMode — пользователь может ставить ещё элементы того же типа подряд.
+    // Чтобы выйти из режима — в header есть кнопка ✕ или тап по кнопке инструмента ещё раз.
   }, [placeMode, elements, adjust, iW, iH, t, findDoorBounds]);
 
   const delSel = useCallback(() => { if (!selId) return; setElements(prev => adjust(prev.filter(e => e.id !== selId))); setSelId(null); }, [selId, adjust]);
@@ -1274,8 +1274,29 @@ export default function WardrobeEditor() {
   const changeHorizDim = useCallback((d, v, dir) => {
     const studs = elements.filter(e => e.type === "stud").sort((a, b) => a.x - b.x);
     if (topLevelCols.length <= 1) { setCorpus(c => ({ ...c, width: Math.max(300, Math.min(3000, v + 2 * t)) })); return; }
-    if (dir === "left" && d.si < studs.length) { const st = studs[d.si]; const nx = topLevelCols[d.si].sl + v; if (nx >= MIN_S && nx <= iW - MIN_S) updateEl(st.id, { x: nx }); }
-    else if (dir === "right" && d.si > 0) { const st = studs[d.si - 1]; const nx = topLevelCols[d.si].sl + topLevelCols[d.si].sw - v; if (nx >= MIN_S && nx <= iW - MIN_S) updateEl(st.id, { x: nx }); }
+    // Попытка двигать согласно dir. Если на выбранной стороне нет стойки — fallback на другую.
+    const tryRight = () => {
+      if (d.si >= studs.length) return false; // справа стена
+      const st = studs[d.si];
+      const nx = topLevelCols[d.si].sl + v;
+      if (nx >= MIN_S && nx <= iW - MIN_S) { updateEl(st.id, { x: nx }); return true; }
+      return false;
+    };
+    const tryLeft = () => {
+      if (d.si <= 0) return false; // слева стена
+      const st = studs[d.si - 1];
+      const nx = topLevelCols[d.si].sl + topLevelCols[d.si].sw - v;
+      if (nx >= MIN_S && nx <= iW - MIN_S) { updateEl(st.id, { x: nx }); return true; }
+      return false;
+    };
+    let moved = false;
+    if (dir === "left") { moved = tryRight() || tryLeft(); }
+    else { moved = tryLeft() || tryRight(); }
+    // Если обе стороны ячейки — стены корпуса (первая и последняя в одно время, т.е. в шкафу нет стоек)
+    // — расширяем сам корпус. Это краевой случай (topLevelCols.length === 1 уже обработан выше).
+    if (!moved && d.si === 0 && d.si === studs.length) {
+      setCorpus(c => ({ ...c, width: Math.max(300, Math.min(3000, v + 2 * t)) }));
+    }
   }, [topLevelCols, elements, t, iW, updateEl]);
 
   const changeVertDim = useCallback((d, v, dir) => {
@@ -1625,8 +1646,8 @@ export default function WardrobeEditor() {
       {/* RIGHT */}
       <rect x={dsx + ddw - HIT / 2} y={dsy + ddh / 2 - HIT} width={HIT} height={HIT * 2} fill="transparent" style={{ cursor: "ew-resize" }}
         onMouseDown={e => onDoorEdgeDrag(e, selDoor, "right")} onTouchStart={e => onDoorEdgeDrag(e, selDoor, "right")} />
-      {/* Width input — below door, in overlay so it's above DIMS */}
-      <SvgInput x={dsx + ddw / 2} y={dsy + ddh + 16} width={50} value={Math.round(selDoor.doorW || selDoor.w)} color="#d97706" fontSize={9}
+      {/* Width input — ВНУТРИ двери, у нижнего края по центру */}
+      <SvgInput x={dsx + ddw / 2} y={dsy + ddh - 12} width={50} value={Math.round(selDoor.doorW || selDoor.w)} color="#d97706" fontSize={10}
         onChange={v => {
           const oldX = selDoor.x || 0;
           const oldW = Math.round(selDoor.doorW || selDoor.w);
@@ -1638,8 +1659,8 @@ export default function WardrobeEditor() {
           }
           updateEl(selDoor.id, { w: v, doorW: v, x: newX, manualW: v });
         }} />
-      {/* Height input — left of door, in overlay so it's above DIMS */}
-      <SvgInput x={dsx - 10} y={dsy + ddh / 2 + 3} width={40} value={Math.round(selDoor.doorH || selDoor.h)} color="#5a8fd4" fontSize={8}
+      {/* Height input — ВНУТРИ двери, у левого края по центру */}
+      <SvgInput x={dsx + 18} y={dsy + ddh / 2 + 3} width={36} value={Math.round(selDoor.doorH || selDoor.h)} color="#5a8fd4" fontSize={10}
         onChange={v => {
           const oldY = selDoor.y || 0;
           const oldH = Math.round(selDoor.doorH || selDoor.h);
@@ -1871,6 +1892,28 @@ export default function WardrobeEditor() {
             </div>
           </div>
           <div style={{ fontSize: 11, color: "#666", marginTop: 6 }}>Высота: {Math.round((selEl.pBot || iH) - (selEl.pTop || 0))}мм</div>
+          {/* Кнопка «По центру» — ставит стойку ровно между соседними стойками/стенками */}
+          <button
+            onClick={() => {
+              const others = elements.filter(e => e.type === "stud" && e.id !== selEl.id).sort((a, b) => a.x - b.x);
+              // Найти ближайших слева и справа (если нет — стенки корпуса)
+              let leftX = 0, rightX = iW - t;
+              for (const s of others) {
+                if (s.x + t <= selEl.x && s.x + t > leftX) leftX = s.x + t;
+                if (s.x >= selEl.x + t && s.x < rightX) rightX = s.x;
+              }
+              const cx = Math.round((leftX + rightX - t) / 2);
+              updateEl(selEl.id, { x: Math.max(0, Math.min(iW - t, cx)) });
+              try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
+            }}
+            style={{
+              marginTop: 10, width: "100%", padding: "12px 0", borderRadius: 8,
+              background: "rgba(96,165,250,0.12)", color: "#60a5fa",
+              fontSize: 13, fontWeight: 700,
+              border: "1px solid rgba(96,165,250,0.3)",
+              cursor: "pointer",
+            }}
+          >⟷ По центру между соседними</button>
         </div>
       )}
 
@@ -1891,6 +1934,33 @@ export default function WardrobeEditor() {
               <NumInput value={Math.round(selEl.w || iW)} onChange={v => updateEl(selEl.id, { w: v, manualW: v })} min={20} max={iW} color="#d97706" width="100%" />
             </div>
           </div>
+          {/* Кнопка «По центру» — ставит полку по Y между ближайшими полками/стенками */}
+          <button
+            onClick={() => {
+              // Учитываем только полки чья x-ширина перекрывается с этой
+              const myLeft = selEl.x || 0, myRight = myLeft + (selEl.w || iW);
+              const others = elements.filter(e => {
+                if (e.type !== "shelf" || e.id === selEl.id) return false;
+                const eL = e.x || 0, eR = eL + (e.w || iW);
+                return eR > myLeft + 5 && eL < myRight - 5; // перекрытие
+              }).sort((a, b) => a.y - b.y);
+              let topY = 0, botY = iH;
+              for (const sh of others) {
+                if (sh.y <= selEl.y && sh.y > topY) topY = sh.y;
+                if (sh.y >= selEl.y && sh.y < botY) botY = sh.y;
+              }
+              const cy = Math.round((topY + botY) / 2);
+              updateEl(selEl.id, { y: Math.max(0, Math.min(iH, cy)) });
+              try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
+            }}
+            style={{
+              marginTop: 10, width: "100%", padding: "12px 0", borderRadius: 8,
+              background: "rgba(217,119,6,0.12)", color: "#d97706",
+              fontSize: 13, fontWeight: 700,
+              border: "1px solid rgba(217,119,6,0.3)",
+              cursor: "pointer",
+            }}
+          >⟷ По центру между соседними</button>
         </div>
       )}
 
@@ -2035,8 +2105,8 @@ export default function WardrobeEditor() {
               <button onClick={() => setMobileDragMode(null)} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 12, fontWeight: 700, padding: 0, lineHeight: 1 }}>✕</button>
             </div>
           )}
-          {/* #3: Door placement indicator */}
-          {placeMode && <div style={{ padding: "4px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700, background: "rgba(34,197,94,0.15)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.3)" }}>{{ shelf: "━ Полка", stud: "┃ Стойка", drawers: "☰ Ящики", rod: "⎯ Штанга", door: "🚪 Дверь" }[placeMode]} → кликни внутрь проёма <button onClick={() => { setPlaceMode(null);  }} style={{ marginLeft: 6, background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✕</button></div>}
+          {/* Place mode indicator — показывает активный режим размещения */}
+          {placeMode && <div style={{ padding: "4px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700, background: "rgba(34,197,94,0.15)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.3)" }}>{{ shelf: "━ Полка", stud: "┃ Стойка", drawers: "☰ Ящики", rod: "⎯ Штанга", door: "🚪 Дверь" }[placeMode]} · {placeMode === "drawers" || placeMode === "door" ? "кликни в проём" : "можно ставить ещё"} <button onClick={() => { setPlaceMode(null);  }} style={{ marginLeft: 6, background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✕</button></div>}
           {/* #2: Eye icon for doors toggle */}
           <button onClick={() => setShowDoors(p => !p)} style={{ padding: "4px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: "pointer", border: "1px solid", background: showDoors ? "rgba(217,119,6,0.12)" : "rgba(100,100,100,0.12)", color: showDoors ? "#d97706" : "#888", borderColor: showDoors ? "rgba(217,119,6,0.3)" : "#444" }}>🚪 Двери {showDoors ? "👁" : "👁‍🗨"}</button>
           <button onClick={() => setShow3d(true)} style={{ padding: "4px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: "pointer", border: "1px solid rgba(96,165,250,0.3)", background: "rgba(96,165,250,0.12)", color: "#60a5fa" }}>🧊 3D</button>
