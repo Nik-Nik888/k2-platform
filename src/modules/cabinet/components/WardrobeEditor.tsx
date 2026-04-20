@@ -997,9 +997,6 @@ export default function WardrobeEditor() {
     };
 
     if (isTouch) {
-      // Предотвращаем эмулированный mouse event поверх touch
-      if (typeof e.preventDefault === 'function') e.preventDefault();
-
       setSelId(el.id);
       const now = Date.now();
       const isDoubleTap = lastTapElRef.current.id === el.id && (now - lastTapElRef.current.time) < 500;
@@ -1331,7 +1328,6 @@ export default function WardrobeEditor() {
       };
       // Отменяем drag если был активен
       setDrag(null);
-      e.preventDefault?.();
     }
   }, [userZoom]);
 
@@ -1343,7 +1339,6 @@ export default function WardrobeEditor() {
       const ratio = dist / pinchRef.current.startDist;
       const newZoom = Math.max(0.5, Math.min(3, pinchRef.current.startZoom * ratio));
       setUserZoom(newZoom);
-      e.preventDefault?.();
     }
   }, []);
 
