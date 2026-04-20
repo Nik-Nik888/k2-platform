@@ -929,8 +929,12 @@ export default function WardrobeEditor() {
     } else return;
 
     setElements(prev => adjust([...prev, el]));
-    // Не выделяем и не сбрасываем placeMode — пользователь может ставить ещё элементы того же типа подряд.
-    // Чтобы выйти из режима — в header есть кнопка ✕ или тап по кнопке инструмента ещё раз.
+    // Удерживаем placeMode только для shelf и stud — их обычно ставят по несколько подряд.
+    // Для rod / drawers / door сбрасываем — это одиночные элементы.
+    if (placeMode !== "shelf" && placeMode !== "stud") {
+      setPlaceMode(null);
+      setSelId(id);
+    }
   }, [placeMode, elements, adjust, iW, iH, t, findDoorBounds]);
 
   const delSel = useCallback(() => { if (!selId) return; setElements(prev => adjust(prev.filter(e => e.id !== selId))); setSelId(null); }, [selId, adjust]);
@@ -1120,6 +1124,59 @@ export default function WardrobeEditor() {
           if (best) {
             if (drag.edge === "left") { newBounds.left = best.pos; newBounds.leftIsWall = best.isWall; }
             else { newBounds.right = best.pos; newBounds.rightIsWall = best.isWall; }
+          }
+        }
+
+        // ══ CLAMP ПО СОСЕДНИМ ДВЕРЯМ ══
+        // Дверь не может пересечь границу соседней двери чей вертикальный диапазон пересекается.
+        // Это защита от случая когда snap выбирает дальнюю цель, а на пути есть соседняя дверь.
+        const otherDoors = prev.filter(e => e.type === "door" && e.id !== el.id && e.doorLeft !== undefined);
+        const myTop = newBounds.top, myBot = newBounds.bottom;
+        const overlapsVertically = (d: any) => {
+          const dT = d.doorTop ?? 0, dB = d.doorBottom ?? iH;
+          return dT < myBot - 1 && dB > myTop + 1;
+        };
+        if (drag.edge === "right") {
+          for (const d of otherDoors) {
+            if (!overlapsVertically(d)) continue;
+            if (d.doorLeft >= newBounds.left && newBounds.right > d.doorLeft) {
+              newBounds.right = d.doorLeft;
+              newBounds.rightIsWall = false;
+            }
+          }
+        } else if (drag.edge === "left") {
+          for (const d of otherDoors) {
+            if (!overlapsVertically(d)) continue;
+            if (d.doorRight <= newBounds.right && newBounds.left < d.doorRight) {
+              newBounds.left = d.doorRight;
+              newBounds.leftIsWall = false;
+            }
+          }
+        }
+        if (drag.edge === "bottom" || drag.edge === "top") {
+          const myLeft = newBounds.left, myRight = newBounds.right;
+          const overlapsHorizontally = (d: any) => {
+            const dL = d.doorLeft ?? 0, dR = d.doorRight ?? iW;
+            return dL < myRight - 1 && dR > myLeft + 1;
+          };
+          if (drag.edge === "bottom") {
+            for (const d of otherDoors) {
+              if (!overlapsHorizontally(d)) continue;
+              const dTop = d.doorTop ?? 0;
+              if (dTop >= newBounds.top && newBounds.bottom > dTop) {
+                newBounds.bottom = dTop;
+                newBounds.bottomIsWall = false;
+              }
+            }
+          } else {
+            for (const d of otherDoors) {
+              if (!overlapsHorizontally(d)) continue;
+              const dBot = d.doorBottom ?? iH;
+              if (dBot <= newBounds.bottom && newBounds.top < dBot) {
+                newBounds.top = dBot;
+                newBounds.topIsWall = false;
+              }
+            }
           }
         }
 
@@ -1605,14 +1662,12 @@ export default function WardrobeEditor() {
       <line x1={dx + 1} y1={dy} x2={dx + dw - 1} y2={dy} stroke="rgba(217,119,6,0.3)" strokeWidth={0.6} />
       <line x1={dx} y1={dy - 3} x2={dx} y2={dy + 3} stroke="rgba(217,119,6,0.3)" strokeWidth={0.4} />
       <line x1={dx + dw} y1={dy - 3} x2={dx + dw} y2={dy + 3} stroke="rgba(217,119,6,0.3)" strokeWidth={0.4} />
-      <text x={dx + dw / 2 + 24} y={dy + 4} textAnchor="middle" fontSize={6} fill="#d9770644" style={{ cursor: "pointer" }} onClick={e => { e.stopPropagation(); toggleDimDir(i); }}>{dir === "left" ? "→" : "←"}</text>
       <SvgInput x={dx + dw / 2} y={dy + 12} width={dw} value={Math.round(d.w)} color="#b87a20" fontSize={9} onChange={v => changeHorizDim(d, v, dir)} />
     </g>; }
     if (d.t === "h") { const dx = (d.x + frameT) * SC - 22, dy1 = (d.y + frameT) * SC, dy2 = (d.y + d.h + frameT) * SC, mid = (dy1 + dy2) / 2; return <g key={`h${i}`}>
       <line x1={dx} y1={dy1 + 1} x2={dx} y2={dy2 - 1} stroke="rgba(96,165,250,0.3)" strokeWidth={0.6} />
       <line x1={dx - 3} y1={dy1} x2={dx + 3} y2={dy1} stroke="rgba(96,165,250,0.3)" strokeWidth={0.4} />
       <line x1={dx - 3} y1={dy2} x2={dx + 3} y2={dy2} stroke="rgba(96,165,250,0.3)" strokeWidth={0.4} />
-      <text x={dx} y={mid + 16} textAnchor="middle" fontSize={6} fill="#60a5fa44" style={{ cursor: "pointer" }} onClick={e => { e.stopPropagation(); toggleDimDir(i); }}>{dir === "top" ? "↓" : "↑"}</text>
       <SvgInput x={dx - 3} y={mid + 3} width={40} value={Math.round(d.h)} color="#5a8fd4" fontSize={8} onChange={v => changeVertDim(d, v, dir)} />
     </g>; }
     return null;
@@ -1840,6 +1895,59 @@ export default function WardrobeEditor() {
 
       {selEl.type === "door" && (
         <>
+          {/* Размеры двери: Ширина общая, Высота отдельно ↑ и ↓ */}
+          {selEl.doorLeft !== undefined && (() => {
+            const doorW = Math.round(selEl.doorW || selEl.w);
+            const doorH = Math.round(selEl.doorH || selEl.h);
+            // Вверх/вниз — какая сторона двигается. Верх: doorTop двигается. Низ: doorBottom двигается.
+            // Пользователь вводит нужный итоговый размер по высоте, и выбирает куда расти.
+            return (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Размеры, мм</div>
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Ширина</div>
+                  <NumInput value={doorW} onChange={v => {
+                    const oldX = selEl.x || 0;
+                    const oldW = doorW;
+                    let newX = oldX;
+                    if (selEl.doorRightIsWall && !selEl.doorLeftIsWall) newX = oldX + oldW - v;
+                    else if (!selEl.doorLeftIsWall && !selEl.doorRightIsWall) newX = oldX - (v - oldW) / 2;
+                    updateEl(selEl.id, { w: v, doorW: v, x: newX, manualW: v });
+                  }} min={20} max={iW} color="#d97706" width="100%" />
+                </div>
+                <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Высота</div>
+                <div style={{ fontSize: 9, color: "#666", marginBottom: 6 }}>Текущая: {doorH}мм. Измени нужное поле — граница сдвинется:</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>↑ Расти вверх</div>
+                    <NumInput value={doorH} onChange={v => {
+                      // растём вверх: doorTop = doorBottom - v
+                      const newTop = Math.max(0, (selEl.doorBottom ?? iH) - v);
+                      updateEl(selEl.id, {
+                        doorTop: newTop,
+                        doorTopIsWall: newTop < 1,
+                        manualH: undefined, // пересчитается через adjust
+                      });
+                      try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
+                    }} min={50} max={iH} color="#5a8fd4" width="100%" />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Расти вниз ↓</div>
+                    <NumInput value={doorH} onChange={v => {
+                      // растём вниз: doorBottom = doorTop + v
+                      const newBot = Math.min(iH, (selEl.doorTop ?? 0) + v);
+                      updateEl(selEl.id, {
+                        doorBottom: newBot,
+                        doorBottomIsWall: newBot > iH - 1,
+                        manualH: undefined,
+                      });
+                      try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
+                    }} min={50} max={iH} color="#5a8fd4" width="100%" />
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Тип петли</div>
             {HINGES.map(ht => (
@@ -1872,13 +1980,34 @@ export default function WardrobeEditor() {
         </>
       )}
 
-      {selEl.type === "stud" && (
+      {selEl.type === "stud" && (() => {
+        // Найти соседние stud/стенки слева и справа
+        const others = elements.filter(e => e.type === "stud" && e.id !== selEl.id).sort((a, b) => a.x - b.x);
+        let leftNeighborRight = 0; // правый край соседа слева (или стенка x=0)
+        let rightNeighborLeft = iW; // левый край соседа справа (или стенка x=iW)
+        for (const s of others) {
+          if (s.x + t <= selEl.x && s.x + t > leftNeighborRight) leftNeighborRight = s.x + t;
+          if (s.x >= selEl.x + t && s.x < rightNeighborLeft) rightNeighborLeft = s.x;
+        }
+        const distLeft = Math.round(selEl.x - leftNeighborRight);
+        const distRight = Math.round(rightNeighborLeft - (selEl.x + t));
+        return (
         <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Позиция и высота, мм</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8, marginBottom: 6 }}>
+          <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Позиция относительно соседей, мм</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 6 }}>
             <div>
-              <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>X (от левой стенки)</div>
-              <NumInput value={Math.round(selEl.x)} onChange={v => updateEl(selEl.id, { x: Math.max(0, Math.min(iW - t, v)) })} min={0} max={iW} color="#60a5fa" width="100%" />
+              <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>← Слева</div>
+              <NumInput value={distLeft} onChange={v => {
+                const nx = Math.max(0, Math.min(iW - t, leftNeighborRight + v));
+                updateEl(selEl.id, { x: nx });
+              }} min={0} max={iW} color="#60a5fa" width="100%" />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Справа →</div>
+              <NumInput value={distRight} onChange={v => {
+                const nx = Math.max(0, Math.min(iW - t, rightNeighborLeft - v - t));
+                updateEl(selEl.id, { x: nx });
+              }} min={0} max={iW} color="#60a5fa" width="100%" />
             </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -1892,17 +2021,9 @@ export default function WardrobeEditor() {
             </div>
           </div>
           <div style={{ fontSize: 11, color: "#666", marginTop: 6 }}>Высота: {Math.round((selEl.pBot || iH) - (selEl.pTop || 0))}мм</div>
-          {/* Кнопка «По центру» — ставит стойку ровно между соседними стойками/стенками */}
           <button
             onClick={() => {
-              const others = elements.filter(e => e.type === "stud" && e.id !== selEl.id).sort((a, b) => a.x - b.x);
-              // Найти ближайших слева и справа (если нет — стенки корпуса)
-              let leftX = 0, rightX = iW - t;
-              for (const s of others) {
-                if (s.x + t <= selEl.x && s.x + t > leftX) leftX = s.x + t;
-                if (s.x >= selEl.x + t && s.x < rightX) rightX = s.x;
-              }
-              const cx = Math.round((leftX + rightX - t) / 2);
+              const cx = Math.round((leftNeighborRight + rightNeighborLeft - t) / 2);
               updateEl(selEl.id, { x: Math.max(0, Math.min(iW - t, cx)) });
               try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
             }}
@@ -1915,14 +2036,42 @@ export default function WardrobeEditor() {
             }}
           >⟷ По центру между соседними</button>
         </div>
-      )}
+        );
+      })()}
 
-      {selEl.type === "shelf" && (
+      {selEl.type === "shelf" && (() => {
+        // Найти соседние полки с перекрытием по X
+        const myLeft = selEl.x || 0, myRight = myLeft + (selEl.w || iW);
+        const others = elements.filter(e => {
+          if (e.type !== "shelf" || e.id === selEl.id) return false;
+          const eL = e.x || 0, eR = eL + (e.w || iW);
+          return eR > myLeft + 5 && eL < myRight - 5;
+        }).sort((a, b) => a.y - b.y);
+        let topNeighborY = 0, botNeighborY = iH;
+        for (const sh of others) {
+          if (sh.y <= selEl.y && sh.y > topNeighborY) topNeighborY = sh.y;
+          if (sh.y >= selEl.y && sh.y < botNeighborY) botNeighborY = sh.y;
+        }
+        const distTop = Math.round((selEl.y || 0) - topNeighborY);
+        const distBot = Math.round(botNeighborY - (selEl.y || 0));
+        return (
         <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Позиция и размер, мм</div>
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Y (высота от верха)</div>
-            <NumInput value={Math.round(selEl.y)} onChange={v => updateEl(selEl.id, { y: Math.max(0, Math.min(iH, v)) })} min={0} max={iH} color="#d97706" width="100%" />
+          <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Позиция относительно соседей, мм</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+            <div>
+              <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>↑ Сверху</div>
+              <NumInput value={distTop} onChange={v => {
+                const ny = Math.max(0, Math.min(iH, topNeighborY + v));
+                updateEl(selEl.id, { y: ny });
+              }} min={0} max={iH} color="#d97706" width="100%" />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Снизу ↓</div>
+              <NumInput value={distBot} onChange={v => {
+                const ny = Math.max(0, Math.min(iH, botNeighborY - v));
+                updateEl(selEl.id, { y: ny });
+              }} min={0} max={iH} color="#d97706" width="100%" />
+            </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <div>
@@ -1934,22 +2083,9 @@ export default function WardrobeEditor() {
               <NumInput value={Math.round(selEl.w || iW)} onChange={v => updateEl(selEl.id, { w: v, manualW: v })} min={20} max={iW} color="#d97706" width="100%" />
             </div>
           </div>
-          {/* Кнопка «По центру» — ставит полку по Y между ближайшими полками/стенками */}
           <button
             onClick={() => {
-              // Учитываем только полки чья x-ширина перекрывается с этой
-              const myLeft = selEl.x || 0, myRight = myLeft + (selEl.w || iW);
-              const others = elements.filter(e => {
-                if (e.type !== "shelf" || e.id === selEl.id) return false;
-                const eL = e.x || 0, eR = eL + (e.w || iW);
-                return eR > myLeft + 5 && eL < myRight - 5; // перекрытие
-              }).sort((a, b) => a.y - b.y);
-              let topY = 0, botY = iH;
-              for (const sh of others) {
-                if (sh.y <= selEl.y && sh.y > topY) topY = sh.y;
-                if (sh.y >= selEl.y && sh.y < botY) botY = sh.y;
-              }
-              const cy = Math.round((topY + botY) / 2);
+              const cy = Math.round((topNeighborY + botNeighborY) / 2);
               updateEl(selEl.id, { y: Math.max(0, Math.min(iH, cy)) });
               try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
             }}
@@ -1962,7 +2098,8 @@ export default function WardrobeEditor() {
             }}
           >⟷ По центру между соседними</button>
         </div>
-      )}
+        );
+      })()}
 
       {/* Одна кнопка для перемещения — дублирует indicator в header */}
       <button
@@ -2106,7 +2243,7 @@ export default function WardrobeEditor() {
             </div>
           )}
           {/* Place mode indicator — показывает активный режим размещения */}
-          {placeMode && <div style={{ padding: "4px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700, background: "rgba(34,197,94,0.15)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.3)" }}>{{ shelf: "━ Полка", stud: "┃ Стойка", drawers: "☰ Ящики", rod: "⎯ Штанга", door: "🚪 Дверь" }[placeMode]} · {placeMode === "drawers" || placeMode === "door" ? "кликни в проём" : "можно ставить ещё"} <button onClick={() => { setPlaceMode(null);  }} style={{ marginLeft: 6, background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✕</button></div>}
+          {placeMode && <div style={{ padding: "4px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700, background: "rgba(34,197,94,0.15)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.3)" }}>{{ shelf: "━ Полка", stud: "┃ Стойка", drawers: "☰ Ящики", rod: "⎯ Штанга", door: "🚪 Дверь" }[placeMode]} · {(placeMode === "shelf" || placeMode === "stud") ? "можно ставить ещё" : "кликни в проём"} <button onClick={() => { setPlaceMode(null);  }} style={{ marginLeft: 6, background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✕</button></div>}
           {/* #2: Eye icon for doors toggle */}
           <button onClick={() => setShowDoors(p => !p)} style={{ padding: "4px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: "pointer", border: "1px solid", background: showDoors ? "rgba(217,119,6,0.12)" : "rgba(100,100,100,0.12)", color: showDoors ? "#d97706" : "#888", borderColor: showDoors ? "rgba(217,119,6,0.3)" : "#444" }}>🚪 Двери {showDoors ? "👁" : "👁‍🗨"}</button>
           <button onClick={() => setShow3d(true)} style={{ padding: "4px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: "pointer", border: "1px solid rgba(96,165,250,0.3)", background: "rgba(96,165,250,0.12)", color: "#60a5fa" }}>🧊 3D</button>
