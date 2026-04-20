@@ -976,13 +976,15 @@ export default function WardrobeEditor() {
     setSelId(null);
   }, [placeMode, toSvg, zones, placeInZone, elements, iW, iH, t]);
 
-  // Ref для отслеживания long-press таймера и отменяемости drag на тач
-  const longPressRef = useRef<{ timer: number | null; started: boolean; startX: number; startY: number; pendingDrag: any | null } | null>(null);
+  // Ref для отслеживания двойного тапа и drag-режима на мобильном
+  // Ref для отслеживания последнего тапа (для определения double-tap)
+  const lastTapElRef = useRef<{ id: string | null; time: number }>({ id: null, time: 0 });
+  // State: id элемента, у которого активирован режим перемещения на мобильном (после double-tap)
+  const [mobileDragMode, setMobileDragMode] = useState<string | null>(null);
 
   const onDown = useCallback((e, el) => {
     if (placeMode) return;
     e.stopPropagation();
-    setSelId(el.id);
     const c = toSvg(e);
     const isTouch = e.pointerType === 'touch' || (e.type && e.type.startsWith('touch'));
     const clientX = e.clientX ?? (e.touches && e.touches[0]?.clientX) ?? 0;
@@ -993,28 +995,34 @@ export default function WardrobeEditor() {
     };
 
     if (isTouch) {
-      // Короткий хаптик-фидбэк при выделении элемента
-      try { if (navigator.vibrate) navigator.vibrate(5); } catch {}
+      // Предотвращаем эмулированный mouse event поверх touch
+      if (typeof e.preventDefault === 'function') e.preventDefault();
 
-      // На мобильном: long-press 400мс активирует drag
-      if (longPressRef.current?.timer) window.clearTimeout(longPressRef.current.timer);
-      longPressRef.current = {
-        timer: window.setTimeout(() => {
-          setDrag(dragPayload);
-          // Более длинный хаптик при старте drag — пользователь понимает что элемент "схвачен"
-          try { if (navigator.vibrate) navigator.vibrate([15, 30, 15]); } catch {}
-          if (longPressRef.current) longPressRef.current.started = true;
-        }, 400),
-        started: false,
-        startX: clientX,
-        startY: clientY,
-        pendingDrag: dragPayload,
-      };
+      setSelId(el.id);
+      const now = Date.now();
+      const isDoubleTap = lastTapElRef.current.id === el.id && (now - lastTapElRef.current.time) < 400;
+      lastTapElRef.current = { id: el.id, time: now };
+
+      if (isDoubleTap) {
+        // Двойной тап → активируем drag-режим и сразу начинаем перемещение
+        setMobileDragMode(el.id);
+        setDrag(dragPayload);
+        try { if (navigator.vibrate) navigator.vibrate([15, 30, 15]); } catch {}
+      } else if (mobileDragMode === el.id) {
+        // Элемент уже в drag-режиме — продолжаем перемещение при новом тапе
+        setDrag(dragPayload);
+      } else {
+        // Одинарный тап → только выделение, drag не запускаем
+        try { if (navigator.vibrate) navigator.vibrate(5); } catch {}
+        // Выключаем drag-режим если был на другом элементе
+        if (mobileDragMode && mobileDragMode !== el.id) setMobileDragMode(null);
+      }
     } else {
-      // На десктопе (мышь): мгновенный drag
+      // На десктопе (мышь): мгновенный drag (как было)
+      setSelId(el.id);
       setDrag(dragPayload);
     }
-  }, [toSvg, placeMode]);
+  }, [toSvg, placeMode, mobileDragMode]);
 
   // Double-click element: placeholder for future inline editing action, prevents deselect
   const onElClick = useCallback((e) => {
@@ -1045,23 +1053,12 @@ export default function WardrobeEditor() {
     return { vTargets, hTargets };
   }, [elements, iW, iH]);
 
-  const onMove = useCallback((e) => {
-    // Поддержка touch — берём координаты первого пальца
-    const clientX = e.clientX ?? (e.touches && e.touches[0]?.clientX);
-    const clientY = e.clientY ?? (e.touches && e.touches[0]?.clientY);
-    if (clientX === undefined) return;
+  // RAF для троттлинга drag-обновлений — сглаживает тач-перемещение
+  const rafRef = useRef<number | null>(null);
+  const pendingMoveRef = useRef<{ clientX: number; clientY: number } | null>(null);
 
-    // Long-press для мобильного: если палец двинулся >10px до срабатывания — отменяем drag (это скролл)
-    if (longPressRef.current && !longPressRef.current.started && longPressRef.current.timer) {
-      const dx = Math.abs(clientX - longPressRef.current.startX);
-      const dy = Math.abs(clientY - longPressRef.current.startY);
-      if (dx > 10 || dy > 10) {
-        window.clearTimeout(longPressRef.current.timer);
-        longPressRef.current = null;
-        return;
-      }
-    }
-
+  // Применение фактического перемещения — вызывается из RAF
+  const applyDragMove = useCallback((clientX: number, clientY: number) => {
     if (!drag) return;
     // Threshold: only start actual dragging after 4px movement — otherwise treat as pure selection click
     if (drag.type !== "door-resize" && drag.startX !== undefined && !drag.moved) {
@@ -1069,7 +1066,9 @@ export default function WardrobeEditor() {
       if (dx < 4 && dy < 4) return;
       drag.moved = true;
     }
-    const c = toSvg(e);
+    // Синтезируем event-like объект для toSvg — оно берёт clientX/Y
+    const fakeEvent = { clientX, clientY };
+    const c = toSvg(fakeEvent);
 
     /* Door resize logic */
     if (drag.type === "door-resize") {
@@ -1174,12 +1173,32 @@ export default function WardrobeEditor() {
     });
   }, [drag, toSvg, iW, iH, t, adjust]);
 
+  const onMove = useCallback((e) => {
+    // Поддержка touch — берём координаты первого пальца
+    const clientX = e.clientX ?? (e.touches && e.touches[0]?.clientX);
+    const clientY = e.clientY ?? (e.touches && e.touches[0]?.clientY);
+    if (clientX === undefined) return;
+    if (!drag) return;
+
+    // Буферизируем координаты в ref — применим на следующий анимационный кадр.
+    // Это сильно сглаживает drag на touch-устройствах, где события прилетают быстрее 60fps.
+    pendingMoveRef.current = { clientX, clientY };
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const pending = pendingMoveRef.current;
+      if (!pending) return;
+      applyDragMove(pending.clientX, pending.clientY);
+    });
+  }, [drag, applyDragMove]);
+
   const onUp = useCallback(() => {
-    // Отменяем long-press timer если он ещё не сработал
-    if (longPressRef.current?.timer) {
-      window.clearTimeout(longPressRef.current.timer);
+    // Отменяем запланированный RAF и пустим ref
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
     }
-    longPressRef.current = null;
+    pendingMoveRef.current = null;
     setDrag(null);
   }, []);
 
@@ -1295,11 +1314,7 @@ export default function WardrobeEditor() {
         startDist: Math.sqrt(dx * dx + dy * dy),
         startZoom: userZoom,
       };
-      // Отменяем long-press drag если был запущен
-      if (longPressRef.current?.timer) {
-        window.clearTimeout(longPressRef.current.timer);
-        longPressRef.current = null;
-      }
+      // Отменяем drag если был активен
       setDrag(null);
       e.preventDefault?.();
     }
@@ -1405,6 +1420,7 @@ export default function WardrobeEditor() {
 
   {elements.map(el => {
     const sel = el.id === selId;
+    const inDragMode = isMobile && mobileDragMode === el.id;
     const sx = ((el.x || 0) + frameT) * SC, sy = ((el.y || 0) + frameT) * SC;
     const noPointer = !!placeMode; // disable element interactions during door boundary picking
 
@@ -1422,9 +1438,9 @@ export default function WardrobeEditor() {
       const jointGap = 0.3;
       return <g key={el.id} data-element="1" onMouseDown={noPointer ? undefined : e => onDown(e, el)} onTouchStart={noPointer ? undefined : e => onDown(e, el)} style={{ cursor: noPointer ? "default" : "ns-resize", pointerEvents: noPointer ? "none" : "auto" }}>
         {/* Shelf ЛДСП panel */}
-        <rect x={shX + jointGap} y={shY} width={shW - 2 * jointGap} height={shH} fill={sel ? "#d97706" : cHex} stroke={sel ? "#fbbf24" : "#6b5a45"} strokeWidth={sel ? 1.2 : 0.5} />
+        <rect x={shX + jointGap} y={shY} width={shW - 2 * jointGap} height={shH} fill={sel ? "#3b82f6" : cHex} stroke={sel ? "#60a5fa" : "#6b5a45"} strokeWidth={sel ? 1.2 : 0.5} />
         {/* Front edge banding */}
-        <line x1={shX + jointGap} y1={shY} x2={shX + shW - jointGap} y2={shY} stroke={sel ? "rgba(251,191,36,0.3)" : "rgba(255,255,255,0.08)"} strokeWidth={0.4} />
+        <line x1={shX + jointGap} y1={shY} x2={shX + shW - jointGap} y2={shY} stroke={sel ? "rgba(96,165,250,0.3)" : "rgba(255,255,255,0.08)"} strokeWidth={0.4} />
         {/* Joint marks at left/right abutment */}
         <line x1={shX + 0.5} y1={shY} x2={shX + 0.5} y2={shY + shH} stroke="rgba(0,0,0,0.25)" strokeWidth={0.3} />
         <line x1={shX + shW - 0.5} y1={shY} x2={shX + shW - 0.5} y2={shY + shH} stroke="rgba(0,0,0,0.25)" strokeWidth={0.3} />
@@ -1828,9 +1844,52 @@ export default function WardrobeEditor() {
       )}
 
       <button
-        onClick={() => { delSel(); setMobileSheet(null); }}
+        onClick={() => {
+          if (mobileDragMode === selEl.id) {
+            setMobileDragMode(null);
+          } else {
+            setMobileDragMode(selEl.id);
+            try { if (navigator.vibrate) navigator.vibrate([15, 30, 15]); } catch {}
+          }
+          setMobileSheet(null);
+        }}
         style={{
-          width: "100%", padding: "14px 0", borderRadius: 8, marginTop: 8,
+          width: "100%", padding: "14px 0", borderRadius: 8, marginTop: 4, marginBottom: 8,
+          background: mobileDragMode === selEl.id ? "rgba(34,197,94,0.18)" : "rgba(59,130,246,0.12)",
+          color: mobileDragMode === selEl.id ? "#22c55e" : "#60a5fa",
+          fontSize: 13, fontWeight: 700,
+          border: mobileDragMode === selEl.id ? "1px solid rgba(34,197,94,0.4)" : "1px solid rgba(59,130,246,0.25)",
+          cursor: "pointer",
+        }}
+      >
+        {mobileDragMode === selEl.id ? "✓ Режим перемещения включён — закрыть" : "🖐 Включить перемещение"}
+      </button>
+
+      {/* Toggle режима перемещения — альтернатива двойному тапу для тех кто привык к долгому нажатию */}
+      <button
+        onClick={() => {
+          if (mobileDragMode === selEl.id) {
+            setMobileDragMode(null);
+          } else {
+            setMobileDragMode(selEl.id);
+            try { if (navigator.vibrate) navigator.vibrate([15, 30, 15]); } catch {}
+          }
+          setMobileSheet(null);
+        }}
+        style={{
+          width: "100%", padding: "14px 0", borderRadius: 8, marginTop: 0, marginBottom: 8,
+          background: mobileDragMode === selEl.id ? "rgba(168,85,247,0.18)" : "rgba(30,30,40,0.5)",
+          color: mobileDragMode === selEl.id ? "#a855f7" : "#d1d5db",
+          fontSize: 13, fontWeight: 700,
+          border: mobileDragMode === selEl.id ? "1px solid rgba(168,85,247,0.4)" : "1px solid rgba(60,60,70,0.4)",
+          cursor: "pointer",
+        }}
+      >{mobileDragMode === selEl.id ? "✋ Выключить перемещение" : "🖐 Включить перемещение"}</button>
+
+      <button
+        onClick={() => { delSel(); setMobileDragMode(null); setMobileSheet(null); }}
+        style={{
+          width: "100%", padding: "14px 0", borderRadius: 8, marginTop: 0,
           background: "rgba(220,38,38,0.12)", color: "#ef4444",
           fontSize: 13, fontWeight: 700,
           border: "1px solid rgba(220,38,38,0.25)",
@@ -1937,7 +1996,14 @@ export default function WardrobeEditor() {
           <div><h1 style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#d1d5db", margin: 0 }}>Редактор мебели</h1>
             <p style={{ fontSize: 11, color: "#555", margin: 0 }}>{corpus.width}×{corpus.height}×{corpus.depth} · {showCorpus ? `${t}мм ЛДСП` : "рамка"}</p></div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {/* Drag mode indicator (mobile) */}
+          {mobileDragMode && isMobile && (
+            <div style={{ padding: "4px 10px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: "rgba(168,85,247,0.15)", color: "#a855f7", border: "1px solid rgba(168,85,247,0.3)", display: "flex", alignItems: "center", gap: 6 }}>
+              ✋ Перемещение
+              <button onClick={() => setMobileDragMode(null)} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 12, fontWeight: 700, padding: 0, lineHeight: 1 }}>✕</button>
+            </div>
+          )}
           {/* #3: Door placement indicator */}
           {placeMode && <div style={{ padding: "4px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700, background: "rgba(34,197,94,0.15)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.3)" }}>{{ shelf: "━ Полка", stud: "┃ Стойка", drawers: "☰ Ящики", rod: "⎯ Штанга", door: "🚪 Дверь" }[placeMode]} → кликни внутрь проёма <button onClick={() => { setPlaceMode(null);  }} style={{ marginLeft: 6, background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✕</button></div>}
           {/* #2: Eye icon for doors toggle */}
@@ -1975,6 +2041,53 @@ export default function WardrobeEditor() {
               {canvas}
             </div>
           </div>
+
+          {/* MOBILE DRAG MODE INDICATOR */}
+          {mobileDragMode && (
+            <div style={{
+              position: "fixed",
+              top: 56,
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 45,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "6px 14px",
+              borderRadius: 20,
+              background: "rgba(34,197,94,0.15)",
+              border: "1px solid rgba(34,197,94,0.5)",
+              color: "#22c55e",
+              fontSize: 11,
+              fontWeight: 700,
+              fontFamily: "'IBM Plex Mono',monospace",
+              backdropFilter: "blur(8px)",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+            }}>
+              <span>🖐 Режим перемещения · тяни элемент пальцем</span>
+              <button
+                onClick={() => {
+                  setMobileDragMode(null);
+                  try { if (navigator.vibrate) navigator.vibrate(5); } catch {}
+                }}
+                style={{
+                  border: "none",
+                  background: "rgba(34,197,94,0.2)",
+                  color: "#22c55e",
+                  width: 22,
+                  height: 22,
+                  borderRadius: 11,
+                  fontSize: 11,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                }}
+                title="Выйти из режима"
+              >✕</button>
+            </div>
+          )}
 
           {/* MOBILE ZOOM INDICATOR */}
           {userZoom !== 1 && (
