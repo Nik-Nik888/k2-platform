@@ -1552,29 +1552,21 @@ export default function WardrobeEditor() {
         {hps.map((p, hi) => <rect key={hi} x={isL ? sx - 1 : sx + dw - 3} y={sy + dh * p - 4} width={4} height={8} rx={1} fill={isDark ? "#888" : "#555"} />)}
         <text x={sx + dw / 2} y={sy + dh / 2 + 3} textAnchor="middle" fontSize={7} fill={isDark ? "#ccc" : "#555"} fontFamily="'IBM Plex Mono',monospace" opacity={0.6}>{facadeTexInfo.name}</text>
         {sel && <>
-          {/* Resize handles — видимые + невидимый hit-target на тачах */}
+          {/* Видимые оранжевые ручки (без pointer events — hit-zones в overlay в конце SVG) */}
           {/* TOP */}
-          <rect x={sx + dw / 2 - HIT} y={sy - HIT / 2} width={HIT * 2} height={HIT} fill="transparent" style={{ cursor: "ns-resize" }}
-            onMouseDown={e => onDoorEdgeDrag(e, el, "top")} onTouchStart={e => onDoorEdgeDrag(e, el, "top")} />
-          <rect x={sx + dw / 2 - LEN / 2} y={sy - HANDLE / 2} width={LEN} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ns-resize", pointerEvents: "none" }} />
+          <rect x={sx + dw / 2 - LEN / 2} y={sy - HANDLE / 2} width={LEN} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ pointerEvents: "none" }} />
           {/* BOTTOM */}
-          <rect x={sx + dw / 2 - HIT} y={sy + dh - HIT / 2} width={HIT * 2} height={HIT} fill="transparent" style={{ cursor: "ns-resize" }}
-            onMouseDown={e => onDoorEdgeDrag(e, el, "bottom")} onTouchStart={e => onDoorEdgeDrag(e, el, "bottom")} />
-          <rect x={sx + dw / 2 - LEN / 2} y={sy + dh - HANDLE / 2} width={LEN} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ns-resize", pointerEvents: "none" }} />
+          <rect x={sx + dw / 2 - LEN / 2} y={sy + dh - HANDLE / 2} width={LEN} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ pointerEvents: "none" }} />
           {/* LEFT */}
-          <rect x={sx - HIT / 2} y={sy + dh / 2 - HIT} width={HIT} height={HIT * 2} fill="transparent" style={{ cursor: "ew-resize" }}
-            onMouseDown={e => onDoorEdgeDrag(e, el, "left")} onTouchStart={e => onDoorEdgeDrag(e, el, "left")} />
-          <rect x={sx - HANDLE / 2} y={sy + dh / 2 - LEN / 2} width={HANDLE} height={LEN} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ew-resize", pointerEvents: "none" }} />
+          <rect x={sx - HANDLE / 2} y={sy + dh / 2 - LEN / 2} width={HANDLE} height={LEN} rx={2} fill="#d97706" opacity={0.9} style={{ pointerEvents: "none" }} />
           {/* RIGHT */}
-          <rect x={sx + dw - HIT / 2} y={sy + dh / 2 - HIT} width={HIT} height={HIT * 2} fill="transparent" style={{ cursor: "ew-resize" }}
-            onMouseDown={e => onDoorEdgeDrag(e, el, "right")} onTouchStart={e => onDoorEdgeDrag(e, el, "right")} />
-          <rect x={sx + dw - HANDLE / 2} y={sy + dh / 2 - LEN / 2} width={HANDLE} height={LEN} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ew-resize", pointerEvents: "none" }} />
+          <rect x={sx + dw - HANDLE / 2} y={sy + dh / 2 - LEN / 2} width={HANDLE} height={LEN} rx={2} fill="#d97706" opacity={0.9} style={{ pointerEvents: "none" }} />
 
-          {/* Width input — below door, centered */}
-          <line x1={sx + 1} y1={sy + dh + 6} x2={sx + dw - 1} y2={sy + dh + 6} stroke="rgba(217,119,6,0.4)" strokeWidth={0.5} />
-          <line x1={sx} y1={sy + dh + 3} x2={sx} y2={sy + dh + 9} stroke="rgba(217,119,6,0.4)" strokeWidth={0.4} />
-          <line x1={sx + dw} y1={sy + dh + 3} x2={sx + dw} y2={sy + dh + 9} stroke="rgba(217,119,6,0.4)" strokeWidth={0.4} />
-          <SvgInput x={sx + dw / 2} y={sy + dh + 16} width={50} value={Math.round(el.doorW || el.w)} color="#d97706" fontSize={9}
+          {/* Width input — ниже двери, с отступом чтобы не конфликтовать с BOTTOM hit-зоной */}
+          <line x1={sx + 1} y1={sy + dh + 28} x2={sx + dw - 1} y2={sy + dh + 28} stroke="rgba(217,119,6,0.4)" strokeWidth={0.5} />
+          <line x1={sx} y1={sy + dh + 25} x2={sx} y2={sy + dh + 31} stroke="rgba(217,119,6,0.4)" strokeWidth={0.4} />
+          <line x1={sx + dw} y1={sy + dh + 25} x2={sx + dw} y2={sy + dh + 31} stroke="rgba(217,119,6,0.4)" strokeWidth={0.4} />
+          <SvgInput x={sx + dw / 2} y={sy + dh + 38} width={50} value={Math.round(el.doorW || el.w)} color="#d97706" fontSize={9}
             onChange={v => {
               // Grow from anchored side: if left is wall → x stays, grow right. If right is wall → right stays, grow left.
               const oldX = el.x || 0;
@@ -1591,11 +1583,11 @@ export default function WardrobeEditor() {
               updateEl(el.id, { w: v, doorW: v, x: newX, manualW: v });
             }} />
 
-          {/* Height input — left of door, centered vertically */}
-          <line x1={sx - 6} y1={sy + 1} x2={sx - 6} y2={sy + dh - 1} stroke="rgba(96,165,250,0.4)" strokeWidth={0.5} />
-          <line x1={sx - 9} y1={sy} x2={sx - 3} y2={sy} stroke="rgba(96,165,250,0.4)" strokeWidth={0.4} />
-          <line x1={sx - 9} y1={sy + dh} x2={sx - 3} y2={sy + dh} stroke="rgba(96,165,250,0.4)" strokeWidth={0.4} />
-          <SvgInput x={sx - 10} y={sy + dh / 2 + 3} width={40} value={Math.round(el.doorH || el.h)} color="#5a8fd4" fontSize={8}
+          {/* Height input — слева от двери, с отступом чтобы не конфликтовать с LEFT hit-зоной */}
+          <line x1={sx - 28} y1={sy + 1} x2={sx - 28} y2={sy + dh - 1} stroke="rgba(96,165,250,0.4)" strokeWidth={0.5} />
+          <line x1={sx - 31} y1={sy} x2={sx - 25} y2={sy} stroke="rgba(96,165,250,0.4)" strokeWidth={0.4} />
+          <line x1={sx - 31} y1={sy + dh} x2={sx - 25} y2={sy + dh} stroke="rgba(96,165,250,0.4)" strokeWidth={0.4} />
+          <SvgInput x={sx - 32} y={sy + dh / 2 + 3} width={40} value={Math.round(el.doorH || el.h)} color="#5a8fd4" fontSize={8}
             onChange={v => {
               // Grow from anchored side: if top is wall → y stays, grow down. If bottom is wall → bottom stays, grow up.
               const oldY = el.y || 0;
@@ -1640,6 +1632,33 @@ export default function WardrobeEditor() {
   <text x={corpus.width * SC / 2 - 32} y={corpus.height * SC + 38} textAnchor="middle" fontSize={8} fill="#444">←</text>
   <text x={corpus.width * SC / 2 + 32} y={corpus.height * SC + 38} textAnchor="middle" fontSize={8} fill="#444">→</text>
   <SvgInput x={-32} y={corpus.height * SC / 2 + 3} width={40} value={corpus.height} color="#777" fontSize={10} onChange={v => setCorpus(c => ({ ...c, height: Math.max(400, Math.min(2700, v)) }))} />
+
+  {/* ═══ DOOR RESIZE HIT-ZONES OVERLAY ═══
+      Рендерится в самом конце SVG чтобы быть ПОВЕРХ всех DIMS и прочих элементов.
+      Иначе hit-зоны TOP/BOTTOM/LEFT перекрывались линиями размеров и не ловили тапы. */}
+  {(() => {
+    const selDoor = elements.find(e => e.id === selId && e.type === "door" && showDoors);
+    if (!selDoor) return null;
+    const dsx = ((selDoor.x || 0) + frameT) * SC;
+    const dsy = ((selDoor.y || 0) + frameT) * SC;
+    const ddw = (selDoor.w || 100) * SC;
+    const ddh = (selDoor.h || iH) * SC;
+    const HIT = isMobile ? 44 : 10;
+    return <>
+      {/* TOP */}
+      <rect x={dsx + ddw / 2 - HIT} y={dsy - HIT / 2} width={HIT * 2} height={HIT} fill="transparent" style={{ cursor: "ns-resize" }}
+        onMouseDown={e => onDoorEdgeDrag(e, selDoor, "top")} onTouchStart={e => onDoorEdgeDrag(e, selDoor, "top")} />
+      {/* BOTTOM */}
+      <rect x={dsx + ddw / 2 - HIT} y={dsy + ddh - HIT / 2} width={HIT * 2} height={HIT} fill="transparent" style={{ cursor: "ns-resize" }}
+        onMouseDown={e => onDoorEdgeDrag(e, selDoor, "bottom")} onTouchStart={e => onDoorEdgeDrag(e, selDoor, "bottom")} />
+      {/* LEFT */}
+      <rect x={dsx - HIT / 2} y={dsy + ddh / 2 - HIT} width={HIT} height={HIT * 2} fill="transparent" style={{ cursor: "ew-resize" }}
+        onMouseDown={e => onDoorEdgeDrag(e, selDoor, "left")} onTouchStart={e => onDoorEdgeDrag(e, selDoor, "left")} />
+      {/* RIGHT */}
+      <rect x={dsx + ddw - HIT / 2} y={dsy + ddh / 2 - HIT} width={HIT} height={HIT * 2} fill="transparent" style={{ cursor: "ew-resize" }}
+        onMouseDown={e => onDoorEdgeDrag(e, selDoor, "right")} onTouchStart={e => onDoorEdgeDrag(e, selDoor, "right")} />
+    </>;
+  })()}
 </svg>
   );
 
