@@ -940,7 +940,16 @@ export default function WardrobeEditor() {
     });
   }, [adjust]);
 
-  const toSvg = useCallback((e) => { const svg = svgRef.current; if (!svg) return { x: 0, y: 0 }; const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; const s = pt.matrixTransform(svg.getScreenCTM().inverse()); return { x: s.x / SC - frameT, y: s.y / SC - frameT }; }, [frameT]);
+  const toSvg = useCallback((e) => {
+    const svg = svgRef.current; if (!svg) return { x: 0, y: 0 };
+    // Поддержка как mouse/pointer event, так и touch event
+    const clientX = e.clientX ?? (e.touches && e.touches[0]?.clientX) ?? 0;
+    const clientY = e.clientY ?? (e.touches && e.touches[0]?.clientY) ?? 0;
+    const pt = svg.createSVGPoint();
+    pt.x = clientX; pt.y = clientY;
+    const s = pt.matrixTransform(svg.getScreenCTM().inverse());
+    return { x: s.x / SC - frameT, y: s.y / SC - frameT };
+  }, [frameT]);
 
   /* SVG click — place element in zone, or deselect */
   const onSvgClick = useCallback((e) => {
@@ -967,12 +976,44 @@ export default function WardrobeEditor() {
     setSelId(null);
   }, [placeMode, toSvg, zones, placeInZone, elements, iW, iH, t]);
 
+  // Ref для отслеживания long-press таймера и отменяемости drag на тач
+  const longPressRef = useRef<{ timer: number | null; started: boolean; startX: number; startY: number; pendingDrag: any | null } | null>(null);
+
   const onDown = useCallback((e, el) => {
     if (placeMode) return;
     e.stopPropagation();
     setSelId(el.id);
     const c = toSvg(e);
-    setDrag({ id: el.id, ox: c.x - (el.x || 0), oy: c.y - (el.y || 0), type: el.type, startX: e.clientX, startY: e.clientY, moved: false });
+    const isTouch = e.pointerType === 'touch' || (e.type && e.type.startsWith('touch'));
+    const clientX = e.clientX ?? (e.touches && e.touches[0]?.clientX) ?? 0;
+    const clientY = e.clientY ?? (e.touches && e.touches[0]?.clientY) ?? 0;
+    const dragPayload = {
+      id: el.id, ox: c.x - (el.x || 0), oy: c.y - (el.y || 0),
+      type: el.type, startX: clientX, startY: clientY, moved: false,
+    };
+
+    if (isTouch) {
+      // Короткий хаптик-фидбэк при выделении элемента
+      try { if (navigator.vibrate) navigator.vibrate(5); } catch {}
+
+      // На мобильном: long-press 400мс активирует drag
+      if (longPressRef.current?.timer) window.clearTimeout(longPressRef.current.timer);
+      longPressRef.current = {
+        timer: window.setTimeout(() => {
+          setDrag(dragPayload);
+          // Более длинный хаптик при старте drag — пользователь понимает что элемент "схвачен"
+          try { if (navigator.vibrate) navigator.vibrate([15, 30, 15]); } catch {}
+          if (longPressRef.current) longPressRef.current.started = true;
+        }, 400),
+        started: false,
+        startX: clientX,
+        startY: clientY,
+        pendingDrag: dragPayload,
+      };
+    } else {
+      // На десктопе (мышь): мгновенный drag
+      setDrag(dragPayload);
+    }
   }, [toSvg, placeMode]);
 
   // Double-click element: placeholder for future inline editing action, prevents deselect
@@ -1005,10 +1046,26 @@ export default function WardrobeEditor() {
   }, [elements, iW, iH]);
 
   const onMove = useCallback((e) => {
+    // Поддержка touch — берём координаты первого пальца
+    const clientX = e.clientX ?? (e.touches && e.touches[0]?.clientX);
+    const clientY = e.clientY ?? (e.touches && e.touches[0]?.clientY);
+    if (clientX === undefined) return;
+
+    // Long-press для мобильного: если палец двинулся >10px до срабатывания — отменяем drag (это скролл)
+    if (longPressRef.current && !longPressRef.current.started && longPressRef.current.timer) {
+      const dx = Math.abs(clientX - longPressRef.current.startX);
+      const dy = Math.abs(clientY - longPressRef.current.startY);
+      if (dx > 10 || dy > 10) {
+        window.clearTimeout(longPressRef.current.timer);
+        longPressRef.current = null;
+        return;
+      }
+    }
+
     if (!drag) return;
     // Threshold: only start actual dragging after 4px movement — otherwise treat as pure selection click
     if (drag.type !== "door-resize" && drag.startX !== undefined && !drag.moved) {
-      const dx = Math.abs(e.clientX - drag.startX), dy = Math.abs(e.clientY - drag.startY);
+      const dx = Math.abs(clientX - drag.startX), dy = Math.abs(clientY - drag.startY);
       if (dx < 4 && dy < 4) return;
       drag.moved = true;
     }
@@ -1117,7 +1174,14 @@ export default function WardrobeEditor() {
     });
   }, [drag, toSvg, iW, iH, t, adjust]);
 
-  const onUp = useCallback(() => setDrag(null), []);
+  const onUp = useCallback(() => {
+    // Отменяем long-press timer если он ещё не сработал
+    if (longPressRef.current?.timer) {
+      window.clearTimeout(longPressRef.current.timer);
+    }
+    longPressRef.current = null;
+    setDrag(null);
+  }, []);
 
   useEffect(() => {
     const h = (e) => {
@@ -1207,16 +1271,68 @@ export default function WardrobeEditor() {
 
   const isMobile = useIsMobile(768);
   const [mobileSheet, setMobileSheet] = useState<null | 'tools' | 'props' | 'summary'>(null);
+  const [userZoom, setUserZoom] = useState<number>(1); // Дополнительный пинч-зум на мобильном (0.5-3)
+  const pinchRef = useRef<{ startDist: number; startZoom: number } | null>(null);
 
   const svgW = corpus.width * SC + 120, svgH = corpus.height * SC + 60;
 
   // Для мобильного: масштабируем canvas через CSS transform, чтобы влез в экран
-  const mobileCanvasScale = useMemo(() => {
+  // baseFit — автоматический фит под ширину экрана, userZoom — пинч-зум от пользователя
+  const mobileCanvasFit = useMemo(() => {
     if (!isMobile) return 1;
     if (typeof window === 'undefined') return 1;
-    const availW = window.innerWidth - 16; // 8px padding с каждой стороны
+    const availW = window.innerWidth - 16;
     return svgW > availW ? availW / svgW : 1;
   }, [isMobile, svgW]);
+  const mobileCanvasScale = mobileCanvasFit * userZoom;
+
+  // ── Pinch-zoom на 2D-канвасе мобильного ─────────────
+  const onCanvasTouchStart = useCallback((e: any) => {
+    if (e.touches && e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchRef.current = {
+        startDist: Math.sqrt(dx * dx + dy * dy),
+        startZoom: userZoom,
+      };
+      // Отменяем long-press drag если был запущен
+      if (longPressRef.current?.timer) {
+        window.clearTimeout(longPressRef.current.timer);
+        longPressRef.current = null;
+      }
+      setDrag(null);
+      e.preventDefault?.();
+    }
+  }, [userZoom]);
+
+  const onCanvasTouchMove = useCallback((e: any) => {
+    if (e.touches && e.touches.length === 2 && pinchRef.current) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const ratio = dist / pinchRef.current.startDist;
+      const newZoom = Math.max(0.5, Math.min(3, pinchRef.current.startZoom * ratio));
+      setUserZoom(newZoom);
+      e.preventDefault?.();
+    }
+  }, []);
+
+  const onCanvasTouchEnd = useCallback((e: any) => {
+    if (!e.touches || e.touches.length < 2) {
+      pinchRef.current = null;
+    }
+  }, []);
+
+  // Двойной тап по канвасу — сброс зума к 1
+  const lastTapRef = useRef<number>(0);
+  const onCanvasDoubleTap = useCallback(() => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 300) {
+      setUserZoom(1);
+      try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
+    }
+    lastTapRef.current = now;
+  }, []);
 
   const canvas = (
 <svg ref={svgRef} width={svgW} height={svgH} viewBox={`-50 -16 ${corpus.width * SC + 120} ${corpus.height * SC + 60}`} style={{ cursor: placeMode ? "crosshair" : "default", filter: "drop-shadow(0 4px 20px rgba(0,0,0,0.5))" }} onClick={onSvgClick}>
@@ -1304,7 +1420,7 @@ export default function WardrobeEditor() {
       else shY = sy - shH / 2; // middle — centered on line
       const cHex = corpusTexInfo.hex || "#8b7355";
       const jointGap = 0.3;
-      return <g key={el.id} data-element="1" onMouseDown={noPointer ? undefined : e => onDown(e, el)} style={{ cursor: noPointer ? "default" : "ns-resize", pointerEvents: noPointer ? "none" : "auto" }}>
+      return <g key={el.id} data-element="1" onMouseDown={noPointer ? undefined : e => onDown(e, el)} onTouchStart={noPointer ? undefined : e => onDown(e, el)} style={{ cursor: noPointer ? "default" : "ns-resize", pointerEvents: noPointer ? "none" : "auto" }}>
         {/* Shelf ЛДСП panel */}
         <rect x={shX + jointGap} y={shY} width={shW - 2 * jointGap} height={shH} fill={sel ? "#d97706" : cHex} stroke={sel ? "#fbbf24" : "#6b5a45"} strokeWidth={sel ? 1.2 : 0.5} />
         {/* Front edge banding */}
@@ -1322,7 +1438,7 @@ export default function WardrobeEditor() {
       const pTopPx = ((el.pTop || 0) + frameT) * SC, pBotPx = ((el.pBot || iH) + frameT) * SC;
       const pH = pBotPx - pTopPx;
       const jointGap = 0.3;
-      return <g key={el.id} data-element="1" onMouseDown={e => onDown(e, el)} style={{ cursor: "ew-resize" }}>
+      return <g key={el.id} data-element="1" onMouseDown={e => onDown(e, el)} onTouchStart={e => onDown(e, el)} style={{ cursor: "ew-resize" }}>
         {/* Stud ЛДСП panel — between bounding shelves */}
         <rect x={studLeft} y={pTopPx + jointGap} width={studW} height={pH - 2 * jointGap} fill={sel ? "#3b82f6" : cHex} stroke={sel ? "#60a5fa" : "#5a4d3f"} strokeWidth={sel ? 1.2 : 0.5} />
         {/* Front edge banding */}
@@ -1344,7 +1460,7 @@ export default function WardrobeEditor() {
       const elW = (el.w || 100) * SC;
       let accY = 0;
       const facadeGap = 2 * SC; // 2mm gap between facade panels
-      return <g key={el.id} data-element="1" onMouseDown={e => onDown(e, el)} style={{ cursor: "move" }}>
+      return <g key={el.id} data-element="1" onMouseDown={e => onDown(e, el)} onTouchStart={e => onDown(e, el)} style={{ cursor: "move" }}>
         {Array.from({ length: cnt }, (_, i) => {
           const dH = (heights[i] || 150) * SC;
           const dy = sy + accY * SC;
@@ -1372,7 +1488,7 @@ export default function WardrobeEditor() {
       </g>;
     }
 
-    if (el.type === "rod") return <g key={el.id} data-element="1" onMouseDown={e => onDown(e, el)} style={{ cursor: "move" }}>
+    if (el.type === "rod") return <g key={el.id} data-element="1" onMouseDown={e => onDown(e, el)} onTouchStart={e => onDown(e, el)} style={{ cursor: "move" }}>
       <line x1={sx} y1={sy} x2={sx + (el.w || 100) * SC} y2={sy} stroke={sel ? "#a855f7" : "#777"} strokeWidth={2.5} strokeLinecap="round" />
       <circle cx={sx} cy={sy} r={3} fill={sel ? "#a855f7" : "#555"} /><circle cx={sx + (el.w || 100) * SC} cy={sy} r={3} fill={sel ? "#a855f7" : "#555"} />
     </g>;
@@ -1384,7 +1500,7 @@ export default function WardrobeEditor() {
       const fHex = facadeTexInfo.hex;
       const isDark = parseInt(fHex.replace('#',''), 16) < 0x666666;
       const HANDLE = 6;
-      return <g key={el.id} data-element="1" onMouseDown={e => { e.stopPropagation(); setSelId(el.id); }} style={{ cursor: "pointer" }}>
+      return <g key={el.id} data-element="1" onMouseDown={e => { e.stopPropagation(); setSelId(el.id); }} onTouchStart={e => { e.stopPropagation(); setSelId(el.id); }} style={{ cursor: "pointer" }}>
         <rect x={sx} y={sy} width={dw} height={dh} fill={fHex} fillOpacity={0.85} stroke={sel ? "#fbbf24" : isDark ? "#5a4a3a" : "#bbb"} strokeWidth={sel ? 1.5 : 0.7} rx={1} />
         <circle cx={isL ? sx + dw - 8 : sx + 8} cy={sy + dh / 2} r={2.5} fill={isDark ? "#aaa" : "#555"} />
         {hps.map((p, hi) => <rect key={hi} x={isL ? sx - 1 : sx + dw - 3} y={sy + dh * p - 4} width={4} height={8} rx={1} fill={isDark ? "#888" : "#555"} />)}
@@ -1392,13 +1508,13 @@ export default function WardrobeEditor() {
         {sel && <>
           {/* Resize handles */}
           <rect x={sx + dw / 2 - 12} y={sy - HANDLE / 2} width={24} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ns-resize" }}
-            onMouseDown={e => onDoorEdgeDrag(e, el, "top")} />
+            onMouseDown={e => onDoorEdgeDrag(e, el, "top")} onTouchStart={e => onDoorEdgeDrag(e, el, "top")} />
           <rect x={sx + dw / 2 - 12} y={sy + dh - HANDLE / 2} width={24} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ns-resize" }}
-            onMouseDown={e => onDoorEdgeDrag(e, el, "bottom")} />
+            onMouseDown={e => onDoorEdgeDrag(e, el, "bottom")} onTouchStart={e => onDoorEdgeDrag(e, el, "bottom")} />
           <rect x={sx - HANDLE / 2} y={sy + dh / 2 - 12} width={HANDLE} height={24} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ew-resize" }}
-            onMouseDown={e => onDoorEdgeDrag(e, el, "left")} />
+            onMouseDown={e => onDoorEdgeDrag(e, el, "left")} onTouchStart={e => onDoorEdgeDrag(e, el, "left")} />
           <rect x={sx + dw - HANDLE / 2} y={sy + dh / 2 - 12} width={HANDLE} height={24} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ew-resize" }}
-            onMouseDown={e => onDoorEdgeDrag(e, el, "right")} />
+            onMouseDown={e => onDoorEdgeDrag(e, el, "right")} onTouchStart={e => onDoorEdgeDrag(e, el, "right")} />
 
           {/* Width input — below door, centered */}
           <line x1={sx + 1} y1={sy + dh + 6} x2={sx + dw - 1} y2={sy + dh + 6} stroke="rgba(217,119,6,0.4)" strokeWidth={0.5} />
@@ -1806,7 +1922,14 @@ export default function WardrobeEditor() {
   );
 
   return (
-    <div style={{ minHeight: "100vh", color: "#e5e7eb", userSelect: "none", background: "#0b0c10", fontFamily: "'IBM Plex Mono',monospace" }} onMouseMove={onMove} onMouseUp={onUp}>
+    <div
+      style={{ minHeight: "100vh", color: "#e5e7eb", userSelect: "none", background: "#0b0c10", fontFamily: "'IBM Plex Mono',monospace" }}
+      onMouseMove={onMove}
+      onMouseUp={onUp}
+      onTouchMove={onMove}
+      onTouchEnd={onUp}
+      onTouchCancel={onUp}
+    >
       {/* HEADER */}
       <div style={{ borderBottom: "1px solid rgba(50,50,60,0.4)", padding: "8px 16px", background: "rgba(11,12,16,0.97)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -1827,15 +1950,21 @@ export default function WardrobeEditor() {
       {isMobile && (
         <>
           {/* MOBILE CANVAS */}
-          <div style={{
-            padding: 8,
-            paddingBottom: 80, // место для нижней тулбар-плашки
-            overflow: "auto",
-            minHeight: "calc(100vh - 46px - 64px)",
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "center",
-          }}>
+          <div
+            onTouchStart={(e) => { onCanvasTouchStart(e); onCanvasDoubleTap(); }}
+            onTouchMove={onCanvasTouchMove}
+            onTouchEnd={onCanvasTouchEnd}
+            onTouchCancel={onCanvasTouchEnd}
+            style={{
+              padding: 8,
+              paddingBottom: 80, // место для нижней тулбар-плашки
+              overflow: "auto",
+              minHeight: "calc(100vh - 46px - 64px)",
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "center",
+              touchAction: pinchRef.current ? "none" : "pan-y",
+            }}>
             <div style={{
               transform: `scale(${mobileCanvasScale})`,
               transformOrigin: "top center",
@@ -1846,6 +1975,49 @@ export default function WardrobeEditor() {
               {canvas}
             </div>
           </div>
+
+          {/* MOBILE ZOOM INDICATOR */}
+          {userZoom !== 1 && (
+            <div style={{
+              position: "fixed",
+              bottom: 72,
+              right: 12,
+              zIndex: 40,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 10px",
+              borderRadius: 20,
+              background: "rgba(11,12,16,0.92)",
+              border: "1px solid rgba(217,119,6,0.3)",
+              color: "#d97706",
+              fontSize: 11,
+              fontWeight: 700,
+              fontFamily: "'IBM Plex Mono',monospace",
+              backdropFilter: "blur(8px)",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+            }}>
+              <span>{Math.round(userZoom * 100)}%</span>
+              <button
+                onClick={() => setUserZoom(1)}
+                style={{
+                  border: "none",
+                  background: "rgba(217,119,6,0.15)",
+                  color: "#d97706",
+                  width: 20,
+                  height: 20,
+                  borderRadius: 10,
+                  fontSize: 11,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                }}
+                title="Сбросить зум"
+              >✕</button>
+            </div>
+          )}
 
           {/* MOBILE BOTTOM TOOLBAR */}
           <div style={{
