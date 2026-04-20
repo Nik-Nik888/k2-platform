@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import Wardrobe3D from "./Wardrobe3D";
 import { TexturePicker, getTextureInfo } from "./TexturePicker";
+import { useIsMobile } from "@shared/hooks/useIsMobile";
+import BottomSheet from "@shared/components/BottomSheet";
 
 const SC = 0.28, MIN_S = 100, SNAP = 5;
 const TOOLS = [
@@ -20,6 +22,14 @@ const HINGES = [
   { id: "insert",  label: "Вкладная" },
 ];
 let _id = 0; const uid = () => "e" + ++_id;
+
+const MOBILE_EL_LABELS: Record<string, string> = {
+  shelf: "Полка",
+  stud: "Стойка",
+  drawers: "Ящики",
+  rod: "Штанга",
+  door: "Дверь",
+};
 
 /* ═══ ZONE COMPUTATION ═══
    Zones are per-column, per-band rectangles.
@@ -1141,7 +1151,605 @@ export default function WardrobeEditor() {
     else { if (!tryBottom()) tryTop(); }
   }, [topLevelCols, elements, iH, updateEl]);
 
+  const isMobile = useIsMobile(768);
+  const [mobileSheet, setMobileSheet] = useState<null | 'tools' | 'props' | 'summary'>(null);
+
   const svgW = corpus.width * SC + 120, svgH = corpus.height * SC + 60;
+
+  // Для мобильного: масштабируем canvas через CSS transform, чтобы влез в экран
+  const mobileCanvasScale = useMemo(() => {
+    if (!isMobile) return 1;
+    if (typeof window === 'undefined') return 1;
+    const availW = window.innerWidth - 16; // 8px padding с каждой стороны
+    return svgW > availW ? availW / svgW : 1;
+  }, [isMobile, svgW]);
+
+  const canvas = (
+<svg ref={svgRef} width={svgW} height={svgH} viewBox={`-50 -16 ${corpus.width * SC + 120} ${corpus.height * SC + 60}`} style={{ cursor: placeMode ? "crosshair" : "default", filter: "drop-shadow(0 4px 20px rgba(0,0,0,0.5))" }} onClick={onSvgClick}>
+  <defs>
+    <pattern id="g" width={100 * SC} height={100 * SC} patternUnits="userSpaceOnUse"><path d={`M ${100 * SC} 0 L 0 0 0 ${100 * SC}`} fill="none" stroke="#161720" strokeWidth={0.5} /></pattern>
+  </defs>
+  {/* ═══ FRAME / CORPUS ═══ */}
+  {(() => {
+    const cHex = corpusTexInfo.hex || "#8b7355";
+    const cStroke = "#4a3f35";
+    const tPx = t * SC;
+    const wPx = corpus.width * SC;
+    const hPx = corpus.height * SC;
+    const gap = 0.3;
+
+    if (!showCorpus) {
+      // Empty frame — dashed boundary, full area usable
+      return <>
+        <rect x={0} y={0} width={wPx} height={hPx} fill="url(#g)" />
+        <rect x={0} y={0} width={wPx} height={hPx} fill="none"
+          stroke="#4a3f35" strokeWidth={1} strokeDasharray="6 3" />
+        {/* Corner marks */}
+        {[[0,0],[wPx,0],[0,hPx],[wPx,hPx]].map(([cx,cy], i) => (
+          <g key={`c${i}`}>
+            <line x1={cx - (cx > 0 ? 8 : -8)} y1={cy} x2={cx} y2={cy} stroke="#d97706" strokeWidth={0.8} />
+            <line x1={cx} y1={cy - (cy > 0 ? 8 : -8)} x2={cx} y2={cy} stroke="#d97706" strokeWidth={0.8} />
+          </g>
+        ))}
+      </>;
+    }
+
+    return <>
+      {/* Inner background */}
+      <rect x={tPx} y={tPx} width={wPx - 2 * tPx} height={hPx - 2 * tPx} fill="url(#g)" />
+      {/* ДВП back panel — thin line inset */}
+      <rect x={tPx + 1} y={tPx + 1} width={wPx - 2 * tPx - 2} height={hPx - 2 * tPx - 2} fill="none" stroke="rgba(58,53,48,0.25)" strokeWidth={0.5} strokeDasharray="3 2" />
+      {/* Left side — full height */}
+      <rect x={0} y={0} width={tPx} height={hPx} fill={cHex} stroke={cStroke} strokeWidth={0.6} />
+      {/* Right side — full height */}
+      <rect x={wPx - tPx} y={0} width={tPx} height={hPx} fill={cHex} stroke={cStroke} strokeWidth={0.6} />
+      {/* Top — between sides */}
+      <rect x={tPx + gap} y={0} width={wPx - 2 * tPx - 2 * gap} height={tPx} fill={cHex} stroke={cStroke} strokeWidth={0.6} />
+      {/* Bottom — between sides */}
+      <rect x={tPx + gap} y={hPx - tPx} width={wPx - 2 * tPx - 2 * gap} height={tPx} fill={cHex} stroke={cStroke} strokeWidth={0.6} />
+      {/* Joint lines */}
+      <line x1={tPx} y1={tPx} x2={tPx + 6} y2={tPx} stroke="rgba(0,0,0,0.3)" strokeWidth={0.4} />
+      <line x1={wPx - tPx} y1={tPx} x2={wPx - tPx - 6} y2={tPx} stroke="rgba(0,0,0,0.3)" strokeWidth={0.4} />
+      <line x1={tPx} y1={hPx - tPx} x2={tPx + 6} y2={hPx - tPx} stroke="rgba(0,0,0,0.3)" strokeWidth={0.4} />
+      <line x1={wPx - tPx} y1={hPx - tPx} x2={wPx - tPx - 6} y2={hPx - tPx} stroke="rgba(0,0,0,0.3)" strokeWidth={0.4} />
+      {/* Edge banding */}
+      <line x1={0.3} y1={0} x2={0.3} y2={hPx} stroke="rgba(255,255,255,0.08)" strokeWidth={0.3} />
+      <line x1={wPx - 0.3} y1={0} x2={wPx - 0.3} y2={hPx} stroke="rgba(255,255,255,0.08)" strokeWidth={0.3} />
+      <line x1={tPx + gap} y1={0.3} x2={wPx - tPx - gap} y2={0.3} stroke="rgba(255,255,255,0.08)" strokeWidth={0.3} />
+      <line x1={tPx + gap} y1={hPx - 0.3} x2={wPx - tPx - gap} y2={hPx - 0.3} stroke="rgba(255,255,255,0.08)" strokeWidth={0.3} />
+    </>;
+  })()}
+
+  {/* Zone highlights */}
+  {zones.map((z, i) => {
+    const zoneMode = !!placeMode;
+    const isOccupied = zoneMode && (
+      (placeMode === "drawers" && elements.some(e => e.type === "drawers" && e.zoneId === z.id))
+    );
+    return <rect key={`z${i}`} x={(z.sl + frameT) * SC} y={(z.top + frameT) * SC} width={z.sw * SC} height={(z.bot - z.top) * SC}
+      fill={zoneMode ? (isOccupied ? "rgba(239,68,68,0.08)" : "rgba(34,197,94,0.08)") : "rgba(25,23,20,0.3)"}
+      stroke={zoneMode ? (isOccupied ? "rgba(239,68,68,0.2)" : "rgba(34,197,94,0.2)") : "rgba(217,119,6,0.06)"}
+      strokeWidth={zoneMode ? 1 : 0.5} strokeDasharray={zoneMode ? "4 2" : "2 2"}
+      style={zoneMode && !isOccupied ? { cursor: "pointer" } : {}} />;
+  })}
+
+  {elements.map(el => {
+    const sel = el.id === selId;
+    const sx = ((el.x || 0) + frameT) * SC, sy = ((el.y || 0) + frameT) * SC;
+    const noPointer = !!placeMode; // disable element interactions during door boundary picking
+
+    if (el.type === "shelf") {
+      const shW = (el.w || iW) * SC;
+      const shH = t * SC; // full ЛДСП thickness
+      const shX = sx;
+      // Smart Y positioning: at top edge (y≈0) → below line, at bottom edge (y≈iH) → above line, else centered
+      const elY = el.y || 0;
+      let shY;
+      if (elY < 5) shY = sy; // top — panel goes down from y=0
+      else if (elY > iH - 5) shY = sy - shH; // bottom — panel goes up from y=iH
+      else shY = sy - shH / 2; // middle — centered on line
+      const cHex = corpusTexInfo.hex || "#8b7355";
+      const jointGap = 0.3;
+      return <g key={el.id} data-element="1" onMouseDown={noPointer ? undefined : e => onDown(e, el)} style={{ cursor: noPointer ? "default" : "ns-resize", pointerEvents: noPointer ? "none" : "auto" }}>
+        {/* Shelf ЛДСП panel */}
+        <rect x={shX + jointGap} y={shY} width={shW - 2 * jointGap} height={shH} fill={sel ? "#d97706" : cHex} stroke={sel ? "#fbbf24" : "#6b5a45"} strokeWidth={sel ? 1.2 : 0.5} />
+        {/* Front edge banding */}
+        <line x1={shX + jointGap} y1={shY} x2={shX + shW - jointGap} y2={shY} stroke={sel ? "rgba(251,191,36,0.3)" : "rgba(255,255,255,0.08)"} strokeWidth={0.4} />
+        {/* Joint marks at left/right abutment */}
+        <line x1={shX + 0.5} y1={shY} x2={shX + 0.5} y2={shY + shH} stroke="rgba(0,0,0,0.25)" strokeWidth={0.3} />
+        <line x1={shX + shW - 0.5} y1={shY} x2={shX + shW - 0.5} y2={shY + shH} stroke="rgba(0,0,0,0.25)" strokeWidth={0.3} />
+      </g>;
+    }
+
+    if (el.type === "stud") {
+      const cHex = corpusTexInfo.hex || "#8b7355";
+      const studLeft = ((el.x || 0) + frameT) * SC;
+      const studW = t * SC;
+      const pTopPx = ((el.pTop || 0) + frameT) * SC, pBotPx = ((el.pBot || iH) + frameT) * SC;
+      const pH = pBotPx - pTopPx;
+      const jointGap = 0.3;
+      return <g key={el.id} data-element="1" onMouseDown={e => onDown(e, el)} style={{ cursor: "ew-resize" }}>
+        {/* Stud ЛДСП panel — between bounding shelves */}
+        <rect x={studLeft} y={pTopPx + jointGap} width={studW} height={pH - 2 * jointGap} fill={sel ? "#3b82f6" : cHex} stroke={sel ? "#60a5fa" : "#5a4d3f"} strokeWidth={sel ? 1.2 : 0.5} />
+        {/* Front edge banding */}
+        <line x1={studLeft} y1={pTopPx + jointGap} x2={studLeft} y2={pBotPx - jointGap} stroke={sel ? "rgba(96,165,250,0.3)" : "rgba(255,255,255,0.08)"} strokeWidth={0.4} />
+        {/* Top joint — where stud meets shelf/top panel */}
+        <line x1={studLeft - 2} y1={pTopPx + jointGap} x2={studLeft + studW + 2} y2={pTopPx + jointGap} stroke="rgba(0,0,0,0.25)" strokeWidth={0.3} />
+        {/* Bottom joint */}
+        <line x1={studLeft - 2} y1={pBotPx - jointGap} x2={studLeft + studW + 2} y2={pBotPx - jointGap} stroke="rgba(0,0,0,0.25)" strokeWidth={0.3} />
+        {/* Конфирмат marks at top and bottom */}
+        <circle cx={studLeft + studW / 2} cy={pTopPx + jointGap + 3} r={0.8} fill="rgba(0,0,0,0.2)" />
+        <circle cx={studLeft + studW / 2} cy={pBotPx - jointGap - 3} r={0.8} fill="rgba(0,0,0,0.2)" />
+      </g>;
+    }
+
+    if (el.type === "drawers") {
+      const cnt = el.count || 3, heights = el.drawerHeights || Array(cnt).fill(Math.floor((el.h || 450) / cnt));
+      const gc = (el.guideType || "roller") === "tandem" ? "#f59e0b" : (el.guideType || "roller") === "ball" ? "#60a5fa" : "#22c55e";
+      const fHex = facadeTexInfo.hex || "#f2efe8";
+      const elW = (el.w || 100) * SC;
+      let accY = 0;
+      const facadeGap = 2 * SC; // 2mm gap between facade panels
+      return <g key={el.id} data-element="1" onMouseDown={e => onDown(e, el)} style={{ cursor: "move" }}>
+        {Array.from({ length: cnt }, (_, i) => {
+          const dH = (heights[i] || 150) * SC;
+          const dy = sy + accY * SC;
+          accY += heights[i] || 150;
+          const facH = dH - facadeGap;
+          return <g key={i}>
+            {/* Drawer box outline (inner) */}
+            <rect x={sx + 4} y={dy + facadeGap / 2 + 2} width={elW - 8} height={facH - 4}
+              fill="none" stroke={sel ? `${gc}33` : "rgba(70,60,45,0.15)"} strokeWidth={0.4} strokeDasharray="2 1" />
+            {/* Facade ЛДСП panel — 1px cosmetic gap */}
+            <rect x={sx + 1} y={dy + facadeGap / 2} width={elW - 2} height={facH}
+              fill={sel ? `${gc}18` : fHex} fillOpacity={0.85}
+              stroke={sel ? gc : "#8a7a6a"} strokeWidth={sel ? 1.2 : 0.5} />
+            {/* Edge banding on facade — top */}
+            <line x1={sx + 1} y1={dy + facadeGap / 2 + 0.3} x2={sx + elW - 1} y2={dy + facadeGap / 2 + 0.3}
+              stroke="rgba(255,255,255,0.06)" strokeWidth={0.3} />
+            {/* Handle */}
+            <rect x={sx + elW / 2 - 10} y={dy + facadeGap / 2 + facH / 2 - 1} width={20} height={2.5}
+              fill={sel ? gc : "#777"} rx={1} />
+            {/* Height label */}
+            <text x={sx + elW - 8} y={dy + facadeGap / 2 + facH / 2 + 3} textAnchor="end" fontSize={6}
+              fill={sel ? gc : "#444"} fontFamily="'IBM Plex Mono',monospace">{heights[i] || 150}</text>
+          </g>;
+        })}
+      </g>;
+    }
+
+    if (el.type === "rod") return <g key={el.id} data-element="1" onMouseDown={e => onDown(e, el)} style={{ cursor: "move" }}>
+      <line x1={sx} y1={sy} x2={sx + (el.w || 100) * SC} y2={sy} stroke={sel ? "#a855f7" : "#777"} strokeWidth={2.5} strokeLinecap="round" />
+      <circle cx={sx} cy={sy} r={3} fill={sel ? "#a855f7" : "#555"} /><circle cx={sx + (el.w || 100) * SC} cy={sy} r={3} fill={sel ? "#a855f7" : "#555"} />
+    </g>;
+
+    if (el.type === "door" && showDoors) {
+      const dw = (el.w || 100) * SC, dh = (el.h || iH) * SC, isL = el.hingeSide === "left";
+      const hn = (el.h || 600) > 1800 ? 4 : (el.h || 600) > 1200 ? 3 : 2;
+      const hps = Array.from({ length: hn }, (_, i) => i === 0 ? 0.08 : i === hn - 1 ? 0.92 : i / (hn - 1));
+      const fHex = facadeTexInfo.hex;
+      const isDark = parseInt(fHex.replace('#',''), 16) < 0x666666;
+      const HANDLE = 6;
+      return <g key={el.id} data-element="1" onMouseDown={e => { e.stopPropagation(); setSelId(el.id); }} style={{ cursor: "pointer" }}>
+        <rect x={sx} y={sy} width={dw} height={dh} fill={fHex} fillOpacity={0.85} stroke={sel ? "#fbbf24" : isDark ? "#5a4a3a" : "#bbb"} strokeWidth={sel ? 1.5 : 0.7} rx={1} />
+        <circle cx={isL ? sx + dw - 8 : sx + 8} cy={sy + dh / 2} r={2.5} fill={isDark ? "#aaa" : "#555"} />
+        {hps.map((p, hi) => <rect key={hi} x={isL ? sx - 1 : sx + dw - 3} y={sy + dh * p - 4} width={4} height={8} rx={1} fill={isDark ? "#888" : "#555"} />)}
+        <text x={sx + dw / 2} y={sy + dh / 2 + 3} textAnchor="middle" fontSize={7} fill={isDark ? "#ccc" : "#555"} fontFamily="'IBM Plex Mono',monospace" opacity={0.6}>{facadeTexInfo.name}</text>
+        {sel && <>
+          {/* Resize handles */}
+          <rect x={sx + dw / 2 - 12} y={sy - HANDLE / 2} width={24} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ns-resize" }}
+            onMouseDown={e => onDoorEdgeDrag(e, el, "top")} />
+          <rect x={sx + dw / 2 - 12} y={sy + dh - HANDLE / 2} width={24} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ns-resize" }}
+            onMouseDown={e => onDoorEdgeDrag(e, el, "bottom")} />
+          <rect x={sx - HANDLE / 2} y={sy + dh / 2 - 12} width={HANDLE} height={24} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ew-resize" }}
+            onMouseDown={e => onDoorEdgeDrag(e, el, "left")} />
+          <rect x={sx + dw - HANDLE / 2} y={sy + dh / 2 - 12} width={HANDLE} height={24} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ew-resize" }}
+            onMouseDown={e => onDoorEdgeDrag(e, el, "right")} />
+
+          {/* Width input — below door, centered */}
+          <line x1={sx + 1} y1={sy + dh + 6} x2={sx + dw - 1} y2={sy + dh + 6} stroke="rgba(217,119,6,0.4)" strokeWidth={0.5} />
+          <line x1={sx} y1={sy + dh + 3} x2={sx} y2={sy + dh + 9} stroke="rgba(217,119,6,0.4)" strokeWidth={0.4} />
+          <line x1={sx + dw} y1={sy + dh + 3} x2={sx + dw} y2={sy + dh + 9} stroke="rgba(217,119,6,0.4)" strokeWidth={0.4} />
+          <SvgInput x={sx + dw / 2} y={sy + dh + 16} width={50} value={Math.round(el.doorW || el.w)} color="#d97706" fontSize={9}
+            onChange={v => {
+              // Grow from anchored side: if left is wall → x stays, grow right. If right is wall → right stays, grow left.
+              const oldX = el.x || 0;
+              const oldW = Math.round(el.doorW || el.w);
+              let newX = oldX;
+              if (el.doorRightIsWall && !el.doorLeftIsWall) {
+                // Anchored right → grow left
+                newX = oldX + oldW - v;
+              } else if (!el.doorLeftIsWall && !el.doorRightIsWall) {
+                // Both studs → grow from center
+                newX = oldX - (v - oldW) / 2;
+              }
+              // doorLeftIsWall → x stays (default), grow right
+              updateEl(el.id, { w: v, doorW: v, x: newX, manualW: v });
+            }} />
+
+          {/* Height input — left of door, centered vertically */}
+          <line x1={sx - 6} y1={sy + 1} x2={sx - 6} y2={sy + dh - 1} stroke="rgba(96,165,250,0.4)" strokeWidth={0.5} />
+          <line x1={sx - 9} y1={sy} x2={sx - 3} y2={sy} stroke="rgba(96,165,250,0.4)" strokeWidth={0.4} />
+          <line x1={sx - 9} y1={sy + dh} x2={sx - 3} y2={sy + dh} stroke="rgba(96,165,250,0.4)" strokeWidth={0.4} />
+          <SvgInput x={sx - 10} y={sy + dh / 2 + 3} width={40} value={Math.round(el.doorH || el.h)} color="#5a8fd4" fontSize={8}
+            onChange={v => {
+              // Grow from anchored side: if top is wall → y stays, grow down. If bottom is wall → bottom stays, grow up.
+              const oldY = el.y || 0;
+              const oldH = Math.round(el.doorH || el.h);
+              let newY = oldY;
+              if (el.doorBottomIsWall && !el.doorTopIsWall) {
+                // Anchored bottom → grow up
+                newY = oldY + oldH - v;
+              } else if (!el.doorTopIsWall && !el.doorBottomIsWall) {
+                // Both shelves → grow from center
+                newY = oldY - (v - oldH) / 2;
+              }
+              // doorTopIsWall → y stays (default), grow down
+              updateEl(el.id, { h: v, doorH: v, y: newY, manualH: v });
+            }} />
+        </>}
+      </g>;
+    }
+    return null;
+  })}
+
+  {/* DIMS */}
+  {dims.map((d, i) => {
+    const dir = getDimDir(i);
+    if (d.t === "w") { const dx = (d.x + frameT) * SC, dy = (iH + frameT) * SC + 16, dw = d.w * SC; return <g key={`w${i}`}>
+      <line x1={dx + 1} y1={dy} x2={dx + dw - 1} y2={dy} stroke="rgba(217,119,6,0.3)" strokeWidth={0.6} />
+      <line x1={dx} y1={dy - 3} x2={dx} y2={dy + 3} stroke="rgba(217,119,6,0.3)" strokeWidth={0.4} />
+      <line x1={dx + dw} y1={dy - 3} x2={dx + dw} y2={dy + 3} stroke="rgba(217,119,6,0.3)" strokeWidth={0.4} />
+      <text x={dx + dw / 2 + 24} y={dy + 4} textAnchor="middle" fontSize={6} fill="#d9770644" style={{ cursor: "pointer" }} onClick={e => { e.stopPropagation(); toggleDimDir(i); }}>{dir === "left" ? "→" : "←"}</text>
+      <SvgInput x={dx + dw / 2} y={dy + 12} width={dw} value={Math.round(d.w)} color="#b87a20" fontSize={9} onChange={v => changeHorizDim(d, v, dir)} />
+    </g>; }
+    if (d.t === "h") { const dx = (d.x + frameT) * SC - 22, dy1 = (d.y + frameT) * SC, dy2 = (d.y + d.h + frameT) * SC, mid = (dy1 + dy2) / 2; return <g key={`h${i}`}>
+      <line x1={dx} y1={dy1 + 1} x2={dx} y2={dy2 - 1} stroke="rgba(96,165,250,0.3)" strokeWidth={0.6} />
+      <line x1={dx - 3} y1={dy1} x2={dx + 3} y2={dy1} stroke="rgba(96,165,250,0.3)" strokeWidth={0.4} />
+      <line x1={dx - 3} y1={dy2} x2={dx + 3} y2={dy2} stroke="rgba(96,165,250,0.3)" strokeWidth={0.4} />
+      <text x={dx} y={mid + 16} textAnchor="middle" fontSize={6} fill="#60a5fa44" style={{ cursor: "pointer" }} onClick={e => { e.stopPropagation(); toggleDimDir(i); }}>{dir === "top" ? "↓" : "↑"}</text>
+      <SvgInput x={dx - 3} y={mid + 3} width={40} value={Math.round(d.h)} color="#5a8fd4" fontSize={8} onChange={v => changeVertDim(d, v, dir)} />
+    </g>; }
+    return null;
+  })}
+  <SvgInput x={corpus.width * SC / 2} y={corpus.height * SC + 38} width={60} value={corpus.width} color="#777" fontSize={10} onChange={v => setCorpus(c => ({ ...c, width: Math.max(300, Math.min(3000, v)) }))} />
+  <text x={corpus.width * SC / 2 - 32} y={corpus.height * SC + 38} textAnchor="middle" fontSize={8} fill="#444">←</text>
+  <text x={corpus.width * SC / 2 + 32} y={corpus.height * SC + 38} textAnchor="middle" fontSize={8} fill="#444">→</text>
+  <SvgInput x={-32} y={corpus.height * SC / 2 + 3} width={40} value={corpus.height} color="#777" fontSize={10} onChange={v => setCorpus(c => ({ ...c, height: Math.max(400, Math.min(2700, v)) }))} />
+</svg>
+  );
+
+  // ══════════════════════════════════════════════════════
+  // MOBILE COMPONENTS (inline) — доступ к замыканию WardrobeEditor
+  // ══════════════════════════════════════════════════════
+
+  const MobileToolbarButton = ({ label, icon, active, highlight, onClick }: {
+    label: string; icon: string; active?: boolean; highlight?: boolean; onClick: () => void;
+  }) => (
+    <button
+      onClick={onClick}
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 2,
+        padding: "6px 2px",
+        border: "none",
+        borderRadius: 8,
+        background: active ? "rgba(217,119,6,0.18)" : "transparent",
+        color: active ? "#d97706" : highlight ? "#22c55e" : "#9ca3af",
+        fontSize: 10,
+        fontWeight: 700,
+        fontFamily: "'IBM Plex Mono',monospace",
+        cursor: "pointer",
+        position: "relative",
+        minHeight: 48,
+      }}
+    >
+      <span style={{ fontSize: 18, lineHeight: 1 }}>{icon}</span>
+      <span style={{ fontSize: 9, letterSpacing: "0.02em" }}>{label}</span>
+      {highlight && !active && (
+        <span style={{
+          position: "absolute", top: 4, right: 8,
+          width: 6, height: 6, borderRadius: 3, background: "#22c55e",
+        }} />
+      )}
+    </button>
+  );
+
+  // Tools sheet — содержит: размеры корпуса, кнопки инструментов, TexturePicker
+  const MobileToolsSheet = (
+    <div style={{ fontSize: 13 }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, marginBottom: 8 }}>Размеры корпуса</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
+          {[{ k: "width", l: "Ширина", mn: 300, mx: 3000 }, { k: "height", l: "Высота", mn: 300, mx: 2700 }, { k: "depth", l: "Глубина", mn: 250, mx: 700 }].map(p => (
+            <div key={p.k}>
+              <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>{p.l}</div>
+              <NumInput value={corpus[p.k as keyof typeof corpus] as number} onChange={v => setCorpus(c => ({ ...c, [p.k]: v }))} min={p.mn} max={p.mx} width="100%" />
+            </div>
+          ))}
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>Толщина ЛДСП, мм</div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[16, 18, 22].map(th => (
+              <button key={th} onClick={() => setCorpus(c => ({ ...c, thickness: th }))} style={{
+                flex: 1, padding: "10px 0", borderRadius: 6, fontSize: 13, fontWeight: 700,
+                cursor: "pointer", border: "none",
+                background: corpus.thickness === th ? "#d97706" : "rgba(30,30,40,0.5)",
+                color: corpus.thickness === th ? "#000" : "#9ca3af",
+              }}>{th}</button>
+            ))}
+          </div>
+        </div>
+        <button onClick={() => setShowCorpus(p => !p)} style={{
+          width: "100%", padding: "10px 0", borderRadius: 6, fontSize: 12, fontWeight: 700,
+          cursor: "pointer", border: "1px solid",
+          background: showCorpus ? "rgba(217,119,6,0.12)" : "rgba(100,100,100,0.08)",
+          color: showCorpus ? "#d97706" : "#888",
+          borderColor: showCorpus ? "rgba(217,119,6,0.3)" : "#333",
+        }}>{showCorpus ? "☑ Корпус ЛДСП" : "☐ Пустая рамка"}</button>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, marginBottom: 8 }}>Добавить элемент</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {TOOLS.map(it => (
+            <button key={it.type} onClick={() => { addEl(it.type); setMobileSheet(null); }} style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "14px 12px", borderRadius: 8,
+              cursor: "pointer",
+              background: placeMode === it.type ? "rgba(34,197,94,0.15)" : "rgba(30,30,40,0.4)",
+              border: placeMode === it.type ? "1px solid rgba(34,197,94,0.4)" : "1px solid rgba(60,60,70,0.3)",
+              color: placeMode === it.type ? "#22c55e" : "#d1d5db",
+              fontSize: 13,
+              fontWeight: 600,
+              minHeight: 52,
+            }}>
+              <span style={{ fontSize: 18, width: 24, textAlign: "center" }}>{it.icon}</span>
+              <span>{it.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, marginBottom: 8 }}>Материалы</div>
+        <TexturePicker
+          corpusTextureId={corpusTextureId}
+          facadeTextureId={facadeTextureId}
+          onCorpusChange={setCorpusTextureId}
+          onFacadeChange={setFacadeTextureId}
+          customTextures={customTextures}
+          onAddCustom={(tex) => setCustomTextures(prev => [...prev, tex])}
+          customBrands={customBrands}
+          onAddBrand={(name) => setCustomBrands(prev => [...prev, name])}
+        />
+      </div>
+    </div>
+  );
+
+  // Props sheet — свойства выделенного элемента
+  const MobilePropsSheet = selEl ? (
+    <div style={{ fontSize: 13 }}>
+      {selEl.type === "drawers" && (() => {
+        const cnt = selEl.count || 3;
+        const heights = selEl.drawerHeights || Array(cnt).fill(150);
+        return (
+          <>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Количество ящиков</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {[1, 2, 3, 4, 5].map(n => (
+                  <button key={n} onClick={() => updateEl(selEl.id, { count: n })} style={{
+                    flex: 1, padding: "12px 0", borderRadius: 6, fontSize: 14, fontWeight: 700,
+                    cursor: "pointer", border: "none",
+                    background: cnt === n ? "#22c55e" : "rgba(30,30,40,0.5)",
+                    color: cnt === n ? "#000" : "#888",
+                  }}>{n}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Высоты ящиков, мм</div>
+              {Array.from({ length: cnt }, (_, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, color: "#888", width: 24 }}>{i + 1}.</span>
+                  <NumInput value={heights[i] || 150} onChange={v => { const nh = [...heights]; nh[i] = Math.max(60, Math.min(600, v)); updateEl(selEl.id, { drawerHeights: nh }); }} min={60} max={600} color="#22c55e" width="100%" />
+                </div>
+              ))}
+              <div style={{ fontSize: 11, color: "#888", marginTop: 6 }}>Σ {heights.slice(0, cnt).reduce((a: number, b: number) => a + b, 0)}мм</div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Направляющие</div>
+              {GUIDES.map(gt => (
+                <button key={gt.id} onClick={() => updateEl(selEl.id, { guideType: gt.id })} style={{
+                  display: "block", width: "100%", textAlign: "left",
+                  padding: "12px 14px", borderRadius: 6, fontSize: 13, marginBottom: 6,
+                  cursor: "pointer", border: "1px solid transparent",
+                  background: (selEl.guideType || "roller") === gt.id ? "rgba(34,197,94,0.12)" : "rgba(30,30,40,0.4)",
+                  color: (selEl.guideType || "roller") === gt.id ? "#22c55e" : "#9ca3af",
+                  borderColor: (selEl.guideType || "roller") === gt.id ? "rgba(34,197,94,0.3)" : "transparent",
+                }}><b>{gt.label}</b> <span style={{ color: "#666", marginLeft: 8 }}>~{gt.p}₽</span></button>
+              ))}
+            </div>
+          </>
+        );
+      })()}
+
+      {selEl.type === "door" && (
+        <>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Тип петли</div>
+            {HINGES.map(ht => (
+              <button key={ht.id} onClick={() => updateEl(selEl.id, { hingeType: ht.id })} style={{
+                display: "block", width: "100%", textAlign: "left",
+                padding: "12px 14px", borderRadius: 6, fontSize: 13, marginBottom: 6,
+                cursor: "pointer", border: "1px solid transparent",
+                background: (selEl.hingeType || "overlay") === ht.id ? "rgba(217,119,6,0.12)" : "rgba(30,30,40,0.4)",
+                color: (selEl.hingeType || "overlay") === ht.id ? "#d97706" : "#9ca3af",
+              }}>{ht.label}</button>
+            ))}
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Сторона петель</div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {["left", "right"].map(s => (
+                <button key={s} onClick={() => updateEl(selEl.id, { hingeSide: s })} style={{
+                  flex: 1, padding: "12px 0", borderRadius: 6, fontSize: 13, fontWeight: 700,
+                  cursor: "pointer", border: "none",
+                  background: selEl.hingeSide === s ? "#d97706" : "rgba(30,30,40,0.5)",
+                  color: selEl.hingeSide === s ? "#000" : "#888",
+                }}>{s === "left" ? "← Лево" : "Право →"}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ fontSize: 11, color: "#666", marginBottom: 10, lineHeight: 1.5 }}>
+            {(selEl.hingeType || "overlay") === "overlay" ? "Накладная: +14мм корпус / +7мм стойка" : "Вкладная: зазор 2мм"}
+            {selEl.doorLeft !== undefined && <><br />Границы: {Math.round(selEl.doorLeft)}–{Math.round(selEl.doorRight)} × {Math.round(selEl.doorTop)}–{Math.round(selEl.doorBottom)}</>}
+          </div>
+        </>
+      )}
+
+      {selEl.type === "stud" && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Позиция и высота, мм</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8, marginBottom: 6 }}>
+            <div>
+              <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>X (от левой стенки)</div>
+              <NumInput value={Math.round(selEl.x)} onChange={v => updateEl(selEl.id, { x: Math.max(0, Math.min(iW - t, v)) })} min={0} max={iW} color="#60a5fa" width="100%" />
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Верх</div>
+              <NumInput value={Math.round(selEl.pTop || 0)} onChange={v => updateEl(selEl.id, { pTop: v, manualPTop: v })} min={0} max={iH} color="#60a5fa" width="100%" />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Низ</div>
+              <NumInput value={Math.round(selEl.pBot || iH)} onChange={v => updateEl(selEl.id, { pBot: v, manualPBot: v })} min={0} max={iH} color="#60a5fa" width="100%" />
+            </div>
+          </div>
+          <div style={{ fontSize: 11, color: "#666", marginTop: 6 }}>Высота: {Math.round((selEl.pBot || iH) - (selEl.pTop || 0))}мм</div>
+        </div>
+      )}
+
+      {selEl.type === "shelf" && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Позиция и размер, мм</div>
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Y (высота от верха)</div>
+            <NumInput value={Math.round(selEl.y)} onChange={v => updateEl(selEl.id, { y: Math.max(0, Math.min(iH, v)) })} min={0} max={iH} color="#d97706" width="100%" />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>X (от левой)</div>
+              <NumInput value={Math.round(selEl.x || 0)} onChange={v => updateEl(selEl.id, { x: v, manualX: v })} min={0} max={iW} color="#d97706" width="100%" />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Ширина</div>
+              <NumInput value={Math.round(selEl.w || iW)} onChange={v => updateEl(selEl.id, { w: v, manualW: v })} min={20} max={iW} color="#d97706" width="100%" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <button
+        onClick={() => { delSel(); setMobileSheet(null); }}
+        style={{
+          width: "100%", padding: "14px 0", borderRadius: 8, marginTop: 8,
+          background: "rgba(220,38,38,0.12)", color: "#ef4444",
+          fontSize: 13, fontWeight: 700,
+          border: "1px solid rgba(220,38,38,0.25)",
+          cursor: "pointer",
+        }}
+      >✕ Удалить элемент</button>
+    </div>
+  ) : (
+    <div style={{ textAlign: "center", padding: "40px 20px", color: "#666", fontSize: 13 }}>
+      <div style={{ fontSize: 32, marginBottom: 12, opacity: 0.4 }}>👆</div>
+      Тапни элемент на схеме, чтобы редактировать его свойства.
+    </div>
+  );
+
+  // Summary sheet — табы крепёж / детали / итого
+  const MobileSummarySheet = (
+    <div style={{ fontSize: 13 }}>
+      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid rgba(50,50,60,0.4)", marginBottom: 12 }}>
+        {[{ id: "hardware", l: "Крепёж" }, { id: "parts", l: "Детали" }, { id: "summary", l: "Итого" }].map(tb => (
+          <button
+            key={tb.id}
+            onClick={() => setPanel(tb.id)}
+            style={{
+              flex: 1, padding: "12px 0", fontSize: 11, fontWeight: 700,
+              textTransform: "uppercase", letterSpacing: "0.05em",
+              cursor: "pointer", border: "none",
+              background: "transparent",
+              color: panel === tb.id ? "#d97706" : "#666",
+              borderBottom: panel === tb.id ? "2px solid #d97706" : "2px solid transparent",
+            }}
+          >{tb.l}</button>
+        ))}
+      </div>
+
+      {panel === "hardware" && (
+        <div>
+          {hw.length === 0 ? (
+            <div style={{ color: "#666", fontStyle: "italic", textAlign: "center", padding: 20 }}>Нет крепежа</div>
+          ) : hw.map((h, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 0", borderBottom: "1px solid rgba(50,50,60,0.15)" }}>
+              <span style={{ fontSize: 16 }}>{h.i}</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, color: "#d1d5db" }}>{h.n}</div>
+                <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>{h.r}</div>
+              </div>
+              <span style={{ fontSize: 15, color: "#d97706", fontWeight: 900 }}>{h.q}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {panel === "parts" && (
+        <div>
+          {pts.length === 0 ? (
+            <div style={{ color: "#666", fontStyle: "italic", textAlign: "center", padding: 20 }}>Нет деталей</div>
+          ) : pts.map((p, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid rgba(50,50,60,0.15)" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, color: "#d1d5db" }}>{p.n}</div>
+                <div style={{ fontSize: 11, color: "#666", fontFamily: "'IBM Plex Mono',monospace", marginTop: 2 }}>{p.l}×{p.w}</div>
+              </div>
+              <span style={{ fontSize: 13, color: "#9ca3af" }}>{p.q}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {panel === "summary" && (
+        <div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+            <div style={{ background: "rgba(30,30,40,0.4)", borderRadius: 8, padding: 16, textAlign: "center" }}>
+              <div style={{ fontSize: 24, fontWeight: 900, color: "#d97706" }}>{area}</div>
+              <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>м² ЛДСП</div>
+            </div>
+            <div style={{ background: "rgba(30,30,40,0.4)", borderRadius: 8, padding: 16, textAlign: "center" }}>
+              <div style={{ fontSize: 24, fontWeight: 900, color: "#d1d5db" }}>{elements.length}</div>
+              <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>элементов</div>
+            </div>
+          </div>
+          <button style={{
+            width: "100%", padding: "14px 0", borderRadius: 8,
+            background: "#d97706", color: "#000",
+            fontSize: 13, fontWeight: 700,
+            border: "none", cursor: "pointer",
+          }}>📄 Экспорт CSV</button>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div style={{ minHeight: "100vh", color: "#e5e7eb", userSelect: "none", background: "#0b0c10", fontFamily: "'IBM Plex Mono',monospace" }} onMouseMove={onMove} onMouseUp={onUp}>
@@ -1161,6 +1769,74 @@ export default function WardrobeEditor() {
         </div>
       </div>
 
+      {/* ═══ MOBILE LAYOUT ═══ */}
+      {isMobile && (
+        <>
+          {/* MOBILE CANVAS */}
+          <div style={{
+            padding: 8,
+            paddingBottom: 80, // место для нижней тулбар-плашки
+            overflow: "auto",
+            minHeight: "calc(100vh - 46px - 64px)",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "center",
+          }}>
+            <div style={{
+              transform: `scale(${mobileCanvasScale})`,
+              transformOrigin: "top center",
+              width: svgW,
+              height: svgH,
+              flexShrink: 0,
+            }}>
+              {canvas}
+            </div>
+          </div>
+
+          {/* MOBILE BOTTOM TOOLBAR */}
+          <div style={{
+            position: "fixed",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            zIndex: 50,
+            background: "rgba(11,12,16,0.97)",
+            borderTop: "1px solid rgba(50,50,60,0.5)",
+            display: "flex",
+            justifyContent: "space-around",
+            padding: "8px 4px calc(8px + env(safe-area-inset-bottom))",
+            backdropFilter: "blur(8px)",
+          }}>
+            <MobileToolbarButton
+              label="Инстр."
+              icon="🛠"
+              active={mobileSheet === 'tools'}
+              onClick={() => setMobileSheet(mobileSheet === 'tools' ? null : 'tools')}
+            />
+            <MobileToolbarButton
+              label="Свойства"
+              icon="⚙"
+              active={mobileSheet === 'props'}
+              highlight={!!selEl}
+              onClick={() => setMobileSheet(mobileSheet === 'props' ? null : 'props')}
+            />
+            <MobileToolbarButton
+              label="Итого"
+              icon="📋"
+              active={mobileSheet === 'summary'}
+              onClick={() => setMobileSheet(mobileSheet === 'summary' ? null : 'summary')}
+            />
+            <MobileToolbarButton
+              label="3D"
+              icon="🧊"
+              onClick={() => setShow3d(true)}
+            />
+          </div>
+        </>
+      )}
+
+      {/* ═══ DESKTOP LAYOUT ═══ */}
+      {!isMobile && (
       <div style={{ display: "flex", maxWidth: 1600, margin: "0 auto" }}>
         {/* LEFT PANEL */}
         <div style={{ width: leftOpen ? 200 : 0, overflow: leftOpen ? "auto" : "hidden", transition: "width 0.2s", borderRight: "1px solid rgba(50,50,60,0.3)", flexShrink: 0, maxHeight: "calc(100vh - 46px)", position: "relative" }}>
@@ -1243,258 +1919,7 @@ export default function WardrobeEditor() {
 
         {/* SVG */}
         <div style={{ flex: 1, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto", minHeight: "calc(100vh - 46px)" }}>
-          <svg ref={svgRef} width={svgW} height={svgH} viewBox={`-50 -16 ${corpus.width * SC + 120} ${corpus.height * SC + 60}`} style={{ cursor: placeMode ? "crosshair" : "default", filter: "drop-shadow(0 4px 20px rgba(0,0,0,0.5))" }} onClick={onSvgClick}>
-            <defs>
-              <pattern id="g" width={100 * SC} height={100 * SC} patternUnits="userSpaceOnUse"><path d={`M ${100 * SC} 0 L 0 0 0 ${100 * SC}`} fill="none" stroke="#161720" strokeWidth={0.5} /></pattern>
-            </defs>
-            {/* ═══ FRAME / CORPUS ═══ */}
-            {(() => {
-              const cHex = corpusTexInfo.hex || "#8b7355";
-              const cStroke = "#4a3f35";
-              const tPx = t * SC;
-              const wPx = corpus.width * SC;
-              const hPx = corpus.height * SC;
-              const gap = 0.3;
-
-              if (!showCorpus) {
-                // Empty frame — dashed boundary, full area usable
-                return <>
-                  <rect x={0} y={0} width={wPx} height={hPx} fill="url(#g)" />
-                  <rect x={0} y={0} width={wPx} height={hPx} fill="none"
-                    stroke="#4a3f35" strokeWidth={1} strokeDasharray="6 3" />
-                  {/* Corner marks */}
-                  {[[0,0],[wPx,0],[0,hPx],[wPx,hPx]].map(([cx,cy], i) => (
-                    <g key={`c${i}`}>
-                      <line x1={cx - (cx > 0 ? 8 : -8)} y1={cy} x2={cx} y2={cy} stroke="#d97706" strokeWidth={0.8} />
-                      <line x1={cx} y1={cy - (cy > 0 ? 8 : -8)} x2={cx} y2={cy} stroke="#d97706" strokeWidth={0.8} />
-                    </g>
-                  ))}
-                </>;
-              }
-
-              return <>
-                {/* Inner background */}
-                <rect x={tPx} y={tPx} width={wPx - 2 * tPx} height={hPx - 2 * tPx} fill="url(#g)" />
-                {/* ДВП back panel — thin line inset */}
-                <rect x={tPx + 1} y={tPx + 1} width={wPx - 2 * tPx - 2} height={hPx - 2 * tPx - 2} fill="none" stroke="rgba(58,53,48,0.25)" strokeWidth={0.5} strokeDasharray="3 2" />
-                {/* Left side — full height */}
-                <rect x={0} y={0} width={tPx} height={hPx} fill={cHex} stroke={cStroke} strokeWidth={0.6} />
-                {/* Right side — full height */}
-                <rect x={wPx - tPx} y={0} width={tPx} height={hPx} fill={cHex} stroke={cStroke} strokeWidth={0.6} />
-                {/* Top — between sides */}
-                <rect x={tPx + gap} y={0} width={wPx - 2 * tPx - 2 * gap} height={tPx} fill={cHex} stroke={cStroke} strokeWidth={0.6} />
-                {/* Bottom — between sides */}
-                <rect x={tPx + gap} y={hPx - tPx} width={wPx - 2 * tPx - 2 * gap} height={tPx} fill={cHex} stroke={cStroke} strokeWidth={0.6} />
-                {/* Joint lines */}
-                <line x1={tPx} y1={tPx} x2={tPx + 6} y2={tPx} stroke="rgba(0,0,0,0.3)" strokeWidth={0.4} />
-                <line x1={wPx - tPx} y1={tPx} x2={wPx - tPx - 6} y2={tPx} stroke="rgba(0,0,0,0.3)" strokeWidth={0.4} />
-                <line x1={tPx} y1={hPx - tPx} x2={tPx + 6} y2={hPx - tPx} stroke="rgba(0,0,0,0.3)" strokeWidth={0.4} />
-                <line x1={wPx - tPx} y1={hPx - tPx} x2={wPx - tPx - 6} y2={hPx - tPx} stroke="rgba(0,0,0,0.3)" strokeWidth={0.4} />
-                {/* Edge banding */}
-                <line x1={0.3} y1={0} x2={0.3} y2={hPx} stroke="rgba(255,255,255,0.08)" strokeWidth={0.3} />
-                <line x1={wPx - 0.3} y1={0} x2={wPx - 0.3} y2={hPx} stroke="rgba(255,255,255,0.08)" strokeWidth={0.3} />
-                <line x1={tPx + gap} y1={0.3} x2={wPx - tPx - gap} y2={0.3} stroke="rgba(255,255,255,0.08)" strokeWidth={0.3} />
-                <line x1={tPx + gap} y1={hPx - 0.3} x2={wPx - tPx - gap} y2={hPx - 0.3} stroke="rgba(255,255,255,0.08)" strokeWidth={0.3} />
-              </>;
-            })()}
-
-            {/* Zone highlights */}
-            {zones.map((z, i) => {
-              const zoneMode = !!placeMode;
-              const isOccupied = zoneMode && (
-                (placeMode === "drawers" && elements.some(e => e.type === "drawers" && e.zoneId === z.id))
-              );
-              return <rect key={`z${i}`} x={(z.sl + frameT) * SC} y={(z.top + frameT) * SC} width={z.sw * SC} height={(z.bot - z.top) * SC}
-                fill={zoneMode ? (isOccupied ? "rgba(239,68,68,0.08)" : "rgba(34,197,94,0.08)") : "rgba(25,23,20,0.3)"}
-                stroke={zoneMode ? (isOccupied ? "rgba(239,68,68,0.2)" : "rgba(34,197,94,0.2)") : "rgba(217,119,6,0.06)"}
-                strokeWidth={zoneMode ? 1 : 0.5} strokeDasharray={zoneMode ? "4 2" : "2 2"}
-                style={zoneMode && !isOccupied ? { cursor: "pointer" } : {}} />;
-            })}
-
-            {elements.map(el => {
-              const sel = el.id === selId;
-              const sx = ((el.x || 0) + frameT) * SC, sy = ((el.y || 0) + frameT) * SC;
-              const noPointer = !!placeMode; // disable element interactions during door boundary picking
-
-              if (el.type === "shelf") {
-                const shW = (el.w || iW) * SC;
-                const shH = t * SC; // full ЛДСП thickness
-                const shX = sx;
-                // Smart Y positioning: at top edge (y≈0) → below line, at bottom edge (y≈iH) → above line, else centered
-                const elY = el.y || 0;
-                let shY;
-                if (elY < 5) shY = sy; // top — panel goes down from y=0
-                else if (elY > iH - 5) shY = sy - shH; // bottom — panel goes up from y=iH
-                else shY = sy - shH / 2; // middle — centered on line
-                const cHex = corpusTexInfo.hex || "#8b7355";
-                const jointGap = 0.3;
-                return <g key={el.id} data-element="1" onMouseDown={noPointer ? undefined : e => onDown(e, el)} style={{ cursor: noPointer ? "default" : "ns-resize", pointerEvents: noPointer ? "none" : "auto" }}>
-                  {/* Shelf ЛДСП panel */}
-                  <rect x={shX + jointGap} y={shY} width={shW - 2 * jointGap} height={shH} fill={sel ? "#d97706" : cHex} stroke={sel ? "#fbbf24" : "#6b5a45"} strokeWidth={sel ? 1.2 : 0.5} />
-                  {/* Front edge banding */}
-                  <line x1={shX + jointGap} y1={shY} x2={shX + shW - jointGap} y2={shY} stroke={sel ? "rgba(251,191,36,0.3)" : "rgba(255,255,255,0.08)"} strokeWidth={0.4} />
-                  {/* Joint marks at left/right abutment */}
-                  <line x1={shX + 0.5} y1={shY} x2={shX + 0.5} y2={shY + shH} stroke="rgba(0,0,0,0.25)" strokeWidth={0.3} />
-                  <line x1={shX + shW - 0.5} y1={shY} x2={shX + shW - 0.5} y2={shY + shH} stroke="rgba(0,0,0,0.25)" strokeWidth={0.3} />
-                </g>;
-              }
-
-              if (el.type === "stud") {
-                const cHex = corpusTexInfo.hex || "#8b7355";
-                const studLeft = ((el.x || 0) + frameT) * SC;
-                const studW = t * SC;
-                const pTopPx = ((el.pTop || 0) + frameT) * SC, pBotPx = ((el.pBot || iH) + frameT) * SC;
-                const pH = pBotPx - pTopPx;
-                const jointGap = 0.3;
-                return <g key={el.id} data-element="1" onMouseDown={e => onDown(e, el)} style={{ cursor: "ew-resize" }}>
-                  {/* Stud ЛДСП panel — between bounding shelves */}
-                  <rect x={studLeft} y={pTopPx + jointGap} width={studW} height={pH - 2 * jointGap} fill={sel ? "#3b82f6" : cHex} stroke={sel ? "#60a5fa" : "#5a4d3f"} strokeWidth={sel ? 1.2 : 0.5} />
-                  {/* Front edge banding */}
-                  <line x1={studLeft} y1={pTopPx + jointGap} x2={studLeft} y2={pBotPx - jointGap} stroke={sel ? "rgba(96,165,250,0.3)" : "rgba(255,255,255,0.08)"} strokeWidth={0.4} />
-                  {/* Top joint — where stud meets shelf/top panel */}
-                  <line x1={studLeft - 2} y1={pTopPx + jointGap} x2={studLeft + studW + 2} y2={pTopPx + jointGap} stroke="rgba(0,0,0,0.25)" strokeWidth={0.3} />
-                  {/* Bottom joint */}
-                  <line x1={studLeft - 2} y1={pBotPx - jointGap} x2={studLeft + studW + 2} y2={pBotPx - jointGap} stroke="rgba(0,0,0,0.25)" strokeWidth={0.3} />
-                  {/* Конфирмат marks at top and bottom */}
-                  <circle cx={studLeft + studW / 2} cy={pTopPx + jointGap + 3} r={0.8} fill="rgba(0,0,0,0.2)" />
-                  <circle cx={studLeft + studW / 2} cy={pBotPx - jointGap - 3} r={0.8} fill="rgba(0,0,0,0.2)" />
-                </g>;
-              }
-
-              if (el.type === "drawers") {
-                const cnt = el.count || 3, heights = el.drawerHeights || Array(cnt).fill(Math.floor((el.h || 450) / cnt));
-                const gc = (el.guideType || "roller") === "tandem" ? "#f59e0b" : (el.guideType || "roller") === "ball" ? "#60a5fa" : "#22c55e";
-                const fHex = facadeTexInfo.hex || "#f2efe8";
-                const elW = (el.w || 100) * SC;
-                let accY = 0;
-                const facadeGap = 2 * SC; // 2mm gap between facade panels
-                return <g key={el.id} data-element="1" onMouseDown={e => onDown(e, el)} style={{ cursor: "move" }}>
-                  {Array.from({ length: cnt }, (_, i) => {
-                    const dH = (heights[i] || 150) * SC;
-                    const dy = sy + accY * SC;
-                    accY += heights[i] || 150;
-                    const facH = dH - facadeGap;
-                    return <g key={i}>
-                      {/* Drawer box outline (inner) */}
-                      <rect x={sx + 4} y={dy + facadeGap / 2 + 2} width={elW - 8} height={facH - 4}
-                        fill="none" stroke={sel ? `${gc}33` : "rgba(70,60,45,0.15)"} strokeWidth={0.4} strokeDasharray="2 1" />
-                      {/* Facade ЛДСП panel — 1px cosmetic gap */}
-                      <rect x={sx + 1} y={dy + facadeGap / 2} width={elW - 2} height={facH}
-                        fill={sel ? `${gc}18` : fHex} fillOpacity={0.85}
-                        stroke={sel ? gc : "#8a7a6a"} strokeWidth={sel ? 1.2 : 0.5} />
-                      {/* Edge banding on facade — top */}
-                      <line x1={sx + 1} y1={dy + facadeGap / 2 + 0.3} x2={sx + elW - 1} y2={dy + facadeGap / 2 + 0.3}
-                        stroke="rgba(255,255,255,0.06)" strokeWidth={0.3} />
-                      {/* Handle */}
-                      <rect x={sx + elW / 2 - 10} y={dy + facadeGap / 2 + facH / 2 - 1} width={20} height={2.5}
-                        fill={sel ? gc : "#777"} rx={1} />
-                      {/* Height label */}
-                      <text x={sx + elW - 8} y={dy + facadeGap / 2 + facH / 2 + 3} textAnchor="end" fontSize={6}
-                        fill={sel ? gc : "#444"} fontFamily="'IBM Plex Mono',monospace">{heights[i] || 150}</text>
-                    </g>;
-                  })}
-                </g>;
-              }
-
-              if (el.type === "rod") return <g key={el.id} data-element="1" onMouseDown={e => onDown(e, el)} style={{ cursor: "move" }}>
-                <line x1={sx} y1={sy} x2={sx + (el.w || 100) * SC} y2={sy} stroke={sel ? "#a855f7" : "#777"} strokeWidth={2.5} strokeLinecap="round" />
-                <circle cx={sx} cy={sy} r={3} fill={sel ? "#a855f7" : "#555"} /><circle cx={sx + (el.w || 100) * SC} cy={sy} r={3} fill={sel ? "#a855f7" : "#555"} />
-              </g>;
-
-              if (el.type === "door" && showDoors) {
-                const dw = (el.w || 100) * SC, dh = (el.h || iH) * SC, isL = el.hingeSide === "left";
-                const hn = (el.h || 600) > 1800 ? 4 : (el.h || 600) > 1200 ? 3 : 2;
-                const hps = Array.from({ length: hn }, (_, i) => i === 0 ? 0.08 : i === hn - 1 ? 0.92 : i / (hn - 1));
-                const fHex = facadeTexInfo.hex;
-                const isDark = parseInt(fHex.replace('#',''), 16) < 0x666666;
-                const HANDLE = 6;
-                return <g key={el.id} data-element="1" onMouseDown={e => { e.stopPropagation(); setSelId(el.id); }} style={{ cursor: "pointer" }}>
-                  <rect x={sx} y={sy} width={dw} height={dh} fill={fHex} fillOpacity={0.85} stroke={sel ? "#fbbf24" : isDark ? "#5a4a3a" : "#bbb"} strokeWidth={sel ? 1.5 : 0.7} rx={1} />
-                  <circle cx={isL ? sx + dw - 8 : sx + 8} cy={sy + dh / 2} r={2.5} fill={isDark ? "#aaa" : "#555"} />
-                  {hps.map((p, hi) => <rect key={hi} x={isL ? sx - 1 : sx + dw - 3} y={sy + dh * p - 4} width={4} height={8} rx={1} fill={isDark ? "#888" : "#555"} />)}
-                  <text x={sx + dw / 2} y={sy + dh / 2 + 3} textAnchor="middle" fontSize={7} fill={isDark ? "#ccc" : "#555"} fontFamily="'IBM Plex Mono',monospace" opacity={0.6}>{facadeTexInfo.name}</text>
-                  {sel && <>
-                    {/* Resize handles */}
-                    <rect x={sx + dw / 2 - 12} y={sy - HANDLE / 2} width={24} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ns-resize" }}
-                      onMouseDown={e => onDoorEdgeDrag(e, el, "top")} />
-                    <rect x={sx + dw / 2 - 12} y={sy + dh - HANDLE / 2} width={24} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ns-resize" }}
-                      onMouseDown={e => onDoorEdgeDrag(e, el, "bottom")} />
-                    <rect x={sx - HANDLE / 2} y={sy + dh / 2 - 12} width={HANDLE} height={24} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ew-resize" }}
-                      onMouseDown={e => onDoorEdgeDrag(e, el, "left")} />
-                    <rect x={sx + dw - HANDLE / 2} y={sy + dh / 2 - 12} width={HANDLE} height={24} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ew-resize" }}
-                      onMouseDown={e => onDoorEdgeDrag(e, el, "right")} />
-
-                    {/* Width input — below door, centered */}
-                    <line x1={sx + 1} y1={sy + dh + 6} x2={sx + dw - 1} y2={sy + dh + 6} stroke="rgba(217,119,6,0.4)" strokeWidth={0.5} />
-                    <line x1={sx} y1={sy + dh + 3} x2={sx} y2={sy + dh + 9} stroke="rgba(217,119,6,0.4)" strokeWidth={0.4} />
-                    <line x1={sx + dw} y1={sy + dh + 3} x2={sx + dw} y2={sy + dh + 9} stroke="rgba(217,119,6,0.4)" strokeWidth={0.4} />
-                    <SvgInput x={sx + dw / 2} y={sy + dh + 16} width={50} value={Math.round(el.doorW || el.w)} color="#d97706" fontSize={9}
-                      onChange={v => {
-                        // Grow from anchored side: if left is wall → x stays, grow right. If right is wall → right stays, grow left.
-                        const oldX = el.x || 0;
-                        const oldW = Math.round(el.doorW || el.w);
-                        let newX = oldX;
-                        if (el.doorRightIsWall && !el.doorLeftIsWall) {
-                          // Anchored right → grow left
-                          newX = oldX + oldW - v;
-                        } else if (!el.doorLeftIsWall && !el.doorRightIsWall) {
-                          // Both studs → grow from center
-                          newX = oldX - (v - oldW) / 2;
-                        }
-                        // doorLeftIsWall → x stays (default), grow right
-                        updateEl(el.id, { w: v, doorW: v, x: newX, manualW: v });
-                      }} />
-
-                    {/* Height input — left of door, centered vertically */}
-                    <line x1={sx - 6} y1={sy + 1} x2={sx - 6} y2={sy + dh - 1} stroke="rgba(96,165,250,0.4)" strokeWidth={0.5} />
-                    <line x1={sx - 9} y1={sy} x2={sx - 3} y2={sy} stroke="rgba(96,165,250,0.4)" strokeWidth={0.4} />
-                    <line x1={sx - 9} y1={sy + dh} x2={sx - 3} y2={sy + dh} stroke="rgba(96,165,250,0.4)" strokeWidth={0.4} />
-                    <SvgInput x={sx - 10} y={sy + dh / 2 + 3} width={40} value={Math.round(el.doorH || el.h)} color="#5a8fd4" fontSize={8}
-                      onChange={v => {
-                        // Grow from anchored side: if top is wall → y stays, grow down. If bottom is wall → bottom stays, grow up.
-                        const oldY = el.y || 0;
-                        const oldH = Math.round(el.doorH || el.h);
-                        let newY = oldY;
-                        if (el.doorBottomIsWall && !el.doorTopIsWall) {
-                          // Anchored bottom → grow up
-                          newY = oldY + oldH - v;
-                        } else if (!el.doorTopIsWall && !el.doorBottomIsWall) {
-                          // Both shelves → grow from center
-                          newY = oldY - (v - oldH) / 2;
-                        }
-                        // doorTopIsWall → y stays (default), grow down
-                        updateEl(el.id, { h: v, doorH: v, y: newY, manualH: v });
-                      }} />
-                  </>}
-                </g>;
-              }
-              return null;
-            })}
-
-            {/* DIMS */}
-            {dims.map((d, i) => {
-              const dir = getDimDir(i);
-              if (d.t === "w") { const dx = (d.x + frameT) * SC, dy = (iH + frameT) * SC + 16, dw = d.w * SC; return <g key={`w${i}`}>
-                <line x1={dx + 1} y1={dy} x2={dx + dw - 1} y2={dy} stroke="rgba(217,119,6,0.3)" strokeWidth={0.6} />
-                <line x1={dx} y1={dy - 3} x2={dx} y2={dy + 3} stroke="rgba(217,119,6,0.3)" strokeWidth={0.4} />
-                <line x1={dx + dw} y1={dy - 3} x2={dx + dw} y2={dy + 3} stroke="rgba(217,119,6,0.3)" strokeWidth={0.4} />
-                <text x={dx + dw / 2 + 24} y={dy + 4} textAnchor="middle" fontSize={6} fill="#d9770644" style={{ cursor: "pointer" }} onClick={e => { e.stopPropagation(); toggleDimDir(i); }}>{dir === "left" ? "→" : "←"}</text>
-                <SvgInput x={dx + dw / 2} y={dy + 12} width={dw} value={Math.round(d.w)} color="#b87a20" fontSize={9} onChange={v => changeHorizDim(d, v, dir)} />
-              </g>; }
-              if (d.t === "h") { const dx = (d.x + frameT) * SC - 22, dy1 = (d.y + frameT) * SC, dy2 = (d.y + d.h + frameT) * SC, mid = (dy1 + dy2) / 2; return <g key={`h${i}`}>
-                <line x1={dx} y1={dy1 + 1} x2={dx} y2={dy2 - 1} stroke="rgba(96,165,250,0.3)" strokeWidth={0.6} />
-                <line x1={dx - 3} y1={dy1} x2={dx + 3} y2={dy1} stroke="rgba(96,165,250,0.3)" strokeWidth={0.4} />
-                <line x1={dx - 3} y1={dy2} x2={dx + 3} y2={dy2} stroke="rgba(96,165,250,0.3)" strokeWidth={0.4} />
-                <text x={dx} y={mid + 16} textAnchor="middle" fontSize={6} fill="#60a5fa44" style={{ cursor: "pointer" }} onClick={e => { e.stopPropagation(); toggleDimDir(i); }}>{dir === "top" ? "↓" : "↑"}</text>
-                <SvgInput x={dx - 3} y={mid + 3} width={40} value={Math.round(d.h)} color="#5a8fd4" fontSize={8} onChange={v => changeVertDim(d, v, dir)} />
-              </g>; }
-              return null;
-            })}
-            <SvgInput x={corpus.width * SC / 2} y={corpus.height * SC + 38} width={60} value={corpus.width} color="#777" fontSize={10} onChange={v => setCorpus(c => ({ ...c, width: Math.max(300, Math.min(3000, v)) }))} />
-            <text x={corpus.width * SC / 2 - 32} y={corpus.height * SC + 38} textAnchor="middle" fontSize={8} fill="#444">←</text>
-            <text x={corpus.width * SC / 2 + 32} y={corpus.height * SC + 38} textAnchor="middle" fontSize={8} fill="#444">→</text>
-            <SvgInput x={-32} y={corpus.height * SC / 2 + 3} width={40} value={corpus.height} color="#777" fontSize={10} onChange={v => setCorpus(c => ({ ...c, height: Math.max(400, Math.min(2700, v)) }))} />
-          </svg>
+          {canvas}
         </div>
 
         {!rightOpen && <button onClick={() => setRightOpen(true)} style={{ position: "fixed", right: 0, top: "50%", transform: "translateY(-50%)", zIndex: 30, width: 24, height: 60, borderRadius: "6px 0 0 6px", background: "#1a1b22", border: "1px solid #333", borderRight: "none", color: "#888", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>◀</button>}
@@ -1520,6 +1945,37 @@ export default function WardrobeEditor() {
           </>}
         </div>
       </div>
+      )}
+
+      {/* ═══ MOBILE BOTTOM SHEETS ═══ */}
+      {isMobile && (
+        <>
+          <BottomSheet
+            isOpen={mobileSheet === 'tools'}
+            onClose={() => setMobileSheet(null)}
+            title="Инструменты и размеры"
+          >
+            {MobileToolsSheet}
+          </BottomSheet>
+
+          <BottomSheet
+            isOpen={mobileSheet === 'props'}
+            onClose={() => setMobileSheet(null)}
+            title={selEl ? `Свойства: ${MOBILE_EL_LABELS[selEl.type] || selEl.type}` : 'Свойства'}
+          >
+            {MobilePropsSheet}
+          </BottomSheet>
+
+          <BottomSheet
+            isOpen={mobileSheet === 'summary'}
+            onClose={() => setMobileSheet(null)}
+            title="Итого и детали"
+          >
+            {MobileSummarySheet}
+          </BottomSheet>
+        </>
+      )}
+
       {show3d && <Wardrobe3D corpus={corpus} elements={elements} corpusTexture={corpusTexInfo} facadeTexture={facadeTexInfo} showDoors={showDoors} showCorpus={showCorpus} onClose={() => setShow3d(false)} />}
     </div>
   );
