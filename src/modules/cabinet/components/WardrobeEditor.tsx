@@ -1223,24 +1223,6 @@ export default function WardrobeEditor() {
     setElements(prev => prev.length ? adjust(prev) : prev);
   }, [iW, iH, t, adjust]);
 
-  // Блокируем скролл страницы и pull-to-refresh когда идёт drag или активен режим перемещения
-  useEffect(() => {
-    if (!isMobile) return;
-    const isLocked = !!drag || !!mobileDragMode;
-    if (isLocked) {
-      const prevHtml = document.documentElement.style.overscrollBehavior;
-      const prevBody = document.body.style.overscrollBehavior;
-      document.documentElement.style.overscrollBehavior = "none";
-      document.body.style.overscrollBehavior = "none";
-      document.documentElement.style.touchAction = "none";
-      return () => {
-        document.documentElement.style.overscrollBehavior = prevHtml;
-        document.body.style.overscrollBehavior = prevBody;
-        document.documentElement.style.touchAction = "";
-      };
-    }
-  }, [isMobile, drag, mobileDragMode]);
-
   const hw = useMemo(() => calcHW(corpus, elements, showCorpus), [corpus, elements, showCorpus]);
   const pts = useMemo(() => calcParts(corpus, elements, showCorpus), [corpus, elements, showCorpus]);
   const area = useMemo(() => pts.filter(p => !p.m).reduce((s, p) => s + p.q * p.l * p.w / 1e6, 0).toFixed(3), [pts]);
@@ -1310,6 +1292,24 @@ export default function WardrobeEditor() {
   const [mobileSheet, setMobileSheet] = useState<null | 'tools' | 'props' | 'summary'>(null);
   const [userZoom, setUserZoom] = useState<number>(1); // Дополнительный пинч-зум на мобильном (0.5-3)
   const pinchRef = useRef<{ startDist: number; startZoom: number } | null>(null);
+
+  // Блокируем скролл страницы и pull-to-refresh когда идёт drag или активен режим перемещения
+  useEffect(() => {
+    if (!isMobile) return;
+    const isLocked = !!drag || !!mobileDragMode;
+    if (isLocked) {
+      const prevHtml = document.documentElement.style.overscrollBehavior;
+      const prevBody = document.body.style.overscrollBehavior;
+      document.documentElement.style.overscrollBehavior = "none";
+      document.body.style.overscrollBehavior = "none";
+      document.documentElement.style.touchAction = "none";
+      return () => {
+        document.documentElement.style.overscrollBehavior = prevHtml;
+        document.body.style.overscrollBehavior = prevBody;
+        document.documentElement.style.touchAction = "";
+      };
+    }
+  }, [isMobile, drag, mobileDragMode]);
 
   const svgW = corpus.width * SC + 120, svgH = corpus.height * SC + 60;
 
