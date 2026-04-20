@@ -267,6 +267,14 @@ export default function WardrobeEditor() {
      For doors: special mode where user picks 4 boundaries */
   const [placeMode, setPlaceMode] = useState(null); // null | "shelf" | "stud" | "drawers" | "rod" | "door"
 
+  // Mobile state — ВСЕ объявления вместе, чтобы минификатор не ломал порядок
+  const isMobile = useIsMobile(768);
+  const [mobileDragMode, setMobileDragMode] = useState<string | null>(null);
+  const [mobileSheet, setMobileSheet] = useState<null | 'tools' | 'props' | 'summary'>(null);
+  const [userZoom, setUserZoom] = useState<number>(1);
+  const lastTapElRef = useRef<{ id: string | null; time: number }>({ id: null, time: 0 });
+  const pinchRef = useRef<{ startDist: number; startZoom: number } | null>(null);
+
   const orderRef = useRef(1);
   const svgRef = useRef(null);
 
@@ -976,12 +984,6 @@ export default function WardrobeEditor() {
     setSelId(null);
   }, [placeMode, toSvg, zones, placeInZone, elements, iW, iH, t]);
 
-  // Ref для отслеживания двойного тапа и drag-режима на мобильном
-  // Ref для отслеживания последнего тапа (для определения double-tap)
-  const lastTapElRef = useRef<{ id: string | null; time: number }>({ id: null, time: 0 });
-  // State: id элемента, у которого активирован режим перемещения на мобильном (после double-tap)
-  const [mobileDragMode, setMobileDragMode] = useState<string | null>(null);
-
   const onDown = useCallback((e, el) => {
     if (placeMode) return;
     e.stopPropagation();
@@ -1288,10 +1290,7 @@ export default function WardrobeEditor() {
     else { if (!tryBottom()) tryTop(); }
   }, [topLevelCols, elements, iH, updateEl]);
 
-  const isMobile = useIsMobile(768);
-  const [mobileSheet, setMobileSheet] = useState<null | 'tools' | 'props' | 'summary'>(null);
-  const [userZoom, setUserZoom] = useState<number>(1); // Дополнительный пинч-зум на мобильном (0.5-3)
-  const pinchRef = useRef<{ startDist: number; startZoom: number } | null>(null);
+  const svgW = corpus.width * SC + 120, svgH = corpus.height * SC + 60;
 
   // Блокируем скролл страницы и pull-to-refresh когда идёт drag или активен режим перемещения
   useEffect(() => {
@@ -1310,8 +1309,6 @@ export default function WardrobeEditor() {
       };
     }
   }, [isMobile, drag, mobileDragMode]);
-
-  const svgW = corpus.width * SC + 120, svgH = corpus.height * SC + 60;
 
   // Для мобильного: масштабируем canvas через CSS transform, чтобы влез в экран
   // baseFit — автоматический фит под ширину экрана, userZoom — пинч-зум от пользователя
