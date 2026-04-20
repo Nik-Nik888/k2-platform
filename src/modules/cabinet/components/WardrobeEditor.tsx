@@ -2034,14 +2034,13 @@ export default function WardrobeEditor() {
             style={{
               padding: 8,
               paddingBottom: 80, // место для нижней тулбар-плашки
-              overflow: "auto",
               minHeight: "calc(100vh - 46px - 64px)",
               display: "flex",
               alignItems: "flex-start",
               justifyContent: "center",
-              // Когда активен режим перемещения или pinch — блокируем скролл/pull-to-refresh
+              // Когда активен drag/режим перемещения/pinch — блокируем pan-y (скролл),
+              // иначе разрешаем вертикальный скролл всей страницы
               touchAction: (drag || mobileDragMode || pinchRef.current) ? "none" : "pan-y",
-              overscrollBehavior: "contain",
             }}>
             <div style={{
               transform: `scale(${mobileCanvasScale})`,
