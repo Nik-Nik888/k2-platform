@@ -106,3 +106,54 @@ export async function updateOrderStatus(
   }
   return true;
 }
+
+// ── Дубли заказов клиента ─────────────────────────────────
+
+// Получить активные заказы того же клиента, кроме текущего
+export async function fetchOtherActiveOrdersOfClient(
+  clientId: string,
+  currentOrderId: string
+): Promise<Order[]> {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('client_id', clientId)
+    .neq('id', currentOrderId)
+    .neq('status', 'completed')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Ошибка загрузки дублей:', error.message);
+    return [];
+  }
+  return (data || []) as Order[];
+}
+
+// Слить source_id → target_id (удаляет source, добавляет notes к target)
+export async function mergeOrders(
+  sourceId: string,
+  targetId: string
+): Promise<boolean> {
+  const { error } = await supabase.rpc('merge_orders', {
+    source_id: sourceId,
+    target_id: targetId,
+  });
+  if (error) {
+    console.error('Ошибка слияния заказов:', error.message);
+    return false;
+  }
+  return true;
+}
+
+// Отметить "больше не предупреждать о дублях для этого заказа"
+export async function setIgnoreDuplicates(orderId: string, value: boolean = true): Promise<boolean> {
+  const { error } = await supabase
+    .from('orders')
+    .update({ ignore_duplicates: value })
+    .eq('id', orderId);
+  if (error) {
+    console.error('Ошибка setIgnoreDuplicates:', error.message);
+    return false;
+  }
+  return true;
+}

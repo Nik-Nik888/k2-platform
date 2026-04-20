@@ -77,6 +77,7 @@ export interface Order {
   assigned_to: string | null;  // user_id
   scheduled_date: string | null;
   notes: string | null;
+  ignore_duplicates?: boolean;
   created_at: string;
   updated_at: string;
 }

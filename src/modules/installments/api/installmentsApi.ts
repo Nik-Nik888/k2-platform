@@ -118,7 +118,9 @@ export function generateSchedule(
 // ══════════════════════════════════════════════════════════
 
 // Загрузить список рассрочек (с данными клиента и заказа)
-export async function fetchInstallments(filter?: InstallmentStatus | 'all'): Promise<Installment[]> {
+export async function fetchInstallments(
+  filter?: InstallmentStatus | InstallmentStatus[] | 'all'
+): Promise<Installment[]> {
   const orgId = useAuthStore.getState().organization?.id;
   if (!orgId) return [];
 
@@ -129,7 +131,11 @@ export async function fetchInstallments(filter?: InstallmentStatus | 'all'): Pro
     .order('created_at', { ascending: false });
 
   if (filter && filter !== 'all') {
-    q = q.eq('status', filter);
+    if (Array.isArray(filter)) {
+      q = q.in('status', filter);
+    } else {
+      q = q.eq('status', filter);
+    }
   }
 
   const { data, error } = await q;

@@ -24,8 +24,15 @@ export default function InstallmentsPage() {
   async function load() {
     setLoading(true);
     try {
-      const filter: InstallmentStatus | 'all' =
-        tab === 'overdue' ? 'overdue' : tab === 'all' ? 'all' : (tab as InstallmentStatus);
+      let filter: InstallmentStatus | InstallmentStatus[] | 'all';
+      if (tab === 'active') {
+        // На вкладке "Активные" показываем и просроченные — это всё ещё действующие договоры
+        filter = ['active', 'overdue'];
+      } else if (tab === 'all') {
+        filter = 'all';
+      } else {
+        filter = tab as InstallmentStatus;
+      }
       const data = await fetchInstallments(filter);
       setItems(data);
     } catch (e: any) {
@@ -126,10 +133,14 @@ function InstallmentCard({ inst, onClick }: { inst: Installment; onClick: () => 
     cancelled: 'Отменена',
   };
 
+  const isOverdue = inst.status === 'overdue';
+
   return (
     <div
       onClick={onClick}
-      className="bg-white border rounded-lg p-4 hover:shadow-md cursor-pointer transition"
+      className={`bg-white border rounded-lg p-4 hover:shadow-md cursor-pointer transition ${
+        isOverdue ? 'border-red-300 bg-red-50/30' : ''
+      }`}
     >
       <div className="flex items-start justify-between">
         <div className="flex-1">

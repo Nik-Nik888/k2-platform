@@ -7,6 +7,7 @@ import {
   ChevronRight, GripVertical, Loader2, AlertCircle, Users,
 } from 'lucide-react';
 import ClientInstallments from '@modules/installments/components/ClientInstallments';
+import OrderDuplicatesWarning from '../components/OrderDuplicatesWarning';
 
 // ─── Этапы канбана ──────────────────────────────────────
 const STAGES: { status: OrderStatus; label: string; color: string; bg: string }[] = [
@@ -198,10 +199,12 @@ function OrderCard({
 
 // ─── Панель деталей заказа ──────────────────────────────
 function OrderDetail({
-  order, client, onClose, onStatusChange,
+  order, client, onClose, onStatusChange, onRefresh, onSelectOrder,
 }: {
   order: Order; client: Client | undefined; onClose: () => void;
   onStatusChange: (status: OrderStatus) => void;
+  onRefresh: () => void;
+  onSelectOrder: (id: string | null) => void;
 }) {
   const currentStageIdx = STAGES.findIndex((s) => s.status === order.status);
   const currentStage = STAGES[currentStageIdx];
@@ -247,6 +250,14 @@ function OrderDetail({
                 </p>
               </div>
             </div>
+          )}
+
+          {client && (
+            <OrderDuplicatesWarning
+              order={order}
+              onRefresh={onRefresh}
+              onMergedInto={(targetId) => onSelectOrder(targetId)}
+            />
           )}
 
           {client && (
@@ -528,7 +539,10 @@ export function CrmPage() {
             setJustDropped(selectedOrder.id);
             setTimeout(() => setJustDropped(null), 600);
             selectOrder(null);
-          }} />
+          }}
+          onRefresh={loadData}
+          onSelectOrder={selectOrder}
+        />
       )}
 
       {showAddClient && (
