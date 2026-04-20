@@ -568,6 +568,8 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
         zoom = Math.max(0.3, Math.min(3, zoom + e.deltaY * -0.0008));
       };
       const onPointerDown = e => {
+        // На тач-устройствах предотвращаем скролл страницы
+        if (e.pointerType === 'touch') e.preventDefault();
         isDragging = true;
         prevX = e.clientX;
         prevY = e.clientY;
@@ -582,10 +584,43 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
       };
       const onPointerUp = () => isDragging = false;
 
+      // ── Touch: pinch-zoom двумя пальцами ──────────────
+      let pinchStartDist = 0;
+      let pinchStartZoom = 1;
+      const onTouchStart = e => {
+        if (e.touches.length === 2) {
+          e.preventDefault();
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
+          pinchStartDist = Math.sqrt(dx * dx + dy * dy);
+          pinchStartZoom = zoom;
+          isDragging = false; // при pinch отключаем вращение
+        }
+      };
+      const onTouchMove = e => {
+        if (e.touches.length === 2 && pinchStartDist > 0) {
+          e.preventDefault();
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
+          const dist2 = Math.sqrt(dx * dx + dy * dy);
+          zoom = Math.max(0.3, Math.min(3, pinchStartZoom * (pinchStartDist / dist2)));
+        }
+      };
+      const onTouchEnd = () => {
+        pinchStartDist = 0;
+      };
+
       renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
       renderer.domElement.addEventListener("pointerdown", onPointerDown);
       renderer.domElement.addEventListener("pointermove", onPointerMove);
       renderer.domElement.addEventListener("pointerup", onPointerUp);
+      renderer.domElement.addEventListener("pointercancel", onPointerUp);
+      renderer.domElement.addEventListener("touchstart", onTouchStart, { passive: false });
+      renderer.domElement.addEventListener("touchmove", onTouchMove, { passive: false });
+      renderer.domElement.addEventListener("touchend", onTouchEnd);
+      renderer.domElement.addEventListener("touchcancel", onTouchEnd);
+      // Предотвращаем скролл браузера на канвасе
+      renderer.domElement.style.touchAction = "none";
 
       const animate = () => {
         stateRef.current.animId = requestAnimationFrame(animate);
@@ -615,6 +650,11 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
         renderer.domElement.removeEventListener("pointerdown", onPointerDown);
         renderer.domElement.removeEventListener("pointermove", onPointerMove);
         renderer.domElement.removeEventListener("pointerup", onPointerUp);
+        renderer.domElement.removeEventListener("pointercancel", onPointerUp);
+        renderer.domElement.removeEventListener("touchstart", onTouchStart);
+        renderer.domElement.removeEventListener("touchmove", onTouchMove);
+        renderer.domElement.removeEventListener("touchend", onTouchEnd);
+        renderer.domElement.removeEventListener("touchcancel", onTouchEnd);
         window.removeEventListener("resize", onResize);
         renderer.dispose();
       };
@@ -657,7 +697,7 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
               fontFamily: "'IBM Plex Mono',monospace",
             }}>
               {corpus.width}×{corpus.height}×{corpus.depth} мм · Кромка · Петли · ДВП
-              <span style={{ marginLeft: 8, color: "#555" }}>Тяни = вращение · Скролл = зум</span>
+              <span style={{ marginLeft: 8, color: "#555" }}>Палец = вращение · 2 пальца = зум</span>
             </div>
           </div>
         </div>

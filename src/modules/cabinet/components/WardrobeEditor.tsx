@@ -842,25 +842,79 @@ export default function WardrobeEditor() {
       const innerW = bounds.right.x - innerLeft;
       const hingeType = "overlay";
 
+      // Ищем уже существующие двери в этом же проёме (с совпадающими границами top/bottom)
+      // — чтобы новая дверь не накладывалась, а делила проём пополам
+      const sameBoundsDoors = elements.filter(e =>
+        e.type === "door"
+        && Math.abs((e.doorTop || 0) - bounds.top.y) < 5
+        && Math.abs((e.doorBottom || iH) - bounds.bottom.y) < 5
+        && (e.doorLeft || 0) >= bounds.left.x - 5
+        && (e.doorRight || iW) <= bounds.right.x + 5
+      );
+      // Куда именно вставать: если клик в левой половине проёма — занимаем левую половину,
+      // иначе правую (если есть свободное место)
+      const openingMid = (bounds.left.x + bounds.right.x) / 2;
+      const wantLeftHalf = clickX < openingMid;
+
+      let effLeft = bounds.left.x;
+      let effRight = bounds.right.x;
+      let effLeftIsWall = bounds.left.isWall;
+      let effRightIsWall = bounds.right.isWall;
+
+      if (sameBoundsDoors.length > 0) {
+        // Определяем какая половина свободна
+        const hasDoorLeft = sameBoundsDoors.some(d => ((d.doorLeft || 0) + (d.doorRight || iW)) / 2 < openingMid);
+        const hasDoorRight = sameBoundsDoors.some(d => ((d.doorLeft || 0) + (d.doorRight || iW)) / 2 >= openingMid);
+        // Если обе половины заняты — ставим как раньше (поверх)
+        if (hasDoorLeft && hasDoorRight) {
+          // fallback — накладываем (это граничный случай)
+        } else if (hasDoorLeft && !hasDoorRight) {
+          // занята левая половина → ставим правую
+          effLeft = openingMid;
+          effLeftIsWall = false; // теперь это граница с другой дверью, не стена
+        } else if (!hasDoorLeft && hasDoorRight) {
+          // занята правая → ставим левую
+          effRight = openingMid;
+          effRightIsWall = false;
+        } else if (wantLeftHalf) {
+          effRight = openingMid;
+          effRightIsWall = false;
+        } else {
+          effLeft = openingMid;
+          effLeftIsWall = false;
+        }
+      }
+
+      const effLeftOffset = effLeftIsWall ? OC : OS;
+      const effRightOffset = effRightIsWall ? OC : OS;
+      const effInnerLeft = effLeft + (effLeftIsWall ? 0 : t);
+      const effInnerW = effRight - effInnerLeft;
+
       let dX, dW, dY, dH;
       if (hingeType === "overlay") {
-        dX = innerLeft - lo;
-        dW = innerW + lo + ro;
+        dX = effInnerLeft - effLeftOffset;
+        dW = effInnerW + effLeftOffset + effRightOffset;
         dY = bounds.top.y - to;
         dH = (bounds.bottom.y - bounds.top.y) + to + bo;
       } else {
         const gap = 2;
-        dX = innerLeft + gap;
-        dW = innerW - gap * 2;
+        dX = effInnerLeft + gap;
+        dW = effInnerW - gap * 2;
         dY = bounds.top.y + gap;
         dH = (bounds.bottom.y - bounds.top.y) - gap * 2;
       }
 
+      // Автоматический выбор стороны петель: если дверь левее центра своего эффективного проёма
+      // — петли слева, если правее — справа (ручки оказываются ближе к центру)
+      const doorCenterX = dX + dW / 2;
+      const openingCenterX = (effLeft + effRight) / 2;
+      const autoHingeSide = doorCenterX < openingCenterX ? "left" : "right";
+
       el = {
         id, type: "door", x: dX, y: dY, w: dW, h: dH, doorW: dW, doorH: dH,
-        hingeSide: "left", hingeType,
-        doorLeft: bounds.left.x, doorRight: bounds.right.x, doorTop: bounds.top.y, doorBottom: bounds.bottom.y,
-        doorLeftIsWall: bounds.left.isWall, doorRightIsWall: bounds.right.isWall,
+        hingeSide: autoHingeSide, hingeType,
+        doorLeft: effLeft, doorRight: effRight, doorTop: bounds.top.y, doorBottom: bounds.bottom.y,
+        doorLeftIsWall: effLeftIsWall, doorRightIsWall: effRightIsWall,
         doorTopIsWall: bounds.top.isWall, doorBottomIsWall: bounds.bottom.isWall,
         _order,
       };
