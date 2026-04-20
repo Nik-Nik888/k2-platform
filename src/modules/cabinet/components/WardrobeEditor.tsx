@@ -1039,9 +1039,16 @@ export default function WardrobeEditor() {
 
   /* Build sorted boundary lists for door resize snapping */
   const doorSnapTargets = useMemo(() => {
+    // vTargets: границы всех вертикальных "стен/стоек/других дверей", к которым можно snap-нуться
+    const otherDoorBounds: { pos: number; isWall: boolean }[] = [];
+    elements.filter(e => e.type === "door").forEach(d => {
+      if (d.doorLeft !== undefined) otherDoorBounds.push({ pos: d.doorLeft, isWall: d.doorLeftIsWall ?? false });
+      if (d.doorRight !== undefined) otherDoorBounds.push({ pos: d.doorRight, isWall: d.doorRightIsWall ?? false });
+    });
     const vTargets = [
       { pos: 0, isWall: true },
       ...elements.filter(e => e.type === "stud").map(st => ({ pos: st.x, isWall: false })),
+      ...otherDoorBounds,
       { pos: iW, isWall: true },
     ].sort((a, b) => a.pos - b.pos);
     const hTargets = [
@@ -1162,6 +1169,12 @@ export default function WardrobeEditor() {
         if (drag.type === "shelf") {
           const ny = Math.max(0, Math.min(iH, Math.round(c.y - drag.oy)));
           return { ...el, y: ny };
+        }
+        if (drag.type === "door") {
+          // Дверь двигается по X и Y одновременно, в пределах iW/iH
+          const nx = Math.max(0, Math.min(iW - (el.w || 50), Math.round(c.x - drag.ox)));
+          const ny = Math.max(0, Math.min(iH - (el.h || 50), Math.round(c.y - drag.oy)));
+          return { ...el, x: nx, y: ny };
         }
         const ny = Math.max(0, Math.min(iH - (drag.type === "drawers" ? (el.h || 450) : 20), Math.round(c.y - drag.oy)));
         return { ...el, y: ny, _dragX: c.x };
@@ -1529,11 +1542,11 @@ export default function WardrobeEditor() {
       const hps = Array.from({ length: hn }, (_, i) => i === 0 ? 0.08 : i === hn - 1 ? 0.92 : i / (hn - 1));
       const fHex = facadeTexInfo.hex;
       const isDark = parseInt(fHex.replace('#',''), 16) < 0x666666;
-      // На мобильном ручки видны шире (14px) + невидимый hit-target 28px для удобства пальца
+      // На мобильном ручки видны шире (14px) + невидимый hit-target 44px для удобства пальца
       const HANDLE = isMobile ? 14 : 6;
-      const HIT = isMobile ? 28 : 10;
-      const LEN = isMobile ? 40 : 24;
-      return <g key={el.id} data-element="1" onMouseDown={e => { e.stopPropagation(); setSelId(el.id); }} onTouchStart={e => { e.stopPropagation(); setSelId(el.id); }} style={{ cursor: "pointer" }}>
+      const HIT = isMobile ? 44 : 10;
+      const LEN = isMobile ? 48 : 24;
+      return <g key={el.id} data-element="1" onMouseDown={e => onDown(e, el)} onTouchStart={e => onDown(e, el)} style={{ cursor: "pointer" }}>
         <rect x={sx} y={sy} width={dw} height={dh} fill={fHex} fillOpacity={0.85} stroke={sel ? "#fbbf24" : isDark ? "#5a4a3a" : "#bbb"} strokeWidth={sel ? 1.5 : 0.7} rx={1} />
         <circle cx={isL ? sx + dw - 8 : sx + 8} cy={sy + dh / 2} r={2.5} fill={isDark ? "#aaa" : "#555"} />
         {hps.map((p, hi) => <rect key={hi} x={isL ? sx - 1 : sx + dw - 3} y={sy + dh * p - 4} width={4} height={8} rx={1} fill={isDark ? "#888" : "#555"} />)}
