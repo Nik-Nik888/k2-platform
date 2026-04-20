@@ -1562,60 +1562,23 @@ export default function WardrobeEditor() {
           {/* RIGHT */}
           <rect x={sx + dw - HANDLE / 2} y={sy + dh / 2 - LEN / 2} width={HANDLE} height={LEN} rx={2} fill="#d97706" opacity={0.9} style={{ pointerEvents: "none" }} />
 
-          {/* Width/Height inputs показываем только на десктопе — на мобильном они перекрываются
-              с соседними элементами и DIMS. На мобильном пользователь правит через BottomSheet. */}
-          {!isMobile && <>
-          {/* Width input — below door, centered */}
-          <line x1={sx + 1} y1={sy + dh + 6} x2={sx + dw - 1} y2={sy + dh + 6} stroke="rgba(217,119,6,0.4)" strokeWidth={0.5} />
-          <line x1={sx} y1={sy + dh + 3} x2={sx} y2={sy + dh + 9} stroke="rgba(217,119,6,0.4)" strokeWidth={0.4} />
-          <line x1={sx + dw} y1={sy + dh + 3} x2={sx + dw} y2={sy + dh + 9} stroke="rgba(217,119,6,0.4)" strokeWidth={0.4} />
-          <SvgInput x={sx + dw / 2} y={sy + dh + 16} width={50} value={Math.round(el.doorW || el.w)} color="#d97706" fontSize={9}
-            onChange={v => {
-              // Grow from anchored side: if left is wall → x stays, grow right. If right is wall → right stays, grow left.
-              const oldX = el.x || 0;
-              const oldW = Math.round(el.doorW || el.w);
-              let newX = oldX;
-              if (el.doorRightIsWall && !el.doorLeftIsWall) {
-                // Anchored right → grow left
-                newX = oldX + oldW - v;
-              } else if (!el.doorLeftIsWall && !el.doorRightIsWall) {
-                // Both studs → grow from center
-                newX = oldX - (v - oldW) / 2;
-              }
-              // doorLeftIsWall → x stays (default), grow right
-              updateEl(el.id, { w: v, doorW: v, x: newX, manualW: v });
-            }} />
+          {/* Width dim lines — below door (inputs rendered in overlay at end of SVG) */}
+          <line x1={sx + 1} y1={sy + dh + 6} x2={sx + dw - 1} y2={sy + dh + 6} stroke="rgba(217,119,6,0.4)" strokeWidth={0.5} style={{ pointerEvents: "none" }} />
+          <line x1={sx} y1={sy + dh + 3} x2={sx} y2={sy + dh + 9} stroke="rgba(217,119,6,0.4)" strokeWidth={0.4} style={{ pointerEvents: "none" }} />
+          <line x1={sx + dw} y1={sy + dh + 3} x2={sx + dw} y2={sy + dh + 9} stroke="rgba(217,119,6,0.4)" strokeWidth={0.4} style={{ pointerEvents: "none" }} />
 
-          {/* Height input — left of door, centered vertically */}
-          <line x1={sx - 6} y1={sy + 1} x2={sx - 6} y2={sy + dh - 1} stroke="rgba(96,165,250,0.4)" strokeWidth={0.5} />
-          <line x1={sx - 9} y1={sy} x2={sx - 3} y2={sy} stroke="rgba(96,165,250,0.4)" strokeWidth={0.4} />
-          <line x1={sx - 9} y1={sy + dh} x2={sx - 3} y2={sy + dh} stroke="rgba(96,165,250,0.4)" strokeWidth={0.4} />
-          <SvgInput x={sx - 10} y={sy + dh / 2 + 3} width={40} value={Math.round(el.doorH || el.h)} color="#5a8fd4" fontSize={8}
-            onChange={v => {
-              // Grow from anchored side: if top is wall → y stays, grow down. If bottom is wall → bottom stays, grow up.
-              const oldY = el.y || 0;
-              const oldH = Math.round(el.doorH || el.h);
-              let newY = oldY;
-              if (el.doorBottomIsWall && !el.doorTopIsWall) {
-                // Anchored bottom → grow up
-                newY = oldY + oldH - v;
-              } else if (!el.doorTopIsWall && !el.doorBottomIsWall) {
-                // Both shelves → grow from center
-                newY = oldY - (v - oldH) / 2;
-              }
-              // doorTopIsWall → y stays (default), grow down
-              updateEl(el.id, { h: v, doorH: v, y: newY, manualH: v });
-            }} />
-          </>}
+          {/* Height dim lines — left of door (inputs rendered in overlay at end of SVG) */}
+          <line x1={sx - 6} y1={sy + 1} x2={sx - 6} y2={sy + dh - 1} stroke="rgba(96,165,250,0.4)" strokeWidth={0.5} style={{ pointerEvents: "none" }} />
+          <line x1={sx - 9} y1={sy} x2={sx - 3} y2={sy} stroke="rgba(96,165,250,0.4)" strokeWidth={0.4} style={{ pointerEvents: "none" }} />
+          <line x1={sx - 9} y1={sy + dh} x2={sx - 3} y2={sy + dh} stroke="rgba(96,165,250,0.4)" strokeWidth={0.4} style={{ pointerEvents: "none" }} />
         </>}
       </g>;
     }
     return null;
   })}
 
-  {/* DIMS (размеры корпуса, стоек, полок) — только на десктопе.
-      На мобильном перекрывают hit-зоны и мешают тапам, пользователь правит через BottomSheet. */}
-  {!isMobile && dims.map((d, i) => {
+  {/* DIMS */}
+  {dims.map((d, i) => {
     const dir = getDimDir(i);
     if (d.t === "w") { const dx = (d.x + frameT) * SC, dy = (iH + frameT) * SC + 16, dw = d.w * SC; return <g key={`w${i}`}>
       <line x1={dx + 1} y1={dy} x2={dx + dw - 1} y2={dy} stroke="rgba(217,119,6,0.3)" strokeWidth={0.6} />
@@ -1633,12 +1596,10 @@ export default function WardrobeEditor() {
     </g>; }
     return null;
   })}
-  {!isMobile && <>
   <SvgInput x={corpus.width * SC / 2} y={corpus.height * SC + 38} width={60} value={corpus.width} color="#777" fontSize={10} onChange={v => setCorpus(c => ({ ...c, width: Math.max(300, Math.min(3000, v)) }))} />
   <text x={corpus.width * SC / 2 - 32} y={corpus.height * SC + 38} textAnchor="middle" fontSize={8} fill="#444">←</text>
   <text x={corpus.width * SC / 2 + 32} y={corpus.height * SC + 38} textAnchor="middle" fontSize={8} fill="#444">→</text>
   <SvgInput x={-32} y={corpus.height * SC / 2 + 3} width={40} value={corpus.height} color="#777" fontSize={10} onChange={v => setCorpus(c => ({ ...c, height: Math.max(400, Math.min(2700, v)) }))} />
-  </>}
 
   {/* ═══ DOOR RESIZE HIT-ZONES OVERLAY ═══
       Рендерится в самом конце SVG чтобы быть ПОВЕРХ всех DIMS и прочих элементов.
@@ -1664,6 +1625,32 @@ export default function WardrobeEditor() {
       {/* RIGHT */}
       <rect x={dsx + ddw - HIT / 2} y={dsy + ddh / 2 - HIT} width={HIT} height={HIT * 2} fill="transparent" style={{ cursor: "ew-resize" }}
         onMouseDown={e => onDoorEdgeDrag(e, selDoor, "right")} onTouchStart={e => onDoorEdgeDrag(e, selDoor, "right")} />
+      {/* Width input — below door, in overlay so it's above DIMS */}
+      <SvgInput x={dsx + ddw / 2} y={dsy + ddh + 16} width={50} value={Math.round(selDoor.doorW || selDoor.w)} color="#d97706" fontSize={9}
+        onChange={v => {
+          const oldX = selDoor.x || 0;
+          const oldW = Math.round(selDoor.doorW || selDoor.w);
+          let newX = oldX;
+          if (selDoor.doorRightIsWall && !selDoor.doorLeftIsWall) {
+            newX = oldX + oldW - v;
+          } else if (!selDoor.doorLeftIsWall && !selDoor.doorRightIsWall) {
+            newX = oldX - (v - oldW) / 2;
+          }
+          updateEl(selDoor.id, { w: v, doorW: v, x: newX, manualW: v });
+        }} />
+      {/* Height input — left of door, in overlay so it's above DIMS */}
+      <SvgInput x={dsx - 10} y={dsy + ddh / 2 + 3} width={40} value={Math.round(selDoor.doorH || selDoor.h)} color="#5a8fd4" fontSize={8}
+        onChange={v => {
+          const oldY = selDoor.y || 0;
+          const oldH = Math.round(selDoor.doorH || selDoor.h);
+          let newY = oldY;
+          if (selDoor.doorBottomIsWall && !selDoor.doorTopIsWall) {
+            newY = oldY + oldH - v;
+          } else if (!selDoor.doorTopIsWall && !selDoor.doorBottomIsWall) {
+            newY = oldY - (v - oldH) / 2;
+          }
+          updateEl(selDoor.id, { h: v, doorH: v, y: newY, manualH: v });
+        }} />
     </>;
   })()}
 </svg>
