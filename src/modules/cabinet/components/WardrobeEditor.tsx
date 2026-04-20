@@ -1000,7 +1000,7 @@ export default function WardrobeEditor() {
 
       setSelId(el.id);
       const now = Date.now();
-      const isDoubleTap = lastTapElRef.current.id === el.id && (now - lastTapElRef.current.time) < 400;
+      const isDoubleTap = lastTapElRef.current.id === el.id && (now - lastTapElRef.current.time) < 500;
       lastTapElRef.current = { id: el.id, time: now };
 
       if (isDoubleTap) {
@@ -1223,6 +1223,24 @@ export default function WardrobeEditor() {
     setElements(prev => prev.length ? adjust(prev) : prev);
   }, [iW, iH, t, adjust]);
 
+  // Блокируем скролл страницы и pull-to-refresh когда идёт drag или активен режим перемещения
+  useEffect(() => {
+    if (!isMobile) return;
+    const isLocked = !!drag || !!mobileDragMode;
+    if (isLocked) {
+      const prevHtml = document.documentElement.style.overscrollBehavior;
+      const prevBody = document.body.style.overscrollBehavior;
+      document.documentElement.style.overscrollBehavior = "none";
+      document.body.style.overscrollBehavior = "none";
+      document.documentElement.style.touchAction = "none";
+      return () => {
+        document.documentElement.style.overscrollBehavior = prevHtml;
+        document.body.style.overscrollBehavior = prevBody;
+        document.documentElement.style.touchAction = "";
+      };
+    }
+  }, [isMobile, drag, mobileDragMode]);
+
   const hw = useMemo(() => calcHW(corpus, elements, showCorpus), [corpus, elements, showCorpus]);
   const pts = useMemo(() => calcParts(corpus, elements, showCorpus), [corpus, elements, showCorpus]);
   const area = useMemo(() => pts.filter(p => !p.m).reduce((s, p) => s + p.q * p.l * p.w / 1e6, 0).toFixed(3), [pts]);
@@ -1437,6 +1455,8 @@ export default function WardrobeEditor() {
       const cHex = corpusTexInfo.hex || "#8b7355";
       const jointGap = 0.3;
       return <g key={el.id} data-element="1" onMouseDown={noPointer ? undefined : e => onDown(e, el)} onTouchStart={noPointer ? undefined : e => onDown(e, el)} style={{ cursor: noPointer ? "default" : "ns-resize", pointerEvents: noPointer ? "none" : "auto" }}>
+        {/* Invisible hit target — расширяем зону клика до 16px для удобства попадания на тонкую полку */}
+        <rect x={shX} y={shY - 8 + shH / 2} width={shW} height={16} fill="transparent" />
         {/* Shelf ЛДСП panel */}
         <rect x={shX + jointGap} y={shY} width={shW - 2 * jointGap} height={shH} fill={sel ? "#3b82f6" : cHex} stroke={sel ? "#60a5fa" : "#6b5a45"} strokeWidth={sel ? 1.2 : 0.5} />
         {/* Front edge banding */}
@@ -1455,6 +1475,8 @@ export default function WardrobeEditor() {
       const pH = pBotPx - pTopPx;
       const jointGap = 0.3;
       return <g key={el.id} data-element="1" onMouseDown={e => onDown(e, el)} onTouchStart={e => onDown(e, el)} style={{ cursor: "ew-resize" }}>
+        {/* Invisible hit target — расширяем зону клика до 16px */}
+        <rect x={studLeft - 8 + studW / 2} y={pTopPx} width={16} height={pH} fill="transparent" />
         {/* Stud ЛДСП panel — between bounding shelves */}
         <rect x={studLeft} y={pTopPx + jointGap} width={studW} height={pH - 2 * jointGap} fill={sel ? "#3b82f6" : cHex} stroke={sel ? "#60a5fa" : "#5a4d3f"} strokeWidth={sel ? 1.2 : 0.5} />
         {/* Front edge banding */}
@@ -1515,22 +1537,33 @@ export default function WardrobeEditor() {
       const hps = Array.from({ length: hn }, (_, i) => i === 0 ? 0.08 : i === hn - 1 ? 0.92 : i / (hn - 1));
       const fHex = facadeTexInfo.hex;
       const isDark = parseInt(fHex.replace('#',''), 16) < 0x666666;
-      const HANDLE = 6;
+      // На мобильном ручки видны шире (14px) + невидимый hit-target 28px для удобства пальца
+      const HANDLE = isMobile ? 14 : 6;
+      const HIT = isMobile ? 28 : 10;
+      const LEN = isMobile ? 40 : 24;
       return <g key={el.id} data-element="1" onMouseDown={e => { e.stopPropagation(); setSelId(el.id); }} onTouchStart={e => { e.stopPropagation(); setSelId(el.id); }} style={{ cursor: "pointer" }}>
         <rect x={sx} y={sy} width={dw} height={dh} fill={fHex} fillOpacity={0.85} stroke={sel ? "#fbbf24" : isDark ? "#5a4a3a" : "#bbb"} strokeWidth={sel ? 1.5 : 0.7} rx={1} />
         <circle cx={isL ? sx + dw - 8 : sx + 8} cy={sy + dh / 2} r={2.5} fill={isDark ? "#aaa" : "#555"} />
         {hps.map((p, hi) => <rect key={hi} x={isL ? sx - 1 : sx + dw - 3} y={sy + dh * p - 4} width={4} height={8} rx={1} fill={isDark ? "#888" : "#555"} />)}
         <text x={sx + dw / 2} y={sy + dh / 2 + 3} textAnchor="middle" fontSize={7} fill={isDark ? "#ccc" : "#555"} fontFamily="'IBM Plex Mono',monospace" opacity={0.6}>{facadeTexInfo.name}</text>
         {sel && <>
-          {/* Resize handles */}
-          <rect x={sx + dw / 2 - 12} y={sy - HANDLE / 2} width={24} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ns-resize" }}
+          {/* Resize handles — видимые + невидимый hit-target на тачах */}
+          {/* TOP */}
+          <rect x={sx + dw / 2 - HIT} y={sy - HIT / 2} width={HIT * 2} height={HIT} fill="transparent" style={{ cursor: "ns-resize" }}
             onMouseDown={e => onDoorEdgeDrag(e, el, "top")} onTouchStart={e => onDoorEdgeDrag(e, el, "top")} />
-          <rect x={sx + dw / 2 - 12} y={sy + dh - HANDLE / 2} width={24} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ns-resize" }}
+          <rect x={sx + dw / 2 - LEN / 2} y={sy - HANDLE / 2} width={LEN} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ns-resize", pointerEvents: "none" }} />
+          {/* BOTTOM */}
+          <rect x={sx + dw / 2 - HIT} y={sy + dh - HIT / 2} width={HIT * 2} height={HIT} fill="transparent" style={{ cursor: "ns-resize" }}
             onMouseDown={e => onDoorEdgeDrag(e, el, "bottom")} onTouchStart={e => onDoorEdgeDrag(e, el, "bottom")} />
-          <rect x={sx - HANDLE / 2} y={sy + dh / 2 - 12} width={HANDLE} height={24} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ew-resize" }}
+          <rect x={sx + dw / 2 - LEN / 2} y={sy + dh - HANDLE / 2} width={LEN} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ns-resize", pointerEvents: "none" }} />
+          {/* LEFT */}
+          <rect x={sx - HIT / 2} y={sy + dh / 2 - HIT} width={HIT} height={HIT * 2} fill="transparent" style={{ cursor: "ew-resize" }}
             onMouseDown={e => onDoorEdgeDrag(e, el, "left")} onTouchStart={e => onDoorEdgeDrag(e, el, "left")} />
-          <rect x={sx + dw - HANDLE / 2} y={sy + dh / 2 - 12} width={HANDLE} height={24} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ew-resize" }}
+          <rect x={sx - HANDLE / 2} y={sy + dh / 2 - LEN / 2} width={HANDLE} height={LEN} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ew-resize", pointerEvents: "none" }} />
+          {/* RIGHT */}
+          <rect x={sx + dw - HIT / 2} y={sy + dh / 2 - HIT} width={HIT} height={HIT * 2} fill="transparent" style={{ cursor: "ew-resize" }}
             onMouseDown={e => onDoorEdgeDrag(e, el, "right")} onTouchStart={e => onDoorEdgeDrag(e, el, "right")} />
+          <rect x={sx + dw - HANDLE / 2} y={sy + dh / 2 - LEN / 2} width={HANDLE} height={LEN} rx={2} fill="#d97706" opacity={0.9} style={{ cursor: "ew-resize", pointerEvents: "none" }} />
 
           {/* Width input — below door, centered */}
           <line x1={sx + 1} y1={sy + dh + 6} x2={sx + dw - 1} y2={sy + dh + 6} stroke="rgba(217,119,6,0.4)" strokeWidth={0.5} />
@@ -1843,6 +1876,7 @@ export default function WardrobeEditor() {
         </div>
       )}
 
+      {/* Одна кнопка для перемещения — дублирует indicator в header */}
       <button
         onClick={() => {
           if (mobileDragMode === selEl.id) {
@@ -1855,36 +1889,15 @@ export default function WardrobeEditor() {
         }}
         style={{
           width: "100%", padding: "14px 0", borderRadius: 8, marginTop: 4, marginBottom: 8,
-          background: mobileDragMode === selEl.id ? "rgba(34,197,94,0.18)" : "rgba(59,130,246,0.12)",
-          color: mobileDragMode === selEl.id ? "#22c55e" : "#60a5fa",
+          background: mobileDragMode === selEl.id ? "rgba(168,85,247,0.18)" : "rgba(59,130,246,0.12)",
+          color: mobileDragMode === selEl.id ? "#a855f7" : "#60a5fa",
           fontSize: 13, fontWeight: 700,
-          border: mobileDragMode === selEl.id ? "1px solid rgba(34,197,94,0.4)" : "1px solid rgba(59,130,246,0.25)",
+          border: mobileDragMode === selEl.id ? "1px solid rgba(168,85,247,0.4)" : "1px solid rgba(59,130,246,0.25)",
           cursor: "pointer",
         }}
       >
-        {mobileDragMode === selEl.id ? "✓ Режим перемещения включён — закрыть" : "🖐 Включить перемещение"}
+        {mobileDragMode === selEl.id ? "✋ Выключить перемещение" : "✋ Включить перемещение"}
       </button>
-
-      {/* Toggle режима перемещения — альтернатива двойному тапу для тех кто привык к долгому нажатию */}
-      <button
-        onClick={() => {
-          if (mobileDragMode === selEl.id) {
-            setMobileDragMode(null);
-          } else {
-            setMobileDragMode(selEl.id);
-            try { if (navigator.vibrate) navigator.vibrate([15, 30, 15]); } catch {}
-          }
-          setMobileSheet(null);
-        }}
-        style={{
-          width: "100%", padding: "14px 0", borderRadius: 8, marginTop: 0, marginBottom: 8,
-          background: mobileDragMode === selEl.id ? "rgba(168,85,247,0.18)" : "rgba(30,30,40,0.5)",
-          color: mobileDragMode === selEl.id ? "#a855f7" : "#d1d5db",
-          fontSize: 13, fontWeight: 700,
-          border: mobileDragMode === selEl.id ? "1px solid rgba(168,85,247,0.4)" : "1px solid rgba(60,60,70,0.4)",
-          cursor: "pointer",
-        }}
-      >{mobileDragMode === selEl.id ? "✋ Выключить перемещение" : "🖐 Включить перемещение"}</button>
 
       <button
         onClick={() => { delSel(); setMobileDragMode(null); setMobileSheet(null); }}
@@ -2029,7 +2042,9 @@ export default function WardrobeEditor() {
               display: "flex",
               alignItems: "flex-start",
               justifyContent: "center",
-              touchAction: pinchRef.current ? "none" : "pan-y",
+              // Когда активен режим перемещения или pinch — блокируем скролл/pull-to-refresh
+              touchAction: (drag || mobileDragMode || pinchRef.current) ? "none" : "pan-y",
+              overscrollBehavior: "contain",
             }}>
             <div style={{
               transform: `scale(${mobileCanvasScale})`,
