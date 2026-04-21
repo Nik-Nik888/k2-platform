@@ -3,7 +3,7 @@ import Wardrobe3D from "./Wardrobe3D";
 import { getTextureInfo } from "./TexturePicker";
 import { useIsMobile } from "@shared/hooks/useIsMobile";
 import BottomSheet from "@shared/components/BottomSheet";
-import { SC, MOBILE_EL_LABELS, uid } from "../constants";
+import { SC, MOBILE_EL_LABELS } from "../constants";
 import { renderElement, type RenderCtx } from "./elements";
 import { renderFrame, renderZoneHighlights } from "./frame";
 import { renderDims, renderCorpusDims, renderSelectedDims, renderDoorHitZones } from "./dims";
@@ -23,6 +23,7 @@ import { findDoorBounds as pureFindDoorBounds, computeDoorSnapTargets } from "..
 import { computeDoorResize } from "../logic/doorResize";
 import { moveElement } from "../logic/elementDrag";
 import { computeTopLevelCols, computeDims, applyHorizDimChange, applyVertDimChange } from "../logic/dims";
+import { placeInZone as purePlaceInZone } from "../logic/placement";
 import { useDragHandlers } from "../hooks/useDragHandlers";
 import { useMobileTouch } from "../hooks/useMobileTouch";
 /* ═══════════════════════════════
@@ -85,192 +86,24 @@ export default function WardrobeEditor() {
   );
 
   /* Place element into clicked zone */
-  const placeInZone = useCallback((zone, clickX, clickY) => {
+  const placeInZone = useCallback((_zone, clickX, clickY) => {
     if (!placeMode) return;
-    const id = uid();
-    const _order = orderRef.current++;
-    let el;
-
-    if (placeMode === "shelf") {
-      // Shelf spans between nearest studs/walls at its Y level
-      const bounds = findDoorBounds(clickX, clickY);
-      const shX = bounds.left.x + (bounds.left.isWall ? 0 : t); // offset after left stud (if any)
-      const shW = bounds.right.x - shX; // span to next stud/wall
-      const y = Math.max(0, Math.min(iH, Math.round(clickY)));
-      el = { id, type: "shelf", x: shX, y, w: shW, anchorX: shX + shW / 2, _order };
-    } else if (placeMode === "stud") {
-      // Stud spans between nearest shelves/walls at its X column
-      const bounds = findDoorBounds(clickX, clickY);
-      const midX = (bounds.left.x + bounds.right.x) / 2;
-      // For stud placement: click X determines stud center, but stud at x=0 snaps to edge
-      let studX;
-      if (clickX < 20) studX = 0; // snap to left edge
-      else if (clickX > iW - t - 20) studX = iW - t; // snap to right edge
-      else studX = Math.max(0, Math.min(iW - t, Math.round(clickX - t / 2)));
-      // Stud vertical span = between nearest shelves at this X
-      el = {
-        id, type: "stud",
-        x: studX,
-        anchorY: Math.round((bounds.top.y + bounds.bottom.y) / 2),
-        pTop: bounds.top.y,
-        pBot: bounds.bottom.y,
-        _order,
-      };
-    } else if (placeMode === "drawers") {
-      const bounds = findDoorBounds(clickX, clickY);
-      const allShelves = elements.filter(e => e.type === "shelf");
-      const allStuds = elements.filter(e => e.type === "stud");
-      const studAtLeft = allStuds.some(st => Math.abs(st.x - bounds.left.x) < 2);
-      const studAtRight = allStuds.some(st => Math.abs(st.x - (bounds.right.x - t)) < 2 || Math.abs(st.x - bounds.right.x) < 2);
-      const shelfAtTop = allShelves.some(sh => Math.abs(sh.y - bounds.top.y) < 2);
-      const shelfAtBot = allShelves.some(sh => Math.abs(sh.y - bounds.bottom.y) < 2);
-
-      let innerLeft = bounds.left.x + ((!bounds.left.isWall || studAtLeft) ? t : 0);
-      let innerRight = bounds.right.x; // right stud's x IS its left edge — drawer ends there
-
-      let topY = bounds.top.y;
-      if (!bounds.top.isWall || shelfAtTop) {
-        topY = bounds.top.y < 1 ? t : bounds.top.y + t / 2;
-      }
-      let botY = bounds.bottom.y;
-      if (!bounds.bottom.isWall || shelfAtBot) {
-        botY = bounds.bottom.y > iH - 1 ? iH - t : bounds.bottom.y - t / 2;
-      }
-
-      // HARD CLAMP — never overlap edge studs/shelves, never exceed frame
-      const hasEdgeStudLeft = allStuds.some(st => st.x < 2);
-      const hasEdgeStudRight = allStuds.some(st => st.x > iW - t - 2);
-      const hasEdgeShelfTop = allShelves.some(sh => sh.y < 2);
-      const hasEdgeShelfBot = allShelves.some(sh => sh.y > iH - 2);
-      if (hasEdgeStudLeft) innerLeft = Math.max(innerLeft, t);
-      if (hasEdgeStudRight) innerRight = Math.min(innerRight, iW - t);
-      if (hasEdgeShelfTop) topY = Math.max(topY, t);
-      if (hasEdgeShelfBot) botY = Math.min(botY, iH - t);
-      innerLeft = Math.max(0, innerLeft);
-      innerRight = Math.min(iW, innerRight);
-      topY = Math.max(0, topY);
-      botY = Math.min(iH, botY);
-
-      const innerW = innerRight - innerLeft;
-      const maxH = botY - topY;
-      // Abort if zone is too narrow/short
-      if (innerW < 100 || maxH < 100) {
-        setPlaceMode(null);
-        return;
-      }
-      const h = Math.min(450, maxH);
-      const h1 = Math.floor(h / 3), h2 = Math.floor(h / 3), h3 = h - h1 - h2;
-      el = { id, type: "drawers", x: innerLeft, y: botY - h, w: innerW, h, count: 3, guideType: "roller", drawerHeights: [h1, h2, h3], _order };
-    } else if (placeMode === "rod") {
-      const bounds = findDoorBounds(clickX, clickY);
-      const allStuds = elements.filter(e => e.type === "stud");
-      const studAtLeft = allStuds.some(st => Math.abs(st.x - bounds.left.x) < 2);
-      const innerLeft = bounds.left.x + ((!bounds.left.isWall || studAtLeft) ? t : 0);
-      const innerRight = bounds.right.x;
-      const innerW = innerRight - innerLeft;
-      el = { id, type: "rod", x: innerLeft + 20, y: Math.round(clickY), w: innerW - 40, _order };
-    } else if (placeMode === "door") {
-      /* SMART DOOR: one click — find 4 nearest boundaries */
-      const bounds = findDoorBounds(clickX, clickY);
-      const OC = 14, OS = 7;
-      const lo = bounds.left.isWall ? OC : OS;
-      const ro = bounds.right.isWall ? OC : OS;
-      const to = bounds.top.isWall ? OC : OS;
-      const bo = bounds.bottom.isWall ? OC : OS;
-
-      const innerLeft = bounds.left.x + (bounds.left.isWall ? 0 : t);
-      const innerW = bounds.right.x - innerLeft;
-      const hingeType = "overlay";
-
-      // Ищем уже существующие двери в этом же проёме (с совпадающими границами top/bottom)
-      // — чтобы новая дверь не накладывалась, а делила проём пополам
-      const sameBoundsDoors = elements.filter(e =>
-        e.type === "door"
-        && Math.abs((e.doorTop || 0) - bounds.top.y) < 5
-        && Math.abs((e.doorBottom || iH) - bounds.bottom.y) < 5
-        && (e.doorLeft || 0) >= bounds.left.x - 5
-        && (e.doorRight || iW) <= bounds.right.x + 5
-      );
-      // Куда именно вставать: если клик в левой половине проёма — занимаем левую половину,
-      // иначе правую (если есть свободное место)
-      const openingMid = (bounds.left.x + bounds.right.x) / 2;
-      const wantLeftHalf = clickX < openingMid;
-
-      let effLeft = bounds.left.x;
-      let effRight = bounds.right.x;
-      let effLeftIsWall = bounds.left.isWall;
-      let effRightIsWall = bounds.right.isWall;
-
-      if (sameBoundsDoors.length > 0) {
-        // Определяем какая половина свободна
-        const hasDoorLeft = sameBoundsDoors.some(d => ((d.doorLeft || 0) + (d.doorRight || iW)) / 2 < openingMid);
-        const hasDoorRight = sameBoundsDoors.some(d => ((d.doorLeft || 0) + (d.doorRight || iW)) / 2 >= openingMid);
-        // Если обе половины заняты — ставим как раньше (поверх)
-        if (hasDoorLeft && hasDoorRight) {
-          // fallback — накладываем (это граничный случай)
-        } else if (hasDoorLeft && !hasDoorRight) {
-          // занята левая половина → ставим правую
-          effLeft = openingMid;
-          effLeftIsWall = false; // теперь это граница с другой дверью, не стена
-        } else if (!hasDoorLeft && hasDoorRight) {
-          // занята правая → ставим левую
-          effRight = openingMid;
-          effRightIsWall = false;
-        } else if (wantLeftHalf) {
-          effRight = openingMid;
-          effRightIsWall = false;
-        } else {
-          effLeft = openingMid;
-          effLeftIsWall = false;
-        }
-      }
-
-      const effLeftOffset = effLeftIsWall ? OC : OS;
-      const effRightOffset = effRightIsWall ? OC : OS;
-      const effInnerLeft = effLeft + (effLeftIsWall ? 0 : t);
-      const effInnerW = effRight - effInnerLeft;
-
-      let dX, dW, dY, dH;
-      if (hingeType === "overlay") {
-        dX = effInnerLeft - effLeftOffset;
-        dW = effInnerW + effLeftOffset + effRightOffset;
-        dY = bounds.top.y - to;
-        dH = (bounds.bottom.y - bounds.top.y) + to + bo;
-      } else {
-        const gap = 2;
-        dX = effInnerLeft + gap;
-        dW = effInnerW - gap * 2;
-        dY = bounds.top.y + gap;
-        dH = (bounds.bottom.y - bounds.top.y) - gap * 2;
-      }
-      // Clamp: не даём двери вылезать за рамку
-      if (dX < 0) { dW += dX; dX = 0; }
-      if (dX + dW > iW) dW = iW - dX;
-      if (dY < 0) { dH += dY; dY = 0; }
-      if (dY + dH > iH) dH = iH - dY;
-
-      // Автоматический выбор стороны петель: если дверь левее центра своего эффективного проёма
-      // — петли слева, если правее — справа (ручки оказываются ближе к центру)
-      const doorCenterX = dX + dW / 2;
-      const openingCenterX = (effLeft + effRight) / 2;
-      const autoHingeSide = doorCenterX < openingCenterX ? "left" : "right";
-
-      el = {
-        id, type: "door", x: dX, y: dY, w: dW, h: dH, doorW: dW, doorH: dH,
-        hingeSide: autoHingeSide, hingeType,
-        doorLeft: effLeft, doorRight: effRight, doorTop: bounds.top.y, doorBottom: bounds.bottom.y,
-        doorLeftIsWall: effLeftIsWall, doorRightIsWall: effRightIsWall,
-        doorTopIsWall: bounds.top.isWall, doorBottomIsWall: bounds.bottom.isWall,
-        _order,
-      };
-    } else return;
-
-    setElements(prev => adjust([...prev, el]));
-    // Удерживаем placeMode только для shelf и stud — их обычно ставят по несколько подряд.
-    // Для rod / drawers / door сбрасываем — это одиночные элементы.
-    if (placeMode !== "shelf" && placeMode !== "stud") {
+    const result = purePlaceInZone({
+      placeMode: placeMode as any,
+      clickX, clickY,
+      iW, iH, t,
+      elements,
+      order: orderRef.current++,
+      findDoorBounds,
+    });
+    if (!result) {
       setPlaceMode(null);
-      setSelId(id);
+      return;
+    }
+    setElements(prev => adjust([...prev, result.element]));
+    if (!result.keepPlaceMode) {
+      setPlaceMode(null);
+      setSelId(result.element.id);
     }
   }, [placeMode, elements, adjust, iW, iH, t, findDoorBounds]);
 
