@@ -13,6 +13,7 @@ import { findDoorBounds as pureFindDoorBounds, computeDoorSnapTargets } from "..
 import { computeDoorResize } from "../logic/doorResize";
 import { moveElement } from "../logic/elementDrag";
 import { useDragHandlers } from "../hooks/useDragHandlers";
+import { useMobileTouch } from "../hooks/useMobileTouch";
 /* ═══════════════════════════════
    MAIN EDITOR
    ═══════════════════════════════ */
@@ -42,7 +43,6 @@ export default function WardrobeEditor() {
   const [mobileSheet, setMobileSheet] = useState<null | 'tools' | 'props' | 'summary'>(null);
   const [userZoom, setUserZoom] = useState<number>(1);
   const lastTapElRef = useRef<{ id: string | null; time: number }>({ id: null, time: 0 });
-  const pinchRef = useRef<{ startDist: number; startZoom: number } | null>(null);
 
   const orderRef = useRef(1);
   const svgRef = useRef(null);
@@ -591,47 +591,14 @@ export default function WardrobeEditor() {
   }, [isMobile, svgW]);
   const mobileCanvasScale = mobileCanvasFit * userZoom;
 
-  // ── Pinch-zoom на 2D-канвасе мобильного ─────────────
-  const onCanvasTouchStart = useCallback((e: any) => {
-    if (e.touches && e.touches.length === 2) {
-      const dx = e.touches[0].clientX - e.touches[1].clientX;
-      const dy = e.touches[0].clientY - e.touches[1].clientY;
-      pinchRef.current = {
-        startDist: Math.sqrt(dx * dx + dy * dy),
-        startZoom: userZoom,
-      };
-      // Отменяем drag если был активен
-      setDrag(null);
-    }
-  }, [userZoom]);
-
-  const onCanvasTouchMove = useCallback((e: any) => {
-    if (e.touches && e.touches.length === 2 && pinchRef.current) {
-      const dx = e.touches[0].clientX - e.touches[1].clientX;
-      const dy = e.touches[0].clientY - e.touches[1].clientY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const ratio = dist / pinchRef.current.startDist;
-      const newZoom = Math.max(0.5, Math.min(3, pinchRef.current.startZoom * ratio));
-      setUserZoom(newZoom);
-    }
-  }, []);
-
-  const onCanvasTouchEnd = useCallback((e: any) => {
-    if (!e.touches || e.touches.length < 2) {
-      pinchRef.current = null;
-    }
-  }, []);
-
-  // Двойной тап по канвасу — сброс зума к 1
-  const lastTapRef = useRef<number>(0);
-  const onCanvasDoubleTap = useCallback(() => {
-    const now = Date.now();
-    if (now - lastTapRef.current < 300) {
-      setUserZoom(1);
-      try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
-    }
-    lastTapRef.current = now;
-  }, []);
+  // ── Мобильные touch-жесты: pinch-zoom + double-tap для сброса ─────────────
+  const {
+    pinchRef,
+    onCanvasTouchStart,
+    onCanvasTouchMove,
+    onCanvasTouchEnd,
+    onCanvasDoubleTap,
+  } = useMobileTouch(userZoom, setUserZoom, setDrag);
 
   const canvas = (
 <svg ref={svgRef} width={svgW} height={svgH} viewBox={`-50 -16 ${corpus.width * SC + 120} ${corpus.height * SC + 60}`} style={{ cursor: placeMode ? "crosshair" : "default", filter: "drop-shadow(0 4px 20px rgba(0,0,0,0.5))" }} onClick={onSvgClick}>
