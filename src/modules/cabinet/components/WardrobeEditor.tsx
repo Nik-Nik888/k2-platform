@@ -3,7 +3,7 @@ import Wardrobe3D from "./Wardrobe3D";
 import { TexturePicker, getTextureInfo } from "./TexturePicker";
 import { useIsMobile } from "@shared/hooks/useIsMobile";
 import BottomSheet from "@shared/components/BottomSheet";
-import { SC, MIN_S, SNAP, TOOLS, GUIDES, HINGES, MOBILE_EL_LABELS, uid } from "../constants";
+import { SC, MIN_S, TOOLS, GUIDES, HINGES, MOBILE_EL_LABELS, uid } from "../constants";
 import { SvgInput } from "./inputs/SvgInput";
 import { NumInput } from "./inputs/NumInput";
 import { computeZones, findZone } from "../logic/zones";
@@ -11,6 +11,8 @@ import { calcHW, calcParts } from "../logic/calculations";
 import { adjust as pureAdjust } from "../logic/adjust";
 import { findDoorBounds as pureFindDoorBounds, computeDoorSnapTargets } from "../logic/doorBounds";
 import { computeDoorResize } from "../logic/doorResize";
+import { moveElement } from "../logic/elementDrag";
+import { useDragHandlers } from "../hooks/useDragHandlers";
 /* ═══════════════════════════════
    MAIN EDITOR
    ═══════════════════════════════ */
@@ -371,11 +373,7 @@ export default function WardrobeEditor() {
     [elements, iW, iH],
   );
 
-  // RAF для троттлинга drag-обновлений — сглаживает тач-перемещение
-  const rafRef = useRef<number | null>(null);
-  const pendingMoveRef = useRef<{ clientX: number; clientY: number } | null>(null);
-
-  // Применение фактического перемещения — вызывается из RAF
+  // Применение фактического перемещения — вызывается из RAF через useDragHandlers
   const applyDragMove = useCallback((clientX: number, clientY: number) => {
     if (!drag) return;
     // Threshold: only start actual dragging after 4px movement — otherwise treat as pure selection click
@@ -414,63 +412,15 @@ export default function WardrobeEditor() {
 
     /* Normal element drag */
     setElements(prev => {
-      let next = prev.map(el => {
-        if (el.id !== drag.id) return el;
-        if (drag.type === "stud") {
-          let nx = Math.round((c.x - drag.ox) / SNAP) * SNAP;
-          nx = Math.max(0, Math.min(iW - t, nx));
-          if (nx < 10) nx = 0;
-          if (nx > iW - t - 10) nx = iW - t;
-          const anchorY = Math.max(0, Math.min(iH, Math.round(c.y)));
-          return { ...el, x: nx, anchorY };
-        }
-        if (drag.type === "shelf") {
-          const ny = Math.max(0, Math.min(iH, Math.round(c.y - drag.oy)));
-          return { ...el, y: ny };
-        }
-        if (drag.type === "door") {
-          // Дверь двигается по X и Y одновременно, в пределах iW/iH
-          const nx = Math.max(0, Math.min(iW - (el.w || 50), Math.round(c.x - drag.ox)));
-          const ny = Math.max(0, Math.min(iH - (el.h || 50), Math.round(c.y - drag.oy)));
-          return { ...el, x: nx, y: ny };
-        }
-        const ny = Math.max(0, Math.min(iH - (drag.type === "drawers" ? (el.h || 450) : 20), Math.round(c.y - drag.oy)));
-        return { ...el, y: ny, _dragX: c.x };
-      });
+      let next = prev.map(el => moveElement(el, drag, c.x, c.y, iW, iH, t));
       next = adjust(next);
+      // Убираем временное поле _dragX которое использовалось для drawers/rod
       next = next.map(el => { const { _dragX, ...rest } = el; return rest; });
       return next;
     });
-  }, [drag, toSvg, iW, iH, t, adjust]);
+  }, [drag, toSvg, iW, iH, t, adjust, doorSnapTargets]);
 
-  const onMove = useCallback((e) => {
-    // Поддержка touch — берём координаты первого пальца
-    const clientX = e.clientX ?? (e.touches && e.touches[0]?.clientX);
-    const clientY = e.clientY ?? (e.touches && e.touches[0]?.clientY);
-    if (clientX === undefined) return;
-    if (!drag) return;
-
-    // Буферизируем координаты в ref — применим на следующий анимационный кадр.
-    // Это сильно сглаживает drag на touch-устройствах, где события прилетают быстрее 60fps.
-    pendingMoveRef.current = { clientX, clientY };
-    if (rafRef.current !== null) return;
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = null;
-      const pending = pendingMoveRef.current;
-      if (!pending) return;
-      applyDragMove(pending.clientX, pending.clientY);
-    });
-  }, [drag, applyDragMove]);
-
-  const onUp = useCallback(() => {
-    // Отменяем запланированный RAF и пустим ref
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-    pendingMoveRef.current = null;
-    setDrag(null);
-  }, []);
+  const { onMove, onUp } = useDragHandlers(drag, applyDragMove, setDrag);
 
   useEffect(() => {
     const h = (e) => {
