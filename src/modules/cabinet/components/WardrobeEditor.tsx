@@ -9,6 +9,7 @@ import { NumInput } from "./inputs/NumInput";
 import { computeZones, findZone } from "../logic/zones";
 import { calcHW, calcParts } from "../logic/calculations";
 import { adjust as pureAdjust } from "../logic/adjust";
+import { findDoorBounds as pureFindDoorBounds, computeDoorSnapTargets } from "../logic/doorBounds";
 /* ═══════════════════════════════
    MAIN EDITOR
    ═══════════════════════════════ */
@@ -63,96 +64,11 @@ export default function WardrobeEditor() {
     
   }, []);
 
-  /* Find 4 nearest boundaries around a click point */
-  const findDoorBounds = useCallback((clickX, clickY) => {
-    // Compute real stud Y-ranges using ALL shelves (ignoring _order)
-    // This determines if a stud actually exists at the click Y level
-    const allShelves = elements.filter(e => e.type === "shelf");
-    const allStuds = elements.filter(e => e.type === "stud");
-
-    const getStudRealRange = (stud) => {
-      const sx = stud.x || 0;
-      const anchorY = stud.anchorY ?? iH / 2;
-      // A shelf limits this stud ONLY if it passes THROUGH the stud's X position
-      // (shelf spans from before stud to after stud, not just touches it)
-      const spanning = allShelves.filter(sh => {
-        const shLeft = sh.x || 0;
-        const shRight = shLeft + (sh.w || iW);
-        // Shelf must extend PAST the stud on both sides (or from wall through stud)
-        return shLeft < sx - 5 && shRight > sx + t + 5;
-      });
-      let sTop = 0, sBot = iH;
-      spanning.forEach(sh => {
-        if (sh.y <= anchorY && sh.y > sTop) sTop = sh.y;
-        if (sh.y > anchorY && sh.y < sBot) sBot = sh.y;
-      });
-      return { sTop, sBot };
-    };
-
-    // Edge studs/shelves become walls: if stud is at frame edge (≤t+2mm), remove corresponding wall
-    const studNearLeft = allStuds.some(st => st.x < t + 2);
-    const studNearRight = allStuds.some(st => st.x > iW - 2 * t - 2);
-    const shelfNearTop = allShelves.some(sh => sh.y < t + 2);
-    const shelfNearBot = allShelves.some(sh => sh.y > iH - t - 2);
-
-    // Vertical boundaries: walls + studs that ACTUALLY span this Y level
-    const vBounds = [
-      ...(studNearLeft ? [] : [{ x: 0, isWall: true }]),
-      ...allStuds.filter(st => {
-        const { sTop, sBot } = getStudRealRange(st);
-        return clickY >= sTop - 5 && clickY <= sBot + 5;
-      }).map(st => ({ x: st.x, isWall: false })),
-      ...(studNearRight ? [] : [{ x: iW, isWall: true }]),
-    ].sort((a, b) => a.x - b.x);
-
-    // Horizontal boundaries: walls + shelves at this X
-    const hBounds = [
-      ...(shelfNearTop ? [] : [{ y: 0, isWall: true }]),
-      ...allShelves.filter(sh => {
-        const shLeft = sh.x || 0, shRight = shLeft + (sh.w || iW);
-        return clickX >= shLeft - 5 && clickX <= shRight + 5;
-      }).map(sh => ({ y: sh.y, isWall: false, xLeft: sh.x || 0, xRight: (sh.x || 0) + (sh.w || iW) })),
-      ...(shelfNearBot ? [] : [{ y: iH, isWall: true }]),
-    ].sort((a, b) => a.y - b.y);
-
-    // Find LEFT: rightmost V boundary that is to the left of click
-    let left = vBounds[0];
-    for (const v of vBounds) { if (v.x <= clickX + 5) left = v; else break; }
-    // Find RIGHT: leftmost V boundary to the right of click
-    let right = vBounds[vBounds.length - 1];
-    for (let i = vBounds.length - 1; i >= 0; i--) { if (vBounds[i].x >= clickX - 5) right = vBounds[i]; else break; }
-    // Ensure left < right
-    if (left.x >= right.x) {
-      const li = vBounds.indexOf(left);
-      if (li > 0) left = vBounds[li - 1];
-      else if (li < vBounds.length - 1) right = vBounds[li + 1];
-    }
-
-    // Find TOP: lowest H boundary above click (only shelves that span this X range)
-    let top = hBounds[0];
-    for (const h of hBounds) {
-      if (h.y > clickY - 5) break;
-      // Check if this shelf spans across the click X (or is a wall)
-      if (h.isWall || (h.xLeft !== undefined && clickX >= h.xLeft - 5 && clickX <= h.xRight + 5)) {
-        top = h;
-      }
-    }
-    // Find BOTTOM: highest H boundary below click
-    let bottom = hBounds[hBounds.length - 1];
-    for (let i = hBounds.length - 1; i >= 0; i--) {
-      if (hBounds[i].y < clickY + 5) break;
-      if (hBounds[i].isWall || (hBounds[i].xLeft !== undefined && clickX >= hBounds[i].xLeft - 5 && clickX <= hBounds[i].xRight + 5)) {
-        bottom = hBounds[i];
-      }
-    }
-    if (top.y >= bottom.y) {
-      const ti = hBounds.indexOf(top);
-      if (ti < hBounds.length - 1) bottom = hBounds[ti + 1];
-      else if (ti > 0) top = hBounds[ti - 1];
-    }
-
-    return { left, right, top, bottom };
-  }, [elements, iW, iH]);
+  /* Find 4 nearest boundaries around a click point — обёртка над pure-функцией */
+  const findDoorBounds = useCallback(
+    (clickX: number, clickY: number) => pureFindDoorBounds(elements, clickX, clickY, iW, iH, t),
+    [elements, iW, iH, t],
+  );
 
   /* Place element into clicked zone */
   const placeInZone = useCallback((zone, clickX, clickY) => {
@@ -444,26 +360,10 @@ export default function WardrobeEditor() {
   }, [toSvg, placeMode]);
 
   /* Build sorted boundary lists for door resize snapping */
-  const doorSnapTargets = useMemo(() => {
-    // vTargets: границы всех вертикальных "стен/стоек/других дверей", к которым можно snap-нуться
-    const otherDoorBounds: { pos: number; isWall: boolean }[] = [];
-    elements.filter(e => e.type === "door").forEach(d => {
-      if (d.doorLeft !== undefined) otherDoorBounds.push({ pos: d.doorLeft, isWall: d.doorLeftIsWall ?? false });
-      if (d.doorRight !== undefined) otherDoorBounds.push({ pos: d.doorRight, isWall: d.doorRightIsWall ?? false });
-    });
-    const vTargets = [
-      { pos: 0, isWall: true },
-      ...elements.filter(e => e.type === "stud").map(st => ({ pos: st.x, isWall: false })),
-      ...otherDoorBounds,
-      { pos: iW, isWall: true },
-    ].sort((a, b) => a.pos - b.pos);
-    const hTargets = [
-      { pos: 0, isWall: true },
-      ...elements.filter(e => e.type === "shelf").map(sh => ({ pos: sh.y, isWall: false, xLeft: sh.x || 0, xRight: (sh.x || 0) + (sh.w || iW) })),
-      { pos: iH, isWall: true },
-    ].sort((a, b) => a.pos - b.pos);
-    return { vTargets, hTargets };
-  }, [elements, iW, iH]);
+  const doorSnapTargets = useMemo(
+    () => computeDoorSnapTargets(elements, iW, iH),
+    [elements, iW, iH],
+  );
 
   // RAF для троттлинга drag-обновлений — сглаживает тач-перемещение
   const rafRef = useRef<number | null>(null);
