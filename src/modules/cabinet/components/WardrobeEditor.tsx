@@ -561,7 +561,7 @@ export default function WardrobeEditor() {
     else { if (!tryBottom()) tryTop(); }
   }, [topLevelCols, elements, iH, updateEl]);
 
-  const svgW = corpus.width * SC + 120, svgH = corpus.height * SC + 60;
+  const svgW = corpus.width * SC + 140, svgH = corpus.height * SC + 60;
 
   // Блокируем скролл страницы и pull-to-refresh когда идёт drag или активен режим перемещения
   useEffect(() => {
@@ -581,14 +581,28 @@ export default function WardrobeEditor() {
     }
   }, [isMobile, drag, mobileDragMode]);
 
+  // Отслеживаем ширину viewport для fit'а канваса под экран (пересчитывается при resize/rotate)
+  const [viewportW, setViewportW] = useState(
+    typeof window !== 'undefined' ? window.innerWidth : 360,
+  );
+  useEffect(() => {
+    if (!isMobile) return;
+    const upd = () => setViewportW(window.innerWidth);
+    window.addEventListener('resize', upd);
+    window.addEventListener('orientationchange', upd);
+    return () => {
+      window.removeEventListener('resize', upd);
+      window.removeEventListener('orientationchange', upd);
+    };
+  }, [isMobile]);
+
   // Для мобильного: масштабируем canvas через CSS transform, чтобы влез в экран
   // baseFit — автоматический фит под ширину экрана, userZoom — пинч-зум от пользователя
   const mobileCanvasFit = useMemo(() => {
     if (!isMobile) return 1;
-    if (typeof window === 'undefined') return 1;
-    const availW = window.innerWidth - 16;
+    const availW = viewportW - 16;
     return svgW > availW ? availW / svgW : 1;
-  }, [isMobile, svgW]);
+  }, [isMobile, svgW, viewportW]);
   const mobileCanvasScale = mobileCanvasFit * userZoom;
 
   // ── Мобильные touch-жесты: pinch-zoom + pan + double-tap для сброса ─────────────
@@ -604,7 +618,7 @@ export default function WardrobeEditor() {
   } = useMobileTouch(userZoom, setUserZoom, setDrag);
 
   const canvas = (
-<svg ref={svgRef} width={svgW} height={svgH} viewBox={`-50 -16 ${corpus.width * SC + 120} ${corpus.height * SC + 60}`} style={{ cursor: placeMode ? "crosshair" : "default", filter: "drop-shadow(0 4px 20px rgba(0,0,0,0.5))" }} onClick={onSvgClick}>
+<svg ref={svgRef} width={svgW} height={svgH} viewBox={`-70 -16 ${corpus.width * SC + 140} ${corpus.height * SC + 60}`} style={{ cursor: placeMode ? "crosshair" : "default", filter: "drop-shadow(0 4px 20px rgba(0,0,0,0.5))" }} onClick={onSvgClick}>
   <defs>
     <pattern id="g" width={100 * SC} height={100 * SC} patternUnits="userSpaceOnUse"><path d={`M ${100 * SC} 0 L 0 0 0 ${100 * SC}`} fill="none" stroke="#161720" strokeWidth={0.5} /></pattern>
   </defs>
@@ -828,7 +842,7 @@ export default function WardrobeEditor() {
   <SvgInput x={corpus.width * SC / 2} y={corpus.height * SC + 38} width={60} value={corpus.width} color="#777" fontSize={10} onChange={v => setCorpus(c => ({ ...c, width: Math.max(300, Math.min(3000, v)) }))} />
   <text x={corpus.width * SC / 2 - 32} y={corpus.height * SC + 38} textAnchor="middle" fontSize={8} fill="#444">←</text>
   <text x={corpus.width * SC / 2 + 32} y={corpus.height * SC + 38} textAnchor="middle" fontSize={8} fill="#444">→</text>
-  <SvgInput x={-32} y={corpus.height * SC / 2 + 3} width={40} value={corpus.height} color="#777" fontSize={10} onChange={v => setCorpus(c => ({ ...c, height: Math.max(400, Math.min(2700, v)) }))} />
+  <SvgInput x={-48} y={corpus.height * SC / 2 + 3} width={40} value={corpus.height} color="#777" fontSize={10} onChange={v => setCorpus(c => ({ ...c, height: Math.max(400, Math.min(2700, v)) }))} />
 
   {/* ═══ SELECTED ELEMENT EDITABLE DIMS OVERLAY ═══
       Когда выделена стойка/полка — рисуем редактируемые размеры до соседей с правильной логикой:
@@ -1518,7 +1532,7 @@ export default function WardrobeEditor() {
 
   return (
     <div
-      style={{ minHeight: "100vh", color: "#e5e7eb", userSelect: "none", background: "#0b0c10", fontFamily: "'IBM Plex Mono',monospace" }}
+      style={{ minHeight: "100vh", width: "100%", color: "#e5e7eb", userSelect: "none", background: "#0b0c10", fontFamily: "'IBM Plex Mono',monospace", boxSizing: "border-box" }}
       onMouseMove={onMove}
       onMouseUp={onUp}
       onTouchMove={onMove}
@@ -1564,6 +1578,8 @@ export default function WardrobeEditor() {
               display: "flex",
               alignItems: "flex-start",
               justifyContent: "center",
+              width: "100%",
+              boxSizing: "border-box",
               // При zoom > 1 блокируем touchAction — pan делаем сами через panX/panY.
               // При zoom = 1 разрешаем pan-y чтобы листалась страница (скроллом).
               // При drag/режиме перемещения/pinch — тоже блок.
@@ -1572,19 +1588,30 @@ export default function WardrobeEditor() {
                 : "pan-y",
               overflow: "hidden",
             }}>
+            {/* Внешняя обёртка — физически занимает size ПОСЛЕ масштабирования,
+                чтобы flex justify-center корректно центрировал. */}
             <div style={{
-              width: svgW,
-              height: svgH,
+              width: svgW * mobileCanvasScale,
+              height: svgH * mobileCanvasScale,
               flexShrink: 0,
-              // Pan через translate + zoom через scale. Порядок важен:
-              // сначала translate (в координатах viewport), потом scale.
-              transform: `translate(${panX}px, ${panY}px) scale(${mobileCanvasScale})`,
-              transformOrigin: "top center",
-              // Плавность возврата при отпускании (CSS transition включается если
-              // pan/pinch неактивны — иначе лагает drag)
-              transition: (panRef.current || pinchRef.current) ? "none" : "transform 0.1s ease-out",
+              position: "relative",
+              touchAction: userZoom > 1 ? "none" : "auto",
             }}>
-              {canvas}
+              <div style={{
+                width: svgW,
+                height: svgH,
+                // Pan через translate + zoom через scale.
+                // transformOrigin: top left — чтобы scale происходил из верхнего-левого
+                // угла и не смещал визуально левый край. Это важно для правильной работы
+                // с обёрткой конкретного размера.
+                transform: `translate(${panX}px, ${panY}px) scale(${mobileCanvasScale})`,
+                transformOrigin: "top left",
+                // Плавность возврата при отпускании.
+                transition: (panRef.current || pinchRef.current) ? "none" : "transform 0.1s ease-out",
+                touchAction: userZoom > 1 ? "none" : "auto",
+              }}>
+                {canvas}
+              </div>
             </div>
           </div>
 
@@ -1657,6 +1684,10 @@ export default function WardrobeEditor() {
               boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
             }}>
               <span>{Math.round(userZoom * 100)}%</span>
+              {/* DEBUG: pan значения на экране для диагностики */}
+              <span style={{ fontSize: 9, color: "#888", fontWeight: 500 }}>
+                {Math.round(panX)},{Math.round(panY)} {panRef.current ? "●" : "○"}
+              </span>
               <button
                 onClick={() => setUserZoom(1)}
                 style={{

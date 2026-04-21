@@ -13,6 +13,13 @@
   body {
     @apply bg-surface-50 text-gray-900 antialiased;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    margin: 0;
+    padding: 0;
   }
 
   * {
