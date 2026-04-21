@@ -591,9 +591,12 @@ export default function WardrobeEditor() {
   }, [isMobile, svgW]);
   const mobileCanvasScale = mobileCanvasFit * userZoom;
 
-  // ── Мобильные touch-жесты: pinch-zoom + double-tap для сброса ─────────────
+  // ── Мобильные touch-жесты: pinch-zoom + pan + double-tap для сброса ─────────────
   const {
     pinchRef,
+    panRef,
+    panX,
+    panY,
     onCanvasTouchStart,
     onCanvasTouchMove,
     onCanvasTouchEnd,
@@ -1561,31 +1564,27 @@ export default function WardrobeEditor() {
               display: "flex",
               alignItems: "flex-start",
               justifyContent: "center",
-              // При зуме > 1 нужна возможность панорамировать увеличенный канвас пальцем —
-              // разрешаем горизонтальный и вертикальный scroll внутри контейнера.
-              // При zoom = 1 оставляем pan-y чтобы листалась страница.
-              // При drag/режиме перемещения — блокируем всё.
-              touchAction: (drag || mobileDragMode || pinchRef.current)
+              // При zoom > 1 блокируем touchAction — pan делаем сами через panX/panY.
+              // При zoom = 1 разрешаем pan-y чтобы листалась страница (скроллом).
+              // При drag/режиме перемещения/pinch — тоже блок.
+              touchAction: (drag || mobileDragMode || pinchRef.current || panRef.current || userZoom > 1)
                 ? "none"
-                : (userZoom > 1 ? "pan-x pan-y" : "pan-y"),
-              overflow: userZoom > 1 ? "auto" : "visible",
+                : "pan-y",
+              overflow: "hidden",
             }}>
             <div style={{
-              // Физический размер div'а = размер канваса × зум.
-              // Это нужно чтобы overflow: auto мог прокручивать увеличенное содержимое.
-              width: svgW * mobileCanvasScale,
-              height: svgH * mobileCanvasScale,
+              width: svgW,
+              height: svgH,
               flexShrink: 0,
-              position: "relative",
+              // Pan через translate + zoom через scale. Порядок важен:
+              // сначала translate (в координатах viewport), потом scale.
+              transform: `translate(${panX}px, ${panY}px) scale(${mobileCanvasScale})`,
+              transformOrigin: "top center",
+              // Плавность возврата при отпускании (CSS transition включается если
+              // pan/pinch неактивны — иначе лагает drag)
+              transition: (panRef.current || pinchRef.current) ? "none" : "transform 0.1s ease-out",
             }}>
-              <div style={{
-                transform: `scale(${mobileCanvasScale})`,
-                transformOrigin: "top left",
-                width: svgW,
-                height: svgH,
-              }}>
-                {canvas}
-              </div>
+              {canvas}
             </div>
           </div>
 
