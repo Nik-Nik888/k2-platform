@@ -10,6 +10,7 @@ import { computeZones, findZone } from "../logic/zones";
 import { calcHW, calcParts } from "../logic/calculations";
 import { adjust as pureAdjust } from "../logic/adjust";
 import { findDoorBounds as pureFindDoorBounds, computeDoorSnapTargets } from "../logic/doorBounds";
+import { computeDoorResize } from "../logic/doorResize";
 /* ═══════════════════════════════
    MAIN EDITOR
    ═══════════════════════════════ */
@@ -393,130 +394,18 @@ export default function WardrobeEditor() {
         const el = prev.find(e => e.id === drag.id);
         if (!el || el.type !== "door") return prev;
 
-        let newBounds = {
-          left: el.doorLeft ?? 0, right: el.doorRight ?? iW,
-          top: el.doorTop ?? 0, bottom: el.doorBottom ?? iH,
-          leftIsWall: el.doorLeftIsWall ?? true, rightIsWall: el.doorRightIsWall ?? true,
-          topIsWall: el.doorTopIsWall ?? true, bottomIsWall: el.doorBottomIsWall ?? true,
-        };
-
         const { vTargets, hTargets } = doorSnapTargets;
-
-        if (drag.edge === "top" || drag.edge === "bottom") {
-          // Find nearest H target to mouse Y
-          const mouseY = c.y;
-          let best = null, bestDist = Infinity;
-          for (const ht of hTargets) {
-            // Only snap to targets that make sense (don't invert)
-            if (drag.edge === "top" && ht.pos >= newBounds.bottom) continue;
-            if (drag.edge === "bottom" && ht.pos <= newBounds.top) continue;
-            const d = Math.abs(ht.pos - mouseY);
-            if (d < bestDist) { bestDist = d; best = ht; }
-          }
-          if (best) {
-            if (drag.edge === "top") { newBounds.top = best.pos; newBounds.topIsWall = best.isWall; }
-            else { newBounds.bottom = best.pos; newBounds.bottomIsWall = best.isWall; }
-          }
-        }
-
-        if (drag.edge === "left" || drag.edge === "right") {
-          const mouseX = c.x;
-          let best = null, bestDist = Infinity;
-          for (const vt of vTargets) {
-            if (drag.edge === "left" && vt.pos >= newBounds.right) continue;
-            if (drag.edge === "right" && vt.pos <= newBounds.left) continue;
-            const d = Math.abs(vt.pos - mouseX);
-            if (d < bestDist) { bestDist = d; best = vt; }
-          }
-          if (best) {
-            if (drag.edge === "left") { newBounds.left = best.pos; newBounds.leftIsWall = best.isWall; }
-            else { newBounds.right = best.pos; newBounds.rightIsWall = best.isWall; }
-          }
-        }
-
-        // ══ CLAMP ПО СОСЕДНИМ ДВЕРЯМ ══
-        // Дверь не может пересечь границу соседней двери чей вертикальный диапазон пересекается.
-        // Это защита от случая когда snap выбирает дальнюю цель, а на пути есть соседняя дверь.
-        const otherDoors = prev.filter(e => e.type === "door" && e.id !== el.id && e.doorLeft !== undefined);
-        const myTop = newBounds.top, myBot = newBounds.bottom;
-        const overlapsVertically = (d: any) => {
-          const dT = d.doorTop ?? 0, dB = d.doorBottom ?? iH;
-          return dT < myBot - 1 && dB > myTop + 1;
-        };
-        if (drag.edge === "right") {
-          for (const d of otherDoors) {
-            if (!overlapsVertically(d)) continue;
-            if (d.doorLeft >= newBounds.left && newBounds.right > d.doorLeft) {
-              newBounds.right = d.doorLeft;
-              newBounds.rightIsWall = false;
-            }
-          }
-        } else if (drag.edge === "left") {
-          for (const d of otherDoors) {
-            if (!overlapsVertically(d)) continue;
-            if (d.doorRight <= newBounds.right && newBounds.left < d.doorRight) {
-              newBounds.left = d.doorRight;
-              newBounds.leftIsWall = false;
-            }
-          }
-        }
-        if (drag.edge === "bottom" || drag.edge === "top") {
-          const myLeft = newBounds.left, myRight = newBounds.right;
-          const overlapsHorizontally = (d: any) => {
-            const dL = d.doorLeft ?? 0, dR = d.doorRight ?? iW;
-            return dL < myRight - 1 && dR > myLeft + 1;
-          };
-          if (drag.edge === "bottom") {
-            for (const d of otherDoors) {
-              if (!overlapsHorizontally(d)) continue;
-              const dTop = d.doorTop ?? 0;
-              if (dTop >= newBounds.top && newBounds.bottom > dTop) {
-                newBounds.bottom = dTop;
-                newBounds.bottomIsWall = false;
-              }
-            }
-          } else {
-            for (const d of otherDoors) {
-              if (!overlapsHorizontally(d)) continue;
-              const dBot = d.doorBottom ?? iH;
-              if (dBot <= newBounds.bottom && newBounds.top < dBot) {
-                newBounds.top = dBot;
-                newBounds.topIsWall = false;
-              }
-            }
-          }
-        }
-
-        // Recalculate door dimensions
-        const OC = 14, OS = 7;
-        const lo = newBounds.leftIsWall ? OC : OS;
-        const ro = newBounds.rightIsWall ? OC : OS;
-        const to = newBounds.topIsWall ? OC : OS;
-        const bo = newBounds.bottomIsWall ? OC : OS;
-        const innerLeft = newBounds.left + (newBounds.left > 0 ? t : 0);
-        const innerW = newBounds.right - innerLeft;
-        const ht = el.hingeType || "overlay";
-        let dX, dW, dY, dH;
-        if (ht === "overlay") {
-          dX = innerLeft - lo; dW = innerW + lo + ro;
-          dY = newBounds.top - to; dH = (newBounds.bottom - newBounds.top) + to + bo;
-        } else {
-          const gap = 2;
-          dX = innerLeft + gap; dW = innerW - gap * 2;
-          dY = newBounds.top + gap; dH = (newBounds.bottom - newBounds.top) - gap * 2;
-        }
-        // Clamp: дверь никогда не выходит за границы рамки
-        if (dX < 0) { dW += dX; dX = 0; }
-        if (dX + dW > iW) dW = iW - dX;
-        if (dY < 0) { dH += dY; dY = 0; }
-        if (dY + dH > iH) dH = iH - dY;
+        const otherDoors = prev.filter(e =>
+          e.type === "door" && e.id !== el.id && e.doorLeft !== undefined,
+        );
+        const next = computeDoorResize(
+          el, c.x, c.y, drag.edge,
+          vTargets, hTargets, otherDoors,
+          iW, iH, t,
+        );
 
         return prev.map(e => e.id !== drag.id ? e : {
-          ...e, x: dX, y: dY, w: dW, h: dH, doorW: dW, doorH: dH,
-          doorLeft: newBounds.left, doorRight: newBounds.right,
-          doorTop: newBounds.top, doorBottom: newBounds.bottom,
-          doorLeftIsWall: newBounds.leftIsWall, doorRightIsWall: newBounds.rightIsWall,
-          doorTopIsWall: newBounds.topIsWall, doorBottomIsWall: newBounds.bottomIsWall,
+          ...e, ...next,
           manualW: undefined, manualH: undefined, // clear manual overrides
         });
       });
