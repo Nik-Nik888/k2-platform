@@ -19,7 +19,7 @@
 import { uid, DOOR_OVERLAY_CORPUS, DOOR_OVERLAY_STUD } from "../constants";
 import type { DoorBoundsResult } from "./doorBounds";
 
-export type PlaceMode = "shelf" | "stud" | "drawers" | "rod" | "door";
+export type PlaceMode = "shelf" | "stud" | "drawers" | "rod" | "door" | "panel";
 
 export interface PlacementCtx {
   placeMode: PlaceMode;
@@ -62,6 +62,9 @@ export function placeInZone(ctx: PlacementCtx): PlacementResult | null {
   }
   if (placeMode === "door") {
     return placeDoor({ id, order, clickX, clickY, iW, iH, t, elements, findDoorBounds });
+  }
+  if (placeMode === "panel") {
+    return placePanel({ id, order, clickX, clickY, iW, iH, t, elements, findDoorBounds });
   }
   return null;
 }
@@ -296,10 +299,20 @@ function placeDoor(p: {
   if (dY < 0) { dH += dY; dY = 0; }
   if (dY + dH > iH) dH = iH - dY;
 
-  // Автовыбор стороны петель — ручка ближе к центру проёма
-  const doorCenterX = dX + dW / 2;
-  const openingCenterX = (effLeft + effRight) / 2;
-  const autoHingeSide = doorCenterX < openingCenterX ? "left" : "right";
+  // Автовыбор стороны петель — петли у стенки, ручка в центр проёма:
+  // - если делим проём пополам (sameBoundsDoors): смотрим в какую половину встала дверь
+  // - иначе — по центру двери относительно проёма
+  let autoHingeSide: "left" | "right";
+  if (sameBoundsDoors.length > 0) {
+    // Заняли левую половину (effRight урезан до openingMid) → петли слева
+    // Заняли правую половину (effLeft = openingMid) → петли справа
+    autoHingeSide = effRight <= openingMid + 1 ? "left" : "right";
+  } else {
+    // Одиночная дверь: по центру двери относительно проёма
+    const doorCenterX = dX + dW / 2;
+    const openingCenterX = (effLeft + effRight) / 2;
+    autoHingeSide = doorCenterX < openingCenterX ? "left" : "right";
+  }
 
   return {
     element: {
@@ -311,6 +324,78 @@ function placeDoor(p: {
       doorTop: bounds.top.y, doorBottom: bounds.bottom.y,
       doorLeftIsWall: effLeftIsWall, doorRightIsWall: effRightIsWall,
       doorTopIsWall: bounds.top.isWall, doorBottomIsWall: bounds.bottom.isWall,
+      _order: order,
+    },
+    keepPlaceMode: false,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────
+// PANEL — декоративная ЛДСП-панель (цоколь, антресоль, заглушка).
+// Логика размещения похожа на дверь (overlay/insert режимы),
+// но без петель/ручки/деления проёма пополам.
+// ───────────────────────────────────────────────────────────────
+
+function placePanel(p: {
+  id: string; order: number; clickX: number; clickY: number;
+  iW: number; iH: number; t: number;
+  elements: any[];
+  findDoorBounds: (x: number, y: number) => DoorBoundsResult;
+}): PlacementResult {
+  const { id, order, clickX, clickY, iW, iH, t, findDoorBounds } = p;
+  const bounds = findDoorBounds(clickX, clickY);
+
+  const OC = DOOR_OVERLAY_CORPUS;
+  const OS = DOOR_OVERLAY_STUD;
+  const to = bounds.top.isWall ? OC : OS;
+  const bo = bounds.bottom.isWall ? OC : OS;
+
+  // По умолчанию панель ставим как overlay (накладка).
+  // Пользователь сможет переключить на insert через панель свойств.
+  const panelType: "overlay" | "insert" = "overlay";
+
+  const effLeft = bounds.left.x;
+  const effRight = bounds.right.x;
+  const effLeftIsWall = bounds.left.isWall;
+  const effRightIsWall = bounds.right.isWall;
+
+  const effLeftOffset = effLeftIsWall ? OC : OS;
+  const effRightOffset = effRightIsWall ? OC : OS;
+  const effInnerLeft = effLeft + (effLeftIsWall ? 0 : t);
+  const effInnerW = effRight - effInnerLeft;
+
+  let dX: number, dW: number, dY: number, dH: number;
+  if (panelType === "overlay") {
+    dX = effInnerLeft - effLeftOffset;
+    dW = effInnerW + effLeftOffset + effRightOffset;
+    dY = bounds.top.y - to;
+    dH = (bounds.bottom.y - bounds.top.y) + to + bo;
+  } else {
+    const gap = 2;
+    dX = effInnerLeft + gap;
+    dW = effInnerW - gap * 2;
+    dY = bounds.top.y + gap;
+    dH = (bounds.bottom.y - bounds.top.y) - gap * 2;
+  }
+  // Clamp: панель не должна вылезать за рамку
+  if (dX < 0) { dW += dX; dX = 0; }
+  if (dX + dW > iW) dW = iW - dX;
+  if (dY < 0) { dH += dY; dY = 0; }
+  if (dY + dH > iH) dH = iH - dY;
+
+  return {
+    element: {
+      id, type: "panel",
+      x: dX, y: dY, w: dW, h: dH,
+      panelW: dW, panelH: dH,
+      panelType,
+      panelLeft: effLeft, panelRight: effRight,
+      panelTop: bounds.top.y, panelBottom: bounds.bottom.y,
+      panelLeftIsWall: effLeftIsWall, panelRightIsWall: effRightIsWall,
+      panelTopIsWall: bounds.top.isWall, panelBottomIsWall: bounds.bottom.isWall,
+      // depthOffset: по умолчанию утоплена к задней стенке (классический цоколь)
+      // Пользователь может переключить на 0 или другое значение.
+      depthOffset: 0,
       _order: order,
     },
     keepPlaceMode: false,

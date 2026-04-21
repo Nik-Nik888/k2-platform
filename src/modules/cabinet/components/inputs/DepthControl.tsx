@@ -78,7 +78,11 @@ export function DepthControl({ corpusDepth, depth, depthOffset, onChange }: Dept
         <>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
             <div>
-              <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Глубина</div>
+              <div style={{
+                fontSize: 10, color: "#888", marginBottom: 3,
+                minHeight: 26, // 2 строки × 13px — фиксированная высота для выравнивания
+                display: "flex", alignItems: "flex-end",
+              }}>Глубина</div>
               <NumInput
                 value={actualDepth}
                 onChange={v => {
@@ -89,9 +93,11 @@ export function DepthControl({ corpusDepth, depth, depthOffset, onChange }: Dept
               />
             </div>
             <div>
-              <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>
-                Отступ от задней
-              </div>
+              <div style={{
+                fontSize: 10, color: "#888", marginBottom: 3,
+                minHeight: 26,
+                display: "flex", alignItems: "flex-end",
+              }}>Отступ от задней</div>
               <NumInput
                 value={actualOffset}
                 onChange={v => {

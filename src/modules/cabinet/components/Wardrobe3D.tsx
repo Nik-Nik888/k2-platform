@@ -490,6 +490,45 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
           });
         }
       }
+
+      /* ── PANEL (Панель — цоколь/антресоль/заглушка) ──
+         Реальная конструкция:
+         • ЛДСП-панель того же цвета что и корпус
+         • Накладная (overlay) — выступает за габариты проёма на 14мм/7мм, ставится на 2мм перед корпусом
+         • Вкладная (insert) — утоплена в проём на 2мм, внутри габаритов
+         • Учитывается el.depth / el.depthOffset если заданы — для утопленных панелей
+         • Кромка на всех 4 видимых рёбрах */
+      if (el.type === "panel") {
+        const panelType = el.panelType || "overlay";
+        const panelT = tt;
+
+        const panelW = (el.w || 400) * S;
+        const panelH = (el.h || iH) * S;
+        const panelX = toX((el.x || 0) + (el.w || 400) / 2);
+        const panelY = toY((el.y || 0) + (el.h || iH) / 2);
+
+        const GAP_FROM_CORPUS = 2 * S;
+        // По умолчанию панель — как дверь (спереди). Но если задан depthOffset —
+        // панель утоплена внутрь корпуса от передней кромки.
+        let panelZ;
+        if (typeof el.depthOffset === "number" && el.depthOffset > 0) {
+          // Утопленная панель: её Z-координата = перед корпуса − depthOffset − половина толщины
+          panelZ = d / 2 - (el.depthOffset * S) - panelT / 2;
+        } else if (panelType === "overlay") {
+          // Накладная: перед корпусом + 2мм зазор
+          panelZ = d / 2 + GAP_FROM_CORPUS + panelT / 2;
+        } else {
+          // Вкладная: внутри проёма, 2мм зазор от кромки корпуса внутрь
+          panelZ = d / 2 - panelT / 2 - GAP_FROM_CORPUS;
+        }
+
+        // ── Панель с кромкой на всех 4 видимых рёбрах ──
+        addPanel(panelW, panelH, panelT,
+          panelX, panelY, panelZ,
+          corpMat, edgeMat,
+          { top: true, bottom: true, left: true, right: true }
+        );
+      }
     });
 
     scene.add(group);

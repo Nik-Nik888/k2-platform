@@ -99,6 +99,14 @@ export function calcParts(c: Corpus, els: any[], showCorpus: boolean): PartItem[
     p.push({ n: `Дверь${i + 1}`, q: 1, l: Math.round(d.doorH || d.h || 0), w: Math.round(d.doorW || d.w || 0) }),
   );
 
+  els.filter(e => e.type === "panel").forEach((pn, i) =>
+    p.push({
+      n: `Панель${i + 1}`, q: 1,
+      l: Math.round(pn.panelH || pn.h || 0),
+      w: Math.round(pn.panelW || pn.w || 0),
+    }),
+  );
+
   els.filter(e => e.type === "drawers").forEach((dr, i) => {
     const cnt = dr.count || 3;
     const heights = dr.drawerHeights || [];

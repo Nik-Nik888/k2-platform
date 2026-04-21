@@ -223,6 +223,54 @@ export function DesktopLeftPanel(props: DesktopLeftPanelProps) {
                 </>
               )}
 
+              {selEl.type === "panel" && (
+                <>
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>Тип установки</div>
+                    {HINGES.map(pt => (
+                      <button key={pt.id} onClick={() => updateEl(selEl.id, { panelType: pt.id })} style={{
+                        display: "block", width: "100%", textAlign: "left",
+                        padding: "5px 8px", borderRadius: 4, fontSize: 11, marginBottom: 2,
+                        cursor: "pointer", border: "1px solid transparent",
+                        background: (selEl.panelType || "overlay") === pt.id ? "rgba(217,119,6,0.12)" : "rgba(30,30,40,0.4)",
+                        color: (selEl.panelType || "overlay") === pt.id ? "#d97706" : "#9ca3af",
+                      }}>{pt.label}</button>
+                    ))}
+                  </div>
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>Размеры, мм</div>
+                    <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
+                      <NumInput label="Ш" value={Math.round(selEl.panelW || selEl.w || 0)} onChange={v => {
+                        const oldX = selEl.x || 0;
+                        const oldW = Math.round(selEl.panelW || selEl.w || 0);
+                        let newX = oldX;
+                        if (selEl.panelRightIsWall && !selEl.panelLeftIsWall) newX = oldX + oldW - v;
+                        else if (!selEl.panelLeftIsWall && !selEl.panelRightIsWall) newX = oldX - (v - oldW) / 2;
+                        updateEl(selEl.id, { w: v, panelW: v, x: newX, manualW: v });
+                      }} min={20} max={iW} color="#d97706" />
+                    </div>
+                    <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
+                      <NumInput label="↑" value={Math.round(selEl.panelH || selEl.h || 0)} onChange={v => {
+                        const newTop = Math.max(0, (selEl.panelBottom ?? iH) - v);
+                        updateEl(selEl.id, { panelTop: newTop, panelTopIsWall: newTop < 1, manualH: undefined });
+                      }} min={20} max={iH} color="#5a8fd4" />
+                      <NumInput label="↓" value={Math.round(selEl.panelH || selEl.h || 0)} onChange={v => {
+                        const newBot = Math.min(iH, (selEl.panelTop ?? 0) + v);
+                        updateEl(selEl.id, { panelBottom: newBot, panelBottomIsWall: newBot > iH - 1, manualH: undefined });
+                      }} min={20} max={iH} color="#5a8fd4" />
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 9, color: "#555", marginTop: 4 }}>
+                    {(selEl.panelType || "overlay") === "overlay"
+                      ? "Накладная: закрывает торцы"
+                      : "Вкладная: утоплена в проём"}
+                    {selEl.panelLeft !== undefined && (
+                      <><br />Границы: {Math.round(selEl.panelLeft)}–{Math.round(selEl.panelRight)} × {Math.round(selEl.panelTop)}–{Math.round(selEl.panelBottom)}</>
+                    )}
+                  </div>
+                </>
+              )}
+
               {selEl.type === "stud" && (
                 <div>
                   <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>

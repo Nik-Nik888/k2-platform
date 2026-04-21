@@ -336,6 +336,58 @@ export function renderDoor(el: any, ctx: RenderCtx): React.ReactNode {
   );
 }
 
+/** Панель — декоративная ЛДСП-панель (цоколь/антресоль/заглушка).
+ * Похожа на дверь по размещению, но без петель и ручки. Цвет — корпуса. */
+export function renderPanel(el: any, ctx: RenderCtx): React.ReactNode {
+  const { sel, sx, sy } = getElBase(el, ctx);
+  const pw = (el.w || 100) * SC;
+  const ph = (el.h || ctx.iH) * SC;
+  const cHex = ctx.corpusHex;
+  const isInsert = el.panelType === "insert";
+  const hasCustomDepth = typeof el.depth === "number" && el.depth > 0;
+  return (
+    <g
+      key={el.id}
+      data-element="1"
+      onMouseDown={e => ctx.onDown(e, el)}
+      onTouchStart={e => ctx.onDown(e, el)}
+      style={{ cursor: "move" }}
+    >
+      <rect
+        x={sx} y={sy} width={pw} height={ph}
+        fill={cHex}
+        fillOpacity={sel ? 0.9 : 0.82}
+        stroke={sel ? "#60a5fa" : "#6b5a45"}
+        strokeWidth={sel ? 1.5 : 0.7}
+        strokeDasharray={hasCustomDepth ? "3 1.5" : isInsert ? "2 1" : undefined}
+        rx={1}
+      />
+      {/* Подпись в центре: «Панель» + тип */}
+      <text
+        x={sx + pw / 2} y={sy + ph / 2 + 3}
+        textAnchor="middle" fontSize={7}
+        fill={sel ? "#60a5fa" : "#8a7a5a"}
+        fontFamily="'IBM Plex Mono',monospace"
+        opacity={0.7}
+        style={{ pointerEvents: "none" }}
+      >
+        {isInsert ? "Панель ↲" : "Панель"}
+      </text>
+      {/* Метка глубины — если задана вручную */}
+      {hasCustomDepth && (
+        <text
+          x={sx + pw - 4}
+          y={sy + ph - 3}
+          textAnchor="end" fontSize={6}
+          fill="#d97706"
+          fontFamily="'IBM Plex Mono',monospace"
+          style={{ pointerEvents: "none" }}
+        >d:{el.depth}</text>
+      )}
+    </g>
+  );
+}
+
 /** Диспетчер: вернуть JSX элемента нужного типа. */
 export function renderElement(el: any, ctx: RenderCtx): React.ReactNode {
   switch (el.type) {
@@ -344,6 +396,7 @@ export function renderElement(el: any, ctx: RenderCtx): React.ReactNode {
     case "drawers": return renderDrawers(el, ctx);
     case "rod": return renderRod(el, ctx);
     case "door": return ctx.showDoors ? renderDoor(el, ctx) : null;
+    case "panel": return renderPanel(el, ctx);
     default: return null;
   }
 }

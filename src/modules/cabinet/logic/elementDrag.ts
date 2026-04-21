@@ -50,8 +50,8 @@ export function moveElement(
     return { ...el, y: ny };
   }
 
-  if (drag.type === "door") {
-    // Дверь двигается по X и Y одновременно в пределах iW/iH
+  if (drag.type === "door" || drag.type === "panel") {
+    // Дверь/панель двигаются по X и Y одновременно в пределах iW/iH
     const nx = Math.max(0, Math.min(iW - (el.w || 50), Math.round(cX - drag.ox)));
     const ny = Math.max(0, Math.min(iH - (el.h || 50), Math.round(cY - drag.oy)));
     return { ...el, x: nx, y: ny };

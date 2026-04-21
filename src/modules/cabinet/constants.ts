@@ -22,6 +22,7 @@ export const TOOLS = [
   { type: "drawers", label: "Ящики",   icon: "☰", key: "D" },
   { type: "rod",     label: "Штанга",  icon: "⎯", key: "R" },
   { type: "door",    label: "Дверь",   icon: "🚪", key: "F" },
+  { type: "panel",   label: "Панель",  icon: "▭", key: "N" },
 ] as const;
 
 export const GUIDES = [
@@ -35,12 +36,19 @@ export const HINGES = [
   { id: "insert",  label: "Вкладная" },
 ] as const;
 
+/** Типы панелей (декоративных, закрывающих, цокольных). */
+export const PANEL_TYPES = [
+  { id: "overlay", label: "Накладная" },
+  { id: "insert",  label: "Вкладная" },
+] as const;
+
 export const MOBILE_EL_LABELS: Record<string, string> = {
   shelf: "Полка",
   stud: "Стойка",
   drawers: "Ящики",
   rod: "Штанга",
   door: "Дверь",
+  panel: "Панель",
 };
 
 /** Генератор уникальных id. */

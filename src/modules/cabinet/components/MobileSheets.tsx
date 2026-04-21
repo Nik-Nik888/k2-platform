@@ -276,6 +276,75 @@ export function MobilePropsSheet(props: MobilePropsSheetProps) {
         </>
       )}
 
+      {selEl.type === "panel" && (
+        <>
+          {/* Размеры панели: ширина + высота (как дверь, но без петель) */}
+          {selEl.panelLeft !== undefined && (() => {
+            const panelW = Math.round(selEl.panelW || selEl.w);
+            const panelH = Math.round(selEl.panelH || selEl.h);
+            return (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Размеры, мм</div>
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Ширина</div>
+                  <NumInput value={panelW} onChange={v => {
+                    const oldX = selEl.x || 0;
+                    const oldW = panelW;
+                    let newX = oldX;
+                    if (selEl.panelRightIsWall && !selEl.panelLeftIsWall) newX = oldX + oldW - v;
+                    else if (!selEl.panelLeftIsWall && !selEl.panelRightIsWall) newX = oldX - (v - oldW) / 2;
+                    updateEl(selEl.id, { w: v, panelW: v, x: newX, manualW: v });
+                  }} min={20} max={iW} color="#d97706" width="100%" />
+                </div>
+                <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Высота</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>↑ Расти вверх</div>
+                    <NumInput value={panelH} onChange={v => {
+                      const newTop = Math.max(0, (selEl.panelBottom ?? iH) - v);
+                      updateEl(selEl.id, {
+                        panelTop: newTop,
+                        panelTopIsWall: newTop < 1,
+                        manualH: undefined,
+                      });
+                    }} min={20} max={iH} color="#5a8fd4" width="100%" />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Расти вниз ↓</div>
+                    <NumInput value={panelH} onChange={v => {
+                      const newBot = Math.min(iH, (selEl.panelTop ?? 0) + v);
+                      updateEl(selEl.id, {
+                        panelBottom: newBot,
+                        panelBottomIsWall: newBot > iH - 1,
+                        manualH: undefined,
+                      });
+                    }} min={20} max={iH} color="#5a8fd4" width="100%" />
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+          {/* Тип панели — накладная/вкладная */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Тип установки</div>
+            {HINGES.map(pt => (
+              <button key={pt.id} onClick={() => updateEl(selEl.id, { panelType: pt.id })} style={{
+                display: "block", width: "100%", textAlign: "left",
+                padding: "12px 14px", borderRadius: 6, fontSize: 13, marginBottom: 6,
+                cursor: "pointer", border: "1px solid transparent",
+                background: (selEl.panelType || "overlay") === pt.id ? "rgba(217,119,6,0.12)" : "rgba(30,30,40,0.4)",
+                color: (selEl.panelType || "overlay") === pt.id ? "#d97706" : "#9ca3af",
+              }}>{pt.label}</button>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: "#666", marginBottom: 10, lineHeight: 1.5 }}>
+            {(selEl.panelType || "overlay") === "overlay"
+              ? "Накладная: закрывает торцы (+14мм корпус / +7мм стойка)"
+              : "Вкладная: утоплена в проём, зазор 2мм"}
+          </div>
+        </>
+      )}
+
       {selEl.type === "stud" && (() => {
         // Соседние stud/стенки слева и справа
         const others = elements.filter(e => e.type === "stud" && e.id !== selEl.id).sort((a, b) => a.x - b.x);

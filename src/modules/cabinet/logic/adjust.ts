@@ -101,12 +101,12 @@ export function adjust(els: any[], iW: number, iH: number, t: number): any[] {
       const w = Math.max(20, Math.min(iW - x, el.w || iW));
       return { ...el, y, x, w };
     }
-    if (el.type === "drawers" || el.type === "rod" || el.type === "door") {
+    if (el.type === "drawers" || el.type === "rod" || el.type === "door" || el.type === "panel") {
       const x = Math.max(0, Math.min(iW, el.x || 0));
       const y = Math.max(0, Math.min(iH, el.y || 0));
       const w = Math.max(20, Math.min(iW - x, el.w || 100));
-      // h клампим только для door/drawers (у rod высота 0)
-      if (el.type === "door" || el.type === "drawers") {
+      // h клампим для door/drawers/panel (у rod высота 0)
+      if (el.type === "door" || el.type === "drawers" || el.type === "panel") {
         const h = Math.max(20, Math.min(iH - y, el.h || 100));
         return { ...el, x, y, w, h };
       }
