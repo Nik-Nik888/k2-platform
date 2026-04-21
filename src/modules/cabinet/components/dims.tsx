@@ -319,3 +319,104 @@ export function renderDoorHitZones(ctx: DoorHitZonesCtx): React.ReactNode {
     </>
   );
 }
+
+// ───────────────────────────────────────────────────────────────
+// PanelHitZones — то же самое для панели (использует panel* поля)
+// ───────────────────────────────────────────────────────────────
+
+export interface PanelHitZonesCtx {
+  elements: any[];
+  selId: string | null;
+  frameT: number;
+  iH: number;
+  isMobile: boolean;
+  onPanelEdgeDrag: (e: any, panelEl: any, edge: "top" | "bottom" | "left" | "right") => void;
+  updateEl: (id: string, upd: any) => void;
+}
+
+export function renderPanelHitZones(ctx: PanelHitZonesCtx): React.ReactNode {
+  const { elements, selId, frameT, iH, isMobile, onPanelEdgeDrag, updateEl } = ctx;
+  const selPanel = elements.find(e => e.id === selId && e.type === "panel");
+  if (!selPanel) return null;
+
+  const psx = ((selPanel.x || 0) + frameT) * SC;
+  const psy = ((selPanel.y || 0) + frameT) * SC;
+  const ppw = (selPanel.w || 100) * SC;
+  const pph = (selPanel.h || iH) * SC;
+  const HIT = isMobile ? 44 : 10;
+
+  return (
+    <>
+      {/* TOP */}
+      <rect
+        x={psx + ppw / 2 - HIT} y={psy - HIT / 2}
+        width={HIT * 2} height={HIT}
+        fill="transparent"
+        style={{ cursor: "ns-resize" }}
+        onMouseDown={e => onPanelEdgeDrag(e, selPanel, "top")}
+        onTouchStart={e => onPanelEdgeDrag(e, selPanel, "top")}
+      />
+      {/* BOTTOM */}
+      <rect
+        x={psx + ppw / 2 - HIT} y={psy + pph - HIT / 2}
+        width={HIT * 2} height={HIT}
+        fill="transparent"
+        style={{ cursor: "ns-resize" }}
+        onMouseDown={e => onPanelEdgeDrag(e, selPanel, "bottom")}
+        onTouchStart={e => onPanelEdgeDrag(e, selPanel, "bottom")}
+      />
+      {/* LEFT */}
+      <rect
+        x={psx - HIT / 2} y={psy + pph / 2 - HIT}
+        width={HIT} height={HIT * 2}
+        fill="transparent"
+        style={{ cursor: "ew-resize" }}
+        onMouseDown={e => onPanelEdgeDrag(e, selPanel, "left")}
+        onTouchStart={e => onPanelEdgeDrag(e, selPanel, "left")}
+      />
+      {/* RIGHT */}
+      <rect
+        x={psx + ppw - HIT / 2} y={psy + pph / 2 - HIT}
+        width={HIT} height={HIT * 2}
+        fill="transparent"
+        style={{ cursor: "ew-resize" }}
+        onMouseDown={e => onPanelEdgeDrag(e, selPanel, "right")}
+        onTouchStart={e => onPanelEdgeDrag(e, selPanel, "right")}
+      />
+      {/* Width input */}
+      <SvgInput
+        x={psx + ppw / 2} y={psy + pph - 12} width={50} fontSize={10}
+        value={Math.round(selPanel.panelW || selPanel.w)}
+        color="#d97706"
+        onChange={v => {
+          const oldX = selPanel.x || 0;
+          const oldW = Math.round(selPanel.panelW || selPanel.w);
+          let newX = oldX;
+          if (selPanel.panelRightIsWall && !selPanel.panelLeftIsWall) {
+            newX = oldX + oldW - v;
+          } else if (!selPanel.panelLeftIsWall && !selPanel.panelRightIsWall) {
+            newX = oldX - (v - oldW) / 2;
+          }
+          updateEl(selPanel.id, { w: v, panelW: v, x: newX, manualW: v });
+        }}
+      />
+      {/* Height input */}
+      <SvgInput
+        x={psx + 18} y={psy + pph / 2 + 3} width={36} fontSize={10}
+        value={Math.round(selPanel.panelH || selPanel.h)}
+        color="#5a8fd4"
+        onChange={v => {
+          const oldY = selPanel.y || 0;
+          const oldH = Math.round(selPanel.panelH || selPanel.h);
+          let newY = oldY;
+          if (selPanel.panelBottomIsWall && !selPanel.panelTopIsWall) {
+            newY = oldY + oldH - v;
+          } else if (!selPanel.panelTopIsWall && !selPanel.panelBottomIsWall) {
+            newY = oldY - (v - oldH) / 2;
+          }
+          updateEl(selPanel.id, { h: v, panelH: v, y: newY, manualH: v });
+        }}
+      />
+    </>
+  );
+}

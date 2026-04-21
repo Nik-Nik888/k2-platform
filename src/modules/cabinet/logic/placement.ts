@@ -347,36 +347,55 @@ function placePanel(p: {
 
   const OC = DOOR_OVERLAY_CORPUS;
   const OS = DOOR_OVERLAY_STUD;
-  const to = bounds.top.isWall ? OC : OS;
-  const bo = bounds.bottom.isWall ? OC : OS;
 
-  // По умолчанию панель ставим как overlay (накладка).
-  // Пользователь сможет переключить на insert через панель свойств.
-  const panelType: "overlay" | "insert" = "overlay";
+  // По умолчанию панель вкладная (insert) — чаще всего это цоколь или
+  // декоративная заглушка, которая не должна закрывать торцы корпуса.
+  const panelType: "overlay" | "insert" = "insert";
 
   const effLeft = bounds.left.x;
   const effRight = bounds.right.x;
   const effLeftIsWall = bounds.left.isWall;
   const effRightIsWall = bounds.right.isWall;
 
-  const effLeftOffset = effLeftIsWall ? OC : OS;
-  const effRightOffset = effRightIsWall ? OC : OS;
+  // Для insert: панель внутри проёма (не заходит на стойки, не закрывает торцы корпуса).
   const effInnerLeft = effLeft + (effLeftIsWall ? 0 : t);
-  const effInnerW = effRight - effInnerLeft;
+  const effInnerRight = effRight;
+  const effInnerW = effInnerRight - effInnerLeft;
+
+  // Определяем «ближнюю» границу к клику — она будет определять позицию панели
+  const midY = (bounds.top.y + bounds.bottom.y) / 2;
+  const nearBottom = clickY > midY; // клик ближе к низу проёма → панель-цоколь внизу
+  const DEFAULT_PANEL_H = 100; // высота по умолчанию (мм) — типовой цоколь
 
   let dX: number, dW: number, dY: number, dH: number;
+
   if (panelType === "overlay") {
+    // Накладная: выступает за габариты проёма, закрывает торцы (как дверь)
+    const to = bounds.top.isWall ? OC : OS;
+    const bo = bounds.bottom.isWall ? OC : OS;
+    const effLeftOffset = effLeftIsWall ? OC : OS;
+    const effRightOffset = effRightIsWall ? OC : OS;
     dX = effInnerLeft - effLeftOffset;
     dW = effInnerW + effLeftOffset + effRightOffset;
     dY = bounds.top.y - to;
     dH = (bounds.bottom.y - bounds.top.y) + to + bo;
   } else {
+    // Вкладная: СТРОГО в проёме — от одной границы, высотой 100мм по умолчанию.
+    // Это позволяет сделать цоколь (низ) или антресольную заглушку (верх).
     const gap = 2;
     dX = effInnerLeft + gap;
     dW = effInnerW - gap * 2;
-    dY = bounds.top.y + gap;
-    dH = (bounds.bottom.y - bounds.top.y) - gap * 2;
+    const openingH = bounds.bottom.y - bounds.top.y;
+    dH = Math.min(DEFAULT_PANEL_H, openingH - 2 * gap);
+    if (nearBottom) {
+      // Цоколь — у низа проёма
+      dY = bounds.bottom.y - gap - dH;
+    } else {
+      // Антресоль / верхняя заглушка — у верха проёма
+      dY = bounds.top.y + gap;
+    }
   }
+
   // Clamp: панель не должна вылезать за рамку
   if (dX < 0) { dW += dX; dX = 0; }
   if (dX + dW > iW) dW = iW - dX;

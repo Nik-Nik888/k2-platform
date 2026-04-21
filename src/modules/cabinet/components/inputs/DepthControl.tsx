@@ -101,10 +101,13 @@ export function DepthControl({ corpusDepth, depth, depthOffset, onChange }: Dept
               <NumInput
                 value={actualOffset}
                 onChange={v => {
-                  const clamped = Math.max(0, Math.min(corpusDepth - actualDepth, v));
-                  onChange({ depth: actualDepth, depthOffset: clamped });
+                  // Если offset+depth превысит corpusDepth — уменьшаем depth до допустимого
+                  const clampedOffset = Math.max(0, Math.min(corpusDepth - 50, v));
+                  const maxDepth = corpusDepth - clampedOffset;
+                  const newDepth = Math.min(actualDepth, maxDepth);
+                  onChange({ depth: newDepth, depthOffset: clampedOffset });
                 }}
-                min={0} max={corpusDepth - actualDepth} color="#d97706" width="100%"
+                min={0} max={corpusDepth - 50} color="#d97706" width="100%"
               />
             </div>
           </div>

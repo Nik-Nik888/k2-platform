@@ -345,6 +345,8 @@ export function renderPanel(el: any, ctx: RenderCtx): React.ReactNode {
   const cHex = ctx.corpusHex;
   const isInsert = el.panelType === "insert";
   const hasCustomDepth = typeof el.depth === "number" && el.depth > 0;
+  const HANDLE = ctx.isMobile ? 14 : 6;
+  const LEN = ctx.isMobile ? 48 : 24;
   return (
     <g
       key={el.id}
@@ -383,6 +385,15 @@ export function renderPanel(el: any, ctx: RenderCtx): React.ReactNode {
           fontFamily="'IBM Plex Mono',monospace"
           style={{ pointerEvents: "none" }}
         >d:{el.depth}</text>
+      )}
+      {sel && (
+        <>
+          {/* Оранжевые ручки resize — pointerEvents: none, hit-zones отдельно */}
+          <rect x={sx + pw / 2 - LEN / 2} y={sy - HANDLE / 2} width={LEN} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ pointerEvents: "none" }} />
+          <rect x={sx + pw / 2 - LEN / 2} y={sy + ph - HANDLE / 2} width={LEN} height={HANDLE} rx={2} fill="#d97706" opacity={0.9} style={{ pointerEvents: "none" }} />
+          <rect x={sx - HANDLE / 2} y={sy + ph / 2 - LEN / 2} width={HANDLE} height={LEN} rx={2} fill="#d97706" opacity={0.9} style={{ pointerEvents: "none" }} />
+          <rect x={sx + pw - HANDLE / 2} y={sy + ph / 2 - LEN / 2} width={HANDLE} height={LEN} rx={2} fill="#d97706" opacity={0.9} style={{ pointerEvents: "none" }} />
+        </>
       )}
     </g>
   );

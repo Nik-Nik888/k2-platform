@@ -183,3 +183,72 @@ export function computeDoorResize(
     doorTopIsWall: newBounds.topIsWall, doorBottomIsWall: newBounds.bottomIsWall,
   };
 }
+
+/**
+ * Пересчёт панели при resize — обёртка над computeDoorResize.
+ * Панель использует поля panelLeft/panelRight/panelTop/panelBottom
+ * и panelType (overlay/insert) вместо дверных аналогов.
+ *
+ * Реализация: временно маппим panel* → door*, вызываем door-логику,
+ * маппим результат обратно. Поведение snap/clamp идентично двери.
+ */
+export interface PanelResizeResult {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  panelW: number;
+  panelH: number;
+  panelLeft: number;
+  panelRight: number;
+  panelTop: number;
+  panelBottom: number;
+  panelLeftIsWall: boolean;
+  panelRightIsWall: boolean;
+  panelTopIsWall: boolean;
+  panelBottomIsWall: boolean;
+}
+
+export function computePanelResize(
+  el: any,
+  mouseX: number,
+  mouseY: number,
+  edge: "top" | "bottom" | "left" | "right",
+  vTargets: SnapTarget[],
+  hTargets: SnapTarget[],
+  otherPanels: any[],
+  iW: number,
+  iH: number,
+  t: number,
+): PanelResizeResult {
+  // Маппим panel* → door* для переиспользования логики двери
+  const doorLike = {
+    ...el,
+    doorLeft: el.panelLeft,
+    doorRight: el.panelRight,
+    doorTop: el.panelTop,
+    doorBottom: el.panelBottom,
+    doorLeftIsWall: el.panelLeftIsWall,
+    doorRightIsWall: el.panelRightIsWall,
+    doorTopIsWall: el.panelTopIsWall,
+    doorBottomIsWall: el.panelBottomIsWall,
+    hingeType: el.panelType || "overlay",
+  };
+  const otherDoorLike = otherPanels.map(p => ({
+    doorLeft: p.panelLeft,
+    doorRight: p.panelRight,
+    doorTop: p.panelTop,
+    doorBottom: p.panelBottom,
+  }));
+  const res = computeDoorResize(doorLike, mouseX, mouseY, edge, vTargets, hTargets, otherDoorLike, iW, iH, t);
+
+  // Маппим обратно door* → panel*
+  return {
+    x: res.x, y: res.y, w: res.w, h: res.h,
+    panelW: res.doorW, panelH: res.doorH,
+    panelLeft: res.doorLeft, panelRight: res.doorRight,
+    panelTop: res.doorTop, panelBottom: res.doorBottom,
+    panelLeftIsWall: res.doorLeftIsWall, panelRightIsWall: res.doorRightIsWall,
+    panelTopIsWall: res.doorTopIsWall, panelBottomIsWall: res.doorBottomIsWall,
+  };
+}

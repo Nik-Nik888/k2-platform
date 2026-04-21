@@ -508,17 +508,27 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
         const panelY = toY((el.y || 0) + (el.h || iH) / 2);
 
         const GAP_FROM_CORPUS = 2 * S;
-        // По умолчанию панель — как дверь (спереди). Но если задан depthOffset —
-        // панель утоплена внутрь корпуса от передней кромки.
+        // Z-координата центра панели. Приоритет:
+        // 1. Если задана depth — используем её (depth = "занимаемое место по глубине").
+        //    Центр панели по Z = задняя_стенка + depthOffset + depth/2
+        // 2. Иначе если задан depthOffset — аналогично, от задней стенки
+        // 3. Иначе — по типу (overlay/insert)
+        const hasCustomDepth = typeof el.depth === "number" && el.depth > 0;
+        const hasCustomOffset = typeof el.depthOffset === "number" && el.depthOffset > 0;
+
         let panelZ;
-        if (typeof el.depthOffset === "number" && el.depthOffset > 0) {
-          // Утопленная панель: её Z-координата = перед корпуса − depthOffset − половина толщины
-          panelZ = d / 2 - (el.depthOffset * S) - panelT / 2;
+        if (hasCustomDepth || hasCustomOffset) {
+          // Пользователь явно задал где стоит панель — используем depth/depthOffset от ЗАДНЕЙ стенки.
+          // Задняя стенка в 3D = -d/2, передняя = +d/2
+          const offset = (el.depthOffset || 0) * S;
+          const depth = hasCustomDepth ? el.depth * S : panelT;
+          // Центр панели-объёма по Z = задняя_стенка + offset + depth/2
+          panelZ = -d / 2 + offset + depth / 2;
         } else if (panelType === "overlay") {
-          // Накладная: перед корпусом + 2мм зазор
+          // Накладная без custom depth: перед корпусом + 2мм зазор
           panelZ = d / 2 + GAP_FROM_CORPUS + panelT / 2;
         } else {
-          // Вкладная: внутри проёма, 2мм зазор от кромки корпуса внутрь
+          // Вкладная без custom depth: у передней кромки внутри, 2мм зазор
           panelZ = d / 2 - panelT / 2 - GAP_FROM_CORPUS;
         }
 

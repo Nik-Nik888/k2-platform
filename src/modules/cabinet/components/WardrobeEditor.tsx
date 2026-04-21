@@ -6,7 +6,7 @@ import BottomSheet from "@shared/components/BottomSheet";
 import { SC, MOBILE_EL_LABELS } from "../constants";
 import { renderElement, type RenderCtx } from "./elements";
 import { renderFrame, renderZoneHighlights } from "./frame";
-import { renderDims, renderCorpusDims, renderSelectedDims, renderDoorHitZones } from "./dims";
+import { renderDims, renderCorpusDims, renderSelectedDims, renderDoorHitZones, renderPanelHitZones } from "./dims";
 import { MobileToolsSheet, MobilePropsSheet, MobileSummarySheet } from "./MobileSheets";
 import { Header } from "./Header";
 import {
@@ -20,7 +20,7 @@ import { computeZones, findZone } from "../logic/zones";
 import { calcHW, calcParts } from "../logic/calculations";
 import { adjust as pureAdjust } from "../logic/adjust";
 import { findDoorBounds as pureFindDoorBounds, computeDoorSnapTargets } from "../logic/doorBounds";
-import { computeDoorResize } from "../logic/doorResize";
+import { computeDoorResize, computePanelResize } from "../logic/doorResize";
 import { moveElement } from "../logic/elementDrag";
 import { computeTopLevelCols, computeDims, applyHorizDimChange, applyVertDimChange } from "../logic/dims";
 import { placeInZone as purePlaceInZone } from "../logic/placement";
@@ -211,6 +211,15 @@ export default function WardrobeEditor() {
     setDrag({ id: doorEl.id, type: "door-resize", edge, startX: c.x, startY: c.y });
   }, [toSvg, placeMode]);
 
+  /* Panel resize — та же логика что и для двери */
+  const onPanelEdgeDrag = useCallback((e, panelEl, edge) => {
+    if (placeMode) return;
+    e.stopPropagation();
+    setSelId(panelEl.id);
+    const c = toSvg(e);
+    setDrag({ id: panelEl.id, type: "panel-resize", edge, startX: c.x, startY: c.y });
+  }, [toSvg, placeMode]);
+
   /* Build sorted boundary lists for door resize snapping */
   const doorSnapTargets = useMemo(
     () => computeDoorSnapTargets(elements, iW, iH),
@@ -221,7 +230,7 @@ export default function WardrobeEditor() {
   const applyDragMove = useCallback((clientX: number, clientY: number) => {
     if (!drag) return;
     // Threshold: only start actual dragging after 4px movement — otherwise treat as pure selection click
-    if (drag.type !== "door-resize" && drag.startX !== undefined && !drag.moved) {
+    if (drag.type !== "door-resize" && drag.type !== "panel-resize" && drag.startX !== undefined && !drag.moved) {
       const dx = Math.abs(clientX - drag.startX), dy = Math.abs(clientY - drag.startY);
       if (dx < 4 && dy < 4) return;
       drag.moved = true;
@@ -249,6 +258,30 @@ export default function WardrobeEditor() {
         return prev.map(e => e.id !== drag.id ? e : {
           ...e, ...next,
           manualW: undefined, manualH: undefined, // clear manual overrides
+        });
+      });
+      return;
+    }
+
+    /* Panel resize logic — та же snap/clamp как у двери */
+    if (drag.type === "panel-resize") {
+      setElements(prev => {
+        const el = prev.find(e => e.id === drag.id);
+        if (!el || el.type !== "panel") return prev;
+
+        const { vTargets, hTargets } = doorSnapTargets;
+        const otherPanels = prev.filter(e =>
+          e.type === "panel" && e.id !== el.id && e.panelLeft !== undefined,
+        );
+        const next = computePanelResize(
+          el, c.x, c.y, drag.edge,
+          vTargets, hTargets, otherPanels,
+          iW, iH, t,
+        );
+
+        return prev.map(e => e.id !== drag.id ? e : {
+          ...e, ...next,
+          manualW: undefined, manualH: undefined,
         });
       });
       return;
@@ -414,6 +447,7 @@ export default function WardrobeEditor() {
   {/* ═══ DOOR RESIZE HIT-ZONES OVERLAY ═══
       Рендерится в самом конце SVG чтобы быть ПОВЕРХ всех DIMS и прочих элементов. */}
   {renderDoorHitZones({ elements, selId, showDoors, frameT, iH, isMobile, onDoorEdgeDrag, updateEl })}
+  {renderPanelHitZones({ elements, selId, frameT, iH, isMobile, onPanelEdgeDrag, updateEl })}
 </svg>
   );
 
