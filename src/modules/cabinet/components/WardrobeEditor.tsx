@@ -3,7 +3,7 @@ import Wardrobe3D from "./Wardrobe3D";
 import { TexturePicker, getTextureInfo } from "./TexturePicker";
 import { useIsMobile } from "@shared/hooks/useIsMobile";
 import BottomSheet from "@shared/components/BottomSheet";
-import { SC, MIN_S, TOOLS, GUIDES, HINGES, MOBILE_EL_LABELS, uid } from "../constants";
+import { SC, TOOLS, GUIDES, HINGES, MOBILE_EL_LABELS, uid } from "../constants";
 import { SvgInput } from "./inputs/SvgInput";
 import { NumInput } from "./inputs/NumInput";
 import { computeZones, findZone } from "../logic/zones";
@@ -12,6 +12,7 @@ import { adjust as pureAdjust } from "../logic/adjust";
 import { findDoorBounds as pureFindDoorBounds, computeDoorSnapTargets } from "../logic/doorBounds";
 import { computeDoorResize } from "../logic/doorResize";
 import { moveElement } from "../logic/elementDrag";
+import { computeTopLevelCols, computeDims, applyHorizDimChange, applyVertDimChange } from "../logic/dims";
 import { useDragHandlers } from "../hooks/useDragHandlers";
 import { useMobileTouch } from "../hooks/useMobileTouch";
 /* ═══════════════════════════════
@@ -447,118 +448,29 @@ export default function WardrobeEditor() {
   const pts = useMemo(() => calcParts(corpus, elements, showCorpus), [corpus, elements, showCorpus]);
   const area = useMemo(() => pts.filter(p => !p.m).reduce((s, p) => s + p.q * p.l * p.w / 1e6, 0).toFixed(3), [pts]);
 
-  const topLevelCols = useMemo(() => {
-    const studs = elements.filter(e => e.type === "stud").sort((a, b) => a.x - b.x);
-    const xs = [...new Set([0, ...studs.map(s => s.x), iW])].sort((a, b) => a - b);
-    return xs.slice(0, -1).map((left, i) => {
-      const hasLeftStud = studs.some(st => Math.abs(st.x - left) < 5);
-      const sl = left + (hasLeftStud ? t : 0);
-      return { left, right: xs[i + 1], sl, sw: xs[i + 1] - sl };
-    });
-  }, [elements, iW, t]);
+  const topLevelCols = useMemo(
+    () => computeTopLevelCols(elements, iW, t),
+    [elements, iW, t],
+  );
 
-  const dims = useMemo(() => {
-    const res = [];
-    topLevelCols.forEach((col, i) => res.push({ t: "w", x: col.sl, w: col.sw, si: i }));
-    // Сначала собираем все вертикальные сегменты по колонкам
-    const hSegments: { x: number; y: number; h: number; topY: number; si: number; xRight: number }[] = [];
-    topLevelCols.forEach((col, ci) => {
-      const breaks = [{ y: 0 }];
-      elements.forEach(el => {
-        if (el.type === "stud" || el.type === "door") return;
-        if (el.type === "shelf") {
-          // Полка добавляет brake только если её X-диапазон перекрывает эту колонку
-          const shL = el.x || 0, shR = shL + (el.w || iW);
-          if (shR > col.sl + 1 && shL < col.sl + col.sw - 1) breaks.push({ y: el.y });
-          return;
-        }
-        const cx = (el.x || 0) + (el.w || 0) / 2;
-        if (cx < col.sl - 5 || cx > col.sl + col.sw + 5) return;
-        if (el.type === "drawers") { breaks.push({ y: el.y }); breaks.push({ y: el.y + (el.h || 450) }); }
-        if (el.type === "rod") breaks.push({ y: el.y });
-      });
-      breaks.push({ y: iH });
-      const sorted = [...new Set(breaks.map(b => b.y))].sort((a, b) => a - b);
-      for (let i = 0; i < sorted.length - 1; i++) {
-        const h = sorted[i + 1] - sorted[i];
-        if (h > 25) hSegments.push({ x: col.sl, y: sorted[i], h, topY: sorted[i], si: ci, xRight: col.sl + col.sw });
-      }
-    });
-
-    // Дедупликация: соседние колонки с ОДИНАКОВЫМ topY и h объединяем в один.
-    // Показываем размер только в самой левой колонке группы.
-    const used = new Array(hSegments.length).fill(false);
-    for (let i = 0; i < hSegments.length; i++) {
-      if (used[i]) continue;
-      const seg = hSegments[i];
-      // Проверяем — есть ли соседняя справа колонка с тем же topY и h?
-      // Если ДА И между ними нет стойки (т.е. они смежные через полку или нет преграды) —
-      // это значит одинаковый интервал по высоте, дубль.
-      // Помечаем все такие как used (кроме первого).
-      for (let j = 0; j < hSegments.length; j++) {
-        if (i === j || used[j]) continue;
-        const other = hSegments[j];
-        if (other.topY === seg.topY && other.h === seg.h && other.x !== seg.x) {
-          // Тот же интервал высоты в другой колонке — это дубль
-          used[j] = true;
-        }
-      }
-      res.push({ t: "h", x: seg.x, y: seg.y, h: seg.h, si: seg.si, topY: seg.topY });
-    }
-    return res;
-  }, [elements, topLevelCols, iH, iW]);
+  const dims = useMemo(
+    () => computeDims(elements, topLevelCols, iH, iW),
+    [elements, topLevelCols, iH, iW],
+  );
 
   const getDimDir = (i) => dimDirOverrides[i] || (dims[i]?.t === "w" ? "left" : "top");
   const toggleDimDir = useCallback((i) => { setDimDirOverrides(p => ({ ...p, [i]: getDimDir(i) === "left" || getDimDir(i) === "top" ? (dims[i].t === "w" ? "right" : "bottom") : (dims[i].t === "w" ? "left" : "top") })); }, [dims, dimDirOverrides]);
 
   const changeHorizDim = useCallback((d, v, dir) => {
-    const studs = elements.filter(e => e.type === "stud").sort((a, b) => a.x - b.x);
-    if (topLevelCols.length <= 1) { setCorpus(c => ({ ...c, width: Math.max(300, Math.min(3000, v + 2 * t)) })); return; }
-    // Попытка двигать согласно dir. Если на выбранной стороне нет стойки — fallback на другую.
-    const tryRight = () => {
-      if (d.si >= studs.length) return false; // справа стена
-      const st = studs[d.si];
-      const nx = topLevelCols[d.si].sl + v;
-      if (nx >= MIN_S && nx <= iW - MIN_S) { updateEl(st.id, { x: nx }); return true; }
-      return false;
-    };
-    const tryLeft = () => {
-      if (d.si <= 0) return false; // слева стена
-      const st = studs[d.si - 1];
-      const nx = topLevelCols[d.si].sl + topLevelCols[d.si].sw - v;
-      if (nx >= MIN_S && nx <= iW - MIN_S) { updateEl(st.id, { x: nx }); return true; }
-      return false;
-    };
-    let moved = false;
-    if (dir === "left") { moved = tryRight() || tryLeft(); }
-    else { moved = tryLeft() || tryRight(); }
-    // Если обе стороны ячейки — стены корпуса (первая и последняя в одно время, т.е. в шкафу нет стоек)
-    // — расширяем сам корпус. Это краевой случай (topLevelCols.length === 1 уже обработан выше).
-    if (!moved && d.si === 0 && d.si === studs.length) {
-      setCorpus(c => ({ ...c, width: Math.max(300, Math.min(3000, v + 2 * t)) }));
-    }
+    const cmd = applyHorizDimChange(d, v, dir, topLevelCols, elements, iW, t);
+    if (!cmd) return;
+    if (cmd.type === "updateStud") updateEl(cmd.id, { x: cmd.x });
+    else if (cmd.type === "updateCorpusWidth") setCorpus(c => ({ ...c, width: cmd.width }));
   }, [topLevelCols, elements, t, iW, updateEl]);
 
   const changeVertDim = useCallback((d, v, dir) => {
-    const col = topLevelCols[d.si]; if (!col) return;
-    const secEls = elements.filter(e => e.type !== "stud" && e.type !== "door").filter(e => {
-      if (e.type === "shelf") return true;
-      const cx = (e.x || 0) + (e.w || 0) / 2; return cx >= col.sl - 5 && cx <= col.sl + col.sw + 5;
-    }).sort((a, b) => (a.y || 0) - (b.y || 0));
-    const gT = d.topY, gB = d.topY + d.h;
-    // Try the requested direction first, then fall back to the other
-    const tryTop = () => {
-      const tgt = secEls.find(e => Math.abs((e.y || 0) - gB) < 8);
-      if (tgt) { updateEl(tgt.id, { y: Math.max(0, Math.min(iH, gT + v)) }); return true; }
-      return false;
-    };
-    const tryBottom = () => {
-      const tgt = secEls.find(e => Math.abs((e.y || 0) - gT) < 8 && gT > 5);
-      if (tgt) { updateEl(tgt.id, { y: Math.max(0, Math.min(iH, gB - v)) }); return true; }
-      return false;
-    };
-    if (dir === "top") { if (!tryTop()) tryBottom(); }
-    else { if (!tryBottom()) tryTop(); }
+    const cmd = applyVertDimChange(d, v, dir, topLevelCols, elements, iH);
+    if (cmd) updateEl(cmd.id, { y: cmd.y });
   }, [topLevelCols, elements, iH, updateEl]);
 
   const svgW = corpus.width * SC + 140, svgH = corpus.height * SC + 60;
@@ -1684,10 +1596,6 @@ export default function WardrobeEditor() {
               boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
             }}>
               <span>{Math.round(userZoom * 100)}%</span>
-              {/* DEBUG: pan значения на экране для диагностики */}
-              <span style={{ fontSize: 9, color: "#888", fontWeight: 500 }}>
-                {Math.round(panX)},{Math.round(panY)} {panRef.current ? "●" : "○"}
-              </span>
               <button
                 onClick={() => setUserZoom(1)}
                 style={{
