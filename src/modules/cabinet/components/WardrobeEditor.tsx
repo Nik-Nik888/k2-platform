@@ -1309,21 +1309,53 @@ export default function WardrobeEditor() {
   const dims = useMemo(() => {
     const res = [];
     topLevelCols.forEach((col, i) => res.push({ t: "w", x: col.sl, w: col.sw, si: i }));
+    // Сначала собираем все вертикальные сегменты по колонкам
+    const hSegments: { x: number; y: number; h: number; topY: number; si: number; xRight: number }[] = [];
     topLevelCols.forEach((col, ci) => {
       const breaks = [{ y: 0 }];
       elements.forEach(el => {
         if (el.type === "stud" || el.type === "door") return;
-        if (el.type === "shelf") { breaks.push({ y: el.y }); return; }
+        if (el.type === "shelf") {
+          // Полка добавляет brake только если её X-диапазон перекрывает эту колонку
+          const shL = el.x || 0, shR = shL + (el.w || iW);
+          if (shR > col.sl + 1 && shL < col.sl + col.sw - 1) breaks.push({ y: el.y });
+          return;
+        }
         const cx = (el.x || 0) + (el.w || 0) / 2;
         if (cx < col.sl - 5 || cx > col.sl + col.sw + 5) return;
         if (el.type === "drawers") { breaks.push({ y: el.y }); breaks.push({ y: el.y + (el.h || 450) }); }
         if (el.type === "rod") breaks.push({ y: el.y });
       });
-      breaks.push({ y: iH }); const sorted = [...new Set(breaks.map(b => b.y))].sort((a, b) => a - b);
-      for (let i = 0; i < sorted.length - 1; i++) { const h = sorted[i + 1] - sorted[i]; if (h > 25) res.push({ t: "h", x: col.sl, y: sorted[i], h, si: ci, topY: sorted[i] }); }
+      breaks.push({ y: iH });
+      const sorted = [...new Set(breaks.map(b => b.y))].sort((a, b) => a - b);
+      for (let i = 0; i < sorted.length - 1; i++) {
+        const h = sorted[i + 1] - sorted[i];
+        if (h > 25) hSegments.push({ x: col.sl, y: sorted[i], h, topY: sorted[i], si: ci, xRight: col.sl + col.sw });
+      }
     });
+
+    // Дедупликация: соседние колонки с ОДИНАКОВЫМ topY и h объединяем в один.
+    // Показываем размер только в самой левой колонке группы.
+    const used = new Array(hSegments.length).fill(false);
+    for (let i = 0; i < hSegments.length; i++) {
+      if (used[i]) continue;
+      const seg = hSegments[i];
+      // Проверяем — есть ли соседняя справа колонка с тем же topY и h?
+      // Если ДА И между ними нет стойки (т.е. они смежные через полку или нет преграды) —
+      // это значит одинаковый интервал по высоте, дубль.
+      // Помечаем все такие как used (кроме первого).
+      for (let j = 0; j < hSegments.length; j++) {
+        if (i === j || used[j]) continue;
+        const other = hSegments[j];
+        if (other.topY === seg.topY && other.h === seg.h && other.x !== seg.x) {
+          // Тот же интервал высоты в другой колонке — это дубль
+          used[j] = true;
+        }
+      }
+      res.push({ t: "h", x: seg.x, y: seg.y, h: seg.h, si: seg.si, topY: seg.topY });
+    }
     return res;
-  }, [elements, topLevelCols, iH]);
+  }, [elements, topLevelCols, iH, iW]);
 
   const getDimDir = (i) => dimDirOverrides[i] || (dims[i]?.t === "w" ? "left" : "top");
   const toggleDimDir = useCallback((i) => { setDimDirOverrides(p => ({ ...p, [i]: getDimDir(i) === "left" || getDimDir(i) === "top" ? (dims[i].t === "w" ? "right" : "bottom") : (dims[i].t === "w" ? "left" : "top") })); }, [dims, dimDirOverrides]);
@@ -1676,6 +1708,151 @@ export default function WardrobeEditor() {
   <text x={corpus.width * SC / 2 - 32} y={corpus.height * SC + 38} textAnchor="middle" fontSize={8} fill="#444">←</text>
   <text x={corpus.width * SC / 2 + 32} y={corpus.height * SC + 38} textAnchor="middle" fontSize={8} fill="#444">→</text>
   <SvgInput x={-32} y={corpus.height * SC / 2 + 3} width={40} value={corpus.height} color="#777" fontSize={10} onChange={v => setCorpus(c => ({ ...c, height: Math.max(400, Math.min(2700, v)) }))} />
+
+  {/* ═══ SELECTED ELEMENT EDITABLE DIMS OVERLAY ═══
+      Когда выделена стойка/полка — рисуем редактируемые размеры до соседей с правильной логикой:
+      пользователь меняет размер ОТРЕЗКА — выделенный элемент двигается в эту сторону на разницу. */}
+  {(() => {
+    const selEl = elements.find(e => e.id === selId);
+    if (!selEl) return null;
+
+    if (selEl.type === "stud") {
+      // Найти ближайших соседей слева и справа
+      const others = elements.filter(e => e.type === "stud" && e.id !== selEl.id).sort((a, b) => a.x - b.x);
+      let leftNeighborRight = 0; // правый край соседа слева (или 0 = стенка)
+      let rightNeighborLeft = iW; // левый край соседа справа (или iW = стенка)
+      for (const s of others) {
+        if (s.x + t <= selEl.x && s.x + t > leftNeighborRight) leftNeighborRight = s.x + t;
+        if (s.x >= selEl.x + t && s.x < rightNeighborLeft) rightNeighborLeft = s.x;
+      }
+      const distLeft = Math.round(selEl.x - leftNeighborRight);
+      const distRight = Math.round(rightNeighborLeft - (selEl.x + t));
+
+      // Координаты на канвасе
+      const studCenterX = (selEl.x + t / 2 + frameT) * SC;
+      const studTopY = ((selEl.pTop || 0) + frameT) * SC;
+      const leftMidX = (leftNeighborRight + (selEl.x - leftNeighborRight) / 2 + frameT) * SC;
+      const rightMidX = ((selEl.x + t) + (rightNeighborLeft - selEl.x - t) / 2 + frameT) * SC;
+      // Y для размеров — выше верха стойки (или над шкафом)
+      const dimY = Math.max(studTopY - 18, 14);
+
+      return <>
+        {/* Подсветка выделенной стойки */}
+        <rect
+          x={studCenterX - 8} y={studTopY - 4}
+          width={16} height={4}
+          fill="#3b82f6" opacity={0.6} rx={1}
+          style={{ pointerEvents: "none" }}
+        />
+        {/* Левый размер (редактируемый) */}
+        <line x1={(leftNeighborRight + frameT) * SC + 1} y1={dimY + 4}
+              x2={studCenterX - 1} y2={dimY + 4}
+              stroke="rgba(96,165,250,0.55)" strokeWidth={0.8} style={{ pointerEvents: "none" }} />
+        <line x1={(leftNeighborRight + frameT) * SC} y1={dimY + 1}
+              x2={(leftNeighborRight + frameT) * SC} y2={dimY + 7}
+              stroke="rgba(96,165,250,0.55)" strokeWidth={0.6} style={{ pointerEvents: "none" }} />
+        <line x1={studCenterX} y1={dimY + 1} x2={studCenterX} y2={dimY + 7}
+              stroke="rgba(96,165,250,0.55)" strokeWidth={0.6} style={{ pointerEvents: "none" }} />
+        <SvgInput
+          x={leftMidX} y={dimY} width={50} fontSize={11}
+          value={distLeft} color="#3b82f6"
+          onChange={v => {
+            // Меняем отрезок СЛЕВА от стойки — двигаем стойку в сторону этого отрезка
+            // (если увеличили — стойка двигается ВПРАВО на разницу)
+            const nx = Math.max(0, Math.min(iW - t, leftNeighborRight + v));
+            updateEl(selEl.id, { x: nx });
+          }}
+        />
+        {/* Правый размер */}
+        <line x1={studCenterX + 1} y1={dimY + 4}
+              x2={(rightNeighborLeft + frameT) * SC - 1} y2={dimY + 4}
+              stroke="rgba(96,165,250,0.55)" strokeWidth={0.8} style={{ pointerEvents: "none" }} />
+        <line x1={(rightNeighborLeft + frameT) * SC} y1={dimY + 1}
+              x2={(rightNeighborLeft + frameT) * SC} y2={dimY + 7}
+              stroke="rgba(96,165,250,0.55)" strokeWidth={0.6} style={{ pointerEvents: "none" }} />
+        <SvgInput
+          x={rightMidX} y={dimY} width={50} fontSize={11}
+          value={distRight} color="#3b82f6"
+          onChange={v => {
+            // Меняем отрезок СПРАВА от стойки — двигаем стойку в сторону этого отрезка
+            // (если увеличили — стойка двигается ВЛЕВО на разницу)
+            const nx = Math.max(0, Math.min(iW - t, rightNeighborLeft - v - t));
+            updateEl(selEl.id, { x: nx });
+          }}
+        />
+      </>;
+    }
+
+    if (selEl.type === "shelf") {
+      const myLeft = selEl.x || 0, myRight = myLeft + (selEl.w || iW);
+      // Соседние полки с перекрытием по X
+      const others = elements.filter(e => {
+        if (e.type !== "shelf" || e.id === selEl.id) return false;
+        const eL = e.x || 0, eR = eL + (e.w || iW);
+        return eR > myLeft + 5 && eL < myRight - 5;
+      }).sort((a, b) => a.y - b.y);
+      let topNeighborY = 0, botNeighborY = iH;
+      for (const sh of others) {
+        if (sh.y <= selEl.y && sh.y > topNeighborY) topNeighborY = sh.y;
+        if (sh.y >= selEl.y && sh.y < botNeighborY) botNeighborY = sh.y;
+      }
+      const distTop = Math.round((selEl.y || 0) - topNeighborY);
+      const distBot = Math.round(botNeighborY - (selEl.y || 0));
+
+      const shelfY = ((selEl.y || 0) + frameT) * SC;
+      const shelfLeftX = (myLeft + frameT) * SC;
+      const topMidY = (topNeighborY + ((selEl.y || 0) - topNeighborY) / 2 + frameT) * SC;
+      const botMidY = ((selEl.y || 0) + (botNeighborY - (selEl.y || 0)) / 2 + frameT) * SC;
+      // X для размеров — левее левого края полки
+      const dimX = Math.max(shelfLeftX - 28, 14);
+
+      return <>
+        {/* Подсветка выделенной полки */}
+        <rect
+          x={shelfLeftX - 4} y={shelfY - 2}
+          width={4} height={4}
+          fill="#d97706" opacity={0.6} rx={1}
+          style={{ pointerEvents: "none" }}
+        />
+        {/* Верхний размер */}
+        <line x1={dimX + 4} y1={(topNeighborY + frameT) * SC + 1}
+              x2={dimX + 4} y2={shelfY - 1}
+              stroke="rgba(217,119,6,0.55)" strokeWidth={0.8} style={{ pointerEvents: "none" }} />
+        <line x1={dimX + 1} y1={(topNeighborY + frameT) * SC}
+              x2={dimX + 7} y2={(topNeighborY + frameT) * SC}
+              stroke="rgba(217,119,6,0.55)" strokeWidth={0.6} style={{ pointerEvents: "none" }} />
+        <line x1={dimX + 1} y1={shelfY} x2={dimX + 7} y2={shelfY}
+              stroke="rgba(217,119,6,0.55)" strokeWidth={0.6} style={{ pointerEvents: "none" }} />
+        <SvgInput
+          x={dimX + 4} y={topMidY + 4} width={42} fontSize={10}
+          value={distTop} color="#d97706"
+          onChange={v => {
+            // Меняем отрезок СВЕРХУ полки — полка двигается в сторону этого отрезка
+            // (увеличили — полка идёт ВНИЗ; уменьшили — полка идёт ВВЕРХ)
+            const ny = Math.max(0, Math.min(iH, topNeighborY + v));
+            updateEl(selEl.id, { y: ny });
+          }}
+        />
+        {/* Нижний размер */}
+        <line x1={dimX + 4} y1={shelfY + 1}
+              x2={dimX + 4} y2={(botNeighborY + frameT) * SC - 1}
+              stroke="rgba(217,119,6,0.55)" strokeWidth={0.8} style={{ pointerEvents: "none" }} />
+        <line x1={dimX + 1} y1={(botNeighborY + frameT) * SC}
+              x2={dimX + 7} y2={(botNeighborY + frameT) * SC}
+              stroke="rgba(217,119,6,0.55)" strokeWidth={0.6} style={{ pointerEvents: "none" }} />
+        <SvgInput
+          x={dimX + 4} y={botMidY + 4} width={42} fontSize={10}
+          value={distBot} color="#d97706"
+          onChange={v => {
+            const ny = Math.max(0, Math.min(iH, botNeighborY - v));
+            updateEl(selEl.id, { y: ny });
+          }}
+        />
+      </>;
+    }
+
+    return null;
+  })()}
 
   {/* ═══ DOOR RESIZE HIT-ZONES OVERLAY ═══
       Рендерится в самом конце SVG чтобы быть ПОВЕРХ всех DIMS и прочих элементов.
