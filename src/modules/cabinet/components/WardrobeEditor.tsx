@@ -4,10 +4,10 @@ import { TexturePicker, getTextureInfo } from "./TexturePicker";
 import { useIsMobile } from "@shared/hooks/useIsMobile";
 import BottomSheet from "@shared/components/BottomSheet";
 import { SC, TOOLS, GUIDES, HINGES, MOBILE_EL_LABELS, uid } from "../constants";
-import { SvgInput } from "./inputs/SvgInput";
 import { NumInput } from "./inputs/NumInput";
 import { renderElement, type RenderCtx } from "./elements";
 import { renderFrame, renderZoneHighlights } from "./frame";
+import { renderDims, renderCorpusDims, renderSelectedDims, renderDoorHitZones } from "./dims";
 import { computeZones, findZone } from "../logic/zones";
 import { calcHW, calcParts } from "../logic/calculations";
 import { adjust as pureAdjust } from "../logic/adjust";
@@ -563,224 +563,16 @@ export default function WardrobeEditor() {
   {elements.map(el => renderElement(el, renderCtx))}
 
   {/* DIMS */}
-  {dims.map((d, i) => {
-    const dir = getDimDir(i);
-    if (d.t === "w") { const dx = (d.x + frameT) * SC, dy = (iH + frameT) * SC + 16, dw = d.w * SC; return <g key={`w${i}`}>
-      <line x1={dx + 1} y1={dy} x2={dx + dw - 1} y2={dy} stroke="rgba(217,119,6,0.3)" strokeWidth={0.6} />
-      <line x1={dx} y1={dy - 3} x2={dx} y2={dy + 3} stroke="rgba(217,119,6,0.3)" strokeWidth={0.4} />
-      <line x1={dx + dw} y1={dy - 3} x2={dx + dw} y2={dy + 3} stroke="rgba(217,119,6,0.3)" strokeWidth={0.4} />
-      <SvgInput x={dx + dw / 2} y={dy + 12} width={dw} value={Math.round(d.w)} color="#b87a20" fontSize={9} onChange={v => changeHorizDim(d, v, dir)} />
-    </g>; }
-    if (d.t === "h") { const dx = (d.x + frameT) * SC - 22, dy1 = (d.y + frameT) * SC, dy2 = (d.y + d.h + frameT) * SC, mid = (dy1 + dy2) / 2; return <g key={`h${i}`}>
-      <line x1={dx} y1={dy1 + 1} x2={dx} y2={dy2 - 1} stroke="rgba(96,165,250,0.3)" strokeWidth={0.6} />
-      <line x1={dx - 3} y1={dy1} x2={dx + 3} y2={dy1} stroke="rgba(96,165,250,0.3)" strokeWidth={0.4} />
-      <line x1={dx - 3} y1={dy2} x2={dx + 3} y2={dy2} stroke="rgba(96,165,250,0.3)" strokeWidth={0.4} />
-      <SvgInput x={dx - 3} y={mid + 3} width={40} value={Math.round(d.h)} color="#5a8fd4" fontSize={8} onChange={v => changeVertDim(d, v, dir)} />
-    </g>; }
-    return null;
-  })}
-  <SvgInput x={corpus.width * SC / 2} y={corpus.height * SC + 38} width={60} value={corpus.width} color="#777" fontSize={10} onChange={v => setCorpus(c => ({ ...c, width: Math.max(300, Math.min(3000, v)) }))} />
-  <text x={corpus.width * SC / 2 - 32} y={corpus.height * SC + 38} textAnchor="middle" fontSize={8} fill="#444">←</text>
-  <text x={corpus.width * SC / 2 + 32} y={corpus.height * SC + 38} textAnchor="middle" fontSize={8} fill="#444">→</text>
-  <SvgInput x={-48} y={corpus.height * SC / 2 + 3} width={40} value={corpus.height} color="#777" fontSize={10} onChange={v => setCorpus(c => ({ ...c, height: Math.max(400, Math.min(2700, v)) }))} />
+  {renderDims({ dims, frameT, iH, getDimDir, changeHorizDim, changeVertDim })}
+  {renderCorpusDims({ width: corpus.width, height: corpus.height, setCorpus })}
 
   {/* ═══ SELECTED ELEMENT EDITABLE DIMS OVERLAY ═══
-      Когда выделена стойка/полка — рисуем редактируемые размеры до соседей с правильной логикой:
-      пользователь меняет размер ОТРЕЗКА — выделенный элемент двигается в эту сторону на разницу. */}
-  {(() => {
-    const selEl = elements.find(e => e.id === selId);
-    if (!selEl) return null;
-
-    if (selEl.type === "stud") {
-      // Найти ближайших соседей слева и справа
-      const others = elements.filter(e => e.type === "stud" && e.id !== selEl.id).sort((a, b) => a.x - b.x);
-      let leftNeighborRight = 0; // правый край соседа слева (или 0 = стенка)
-      let rightNeighborLeft = iW; // левый край соседа справа (или iW = стенка)
-      for (const s of others) {
-        if (s.x + t <= selEl.x && s.x + t > leftNeighborRight) leftNeighborRight = s.x + t;
-        if (s.x >= selEl.x + t && s.x < rightNeighborLeft) rightNeighborLeft = s.x;
-      }
-      const distLeft = Math.round(selEl.x - leftNeighborRight);
-      const distRight = Math.round(rightNeighborLeft - (selEl.x + t));
-
-      // Координаты на канвасе
-      const studCenterX = (selEl.x + t / 2 + frameT) * SC;
-      const studTopY = ((selEl.pTop || 0) + frameT) * SC;
-      const leftMidX = (leftNeighborRight + (selEl.x - leftNeighborRight) / 2 + frameT) * SC;
-      const rightMidX = ((selEl.x + t) + (rightNeighborLeft - selEl.x - t) / 2 + frameT) * SC;
-      // Y для размеров — выше верха стойки (или над шкафом)
-      const dimY = Math.max(studTopY - 18, 14);
-
-      return <>
-        {/* Подсветка выделенной стойки */}
-        <rect
-          x={studCenterX - 8} y={studTopY - 4}
-          width={16} height={4}
-          fill="#3b82f6" opacity={0.6} rx={1}
-          style={{ pointerEvents: "none" }}
-        />
-        {/* Левый размер (редактируемый) */}
-        <line x1={(leftNeighborRight + frameT) * SC + 1} y1={dimY + 4}
-              x2={studCenterX - 1} y2={dimY + 4}
-              stroke="rgba(96,165,250,0.55)" strokeWidth={0.8} style={{ pointerEvents: "none" }} />
-        <line x1={(leftNeighborRight + frameT) * SC} y1={dimY + 1}
-              x2={(leftNeighborRight + frameT) * SC} y2={dimY + 7}
-              stroke="rgba(96,165,250,0.55)" strokeWidth={0.6} style={{ pointerEvents: "none" }} />
-        <line x1={studCenterX} y1={dimY + 1} x2={studCenterX} y2={dimY + 7}
-              stroke="rgba(96,165,250,0.55)" strokeWidth={0.6} style={{ pointerEvents: "none" }} />
-        <SvgInput
-          x={leftMidX} y={dimY} width={50} fontSize={11}
-          value={distLeft} color="#3b82f6"
-          onChange={v => {
-            // Меняем отрезок СЛЕВА от стойки — двигаем стойку в сторону этого отрезка
-            // (если увеличили — стойка двигается ВПРАВО на разницу)
-            const nx = Math.max(0, Math.min(iW - t, leftNeighborRight + v));
-            updateEl(selEl.id, { x: nx });
-          }}
-        />
-        {/* Правый размер */}
-        <line x1={studCenterX + 1} y1={dimY + 4}
-              x2={(rightNeighborLeft + frameT) * SC - 1} y2={dimY + 4}
-              stroke="rgba(96,165,250,0.55)" strokeWidth={0.8} style={{ pointerEvents: "none" }} />
-        <line x1={(rightNeighborLeft + frameT) * SC} y1={dimY + 1}
-              x2={(rightNeighborLeft + frameT) * SC} y2={dimY + 7}
-              stroke="rgba(96,165,250,0.55)" strokeWidth={0.6} style={{ pointerEvents: "none" }} />
-        <SvgInput
-          x={rightMidX} y={dimY} width={50} fontSize={11}
-          value={distRight} color="#3b82f6"
-          onChange={v => {
-            // Меняем отрезок СПРАВА от стойки — двигаем стойку в сторону этого отрезка
-            // (если увеличили — стойка двигается ВЛЕВО на разницу)
-            const nx = Math.max(0, Math.min(iW - t, rightNeighborLeft - v - t));
-            updateEl(selEl.id, { x: nx });
-          }}
-        />
-      </>;
-    }
-
-    if (selEl.type === "shelf") {
-      const myLeft = selEl.x || 0, myRight = myLeft + (selEl.w || iW);
-      // Соседние полки с перекрытием по X
-      const others = elements.filter(e => {
-        if (e.type !== "shelf" || e.id === selEl.id) return false;
-        const eL = e.x || 0, eR = eL + (e.w || iW);
-        return eR > myLeft + 5 && eL < myRight - 5;
-      }).sort((a, b) => a.y - b.y);
-      let topNeighborY = 0, botNeighborY = iH;
-      for (const sh of others) {
-        if (sh.y <= selEl.y && sh.y > topNeighborY) topNeighborY = sh.y;
-        if (sh.y >= selEl.y && sh.y < botNeighborY) botNeighborY = sh.y;
-      }
-      const distTop = Math.round((selEl.y || 0) - topNeighborY);
-      const distBot = Math.round(botNeighborY - (selEl.y || 0));
-
-      const shelfY = ((selEl.y || 0) + frameT) * SC;
-      const shelfLeftX = (myLeft + frameT) * SC;
-      const topMidY = (topNeighborY + ((selEl.y || 0) - topNeighborY) / 2 + frameT) * SC;
-      const botMidY = ((selEl.y || 0) + (botNeighborY - (selEl.y || 0)) / 2 + frameT) * SC;
-      // X для размеров — левее левого края полки
-      const dimX = Math.max(shelfLeftX - 28, 14);
-
-      return <>
-        {/* Подсветка выделенной полки */}
-        <rect
-          x={shelfLeftX - 4} y={shelfY - 2}
-          width={4} height={4}
-          fill="#d97706" opacity={0.6} rx={1}
-          style={{ pointerEvents: "none" }}
-        />
-        {/* Верхний размер */}
-        <line x1={dimX + 4} y1={(topNeighborY + frameT) * SC + 1}
-              x2={dimX + 4} y2={shelfY - 1}
-              stroke="rgba(217,119,6,0.55)" strokeWidth={0.8} style={{ pointerEvents: "none" }} />
-        <line x1={dimX + 1} y1={(topNeighborY + frameT) * SC}
-              x2={dimX + 7} y2={(topNeighborY + frameT) * SC}
-              stroke="rgba(217,119,6,0.55)" strokeWidth={0.6} style={{ pointerEvents: "none" }} />
-        <line x1={dimX + 1} y1={shelfY} x2={dimX + 7} y2={shelfY}
-              stroke="rgba(217,119,6,0.55)" strokeWidth={0.6} style={{ pointerEvents: "none" }} />
-        <SvgInput
-          x={dimX + 4} y={topMidY + 4} width={42} fontSize={10}
-          value={distTop} color="#d97706"
-          onChange={v => {
-            // Меняем отрезок СВЕРХУ полки — полка двигается в сторону этого отрезка
-            // (увеличили — полка идёт ВНИЗ; уменьшили — полка идёт ВВЕРХ)
-            const ny = Math.max(0, Math.min(iH, topNeighborY + v));
-            updateEl(selEl.id, { y: ny });
-          }}
-        />
-        {/* Нижний размер */}
-        <line x1={dimX + 4} y1={shelfY + 1}
-              x2={dimX + 4} y2={(botNeighborY + frameT) * SC - 1}
-              stroke="rgba(217,119,6,0.55)" strokeWidth={0.8} style={{ pointerEvents: "none" }} />
-        <line x1={dimX + 1} y1={(botNeighborY + frameT) * SC}
-              x2={dimX + 7} y2={(botNeighborY + frameT) * SC}
-              stroke="rgba(217,119,6,0.55)" strokeWidth={0.6} style={{ pointerEvents: "none" }} />
-        <SvgInput
-          x={dimX + 4} y={botMidY + 4} width={42} fontSize={10}
-          value={distBot} color="#d97706"
-          onChange={v => {
-            const ny = Math.max(0, Math.min(iH, botNeighborY - v));
-            updateEl(selEl.id, { y: ny });
-          }}
-        />
-      </>;
-    }
-
-    return null;
-  })()}
+      Когда выделена стойка/полка — рисуем редактируемые размеры до соседей. */}
+  {renderSelectedDims({ elements, selId, frameT, iW, iH, t, updateEl })}
 
   {/* ═══ DOOR RESIZE HIT-ZONES OVERLAY ═══
-      Рендерится в самом конце SVG чтобы быть ПОВЕРХ всех DIMS и прочих элементов.
-      Иначе hit-зоны TOP/BOTTOM/LEFT перекрывались линиями размеров и не ловили тапы. */}
-  {(() => {
-    const selDoor = elements.find(e => e.id === selId && e.type === "door" && showDoors);
-    if (!selDoor) return null;
-    const dsx = ((selDoor.x || 0) + frameT) * SC;
-    const dsy = ((selDoor.y || 0) + frameT) * SC;
-    const ddw = (selDoor.w || 100) * SC;
-    const ddh = (selDoor.h || iH) * SC;
-    const HIT = isMobile ? 44 : 10;
-    return <>
-      {/* TOP */}
-      <rect x={dsx + ddw / 2 - HIT} y={dsy - HIT / 2} width={HIT * 2} height={HIT} fill="transparent" style={{ cursor: "ns-resize" }}
-        onMouseDown={e => onDoorEdgeDrag(e, selDoor, "top")} onTouchStart={e => onDoorEdgeDrag(e, selDoor, "top")} />
-      {/* BOTTOM */}
-      <rect x={dsx + ddw / 2 - HIT} y={dsy + ddh - HIT / 2} width={HIT * 2} height={HIT} fill="transparent" style={{ cursor: "ns-resize" }}
-        onMouseDown={e => onDoorEdgeDrag(e, selDoor, "bottom")} onTouchStart={e => onDoorEdgeDrag(e, selDoor, "bottom")} />
-      {/* LEFT */}
-      <rect x={dsx - HIT / 2} y={dsy + ddh / 2 - HIT} width={HIT} height={HIT * 2} fill="transparent" style={{ cursor: "ew-resize" }}
-        onMouseDown={e => onDoorEdgeDrag(e, selDoor, "left")} onTouchStart={e => onDoorEdgeDrag(e, selDoor, "left")} />
-      {/* RIGHT */}
-      <rect x={dsx + ddw - HIT / 2} y={dsy + ddh / 2 - HIT} width={HIT} height={HIT * 2} fill="transparent" style={{ cursor: "ew-resize" }}
-        onMouseDown={e => onDoorEdgeDrag(e, selDoor, "right")} onTouchStart={e => onDoorEdgeDrag(e, selDoor, "right")} />
-      {/* Width input — ВНУТРИ двери, у нижнего края по центру */}
-      <SvgInput x={dsx + ddw / 2} y={dsy + ddh - 12} width={50} value={Math.round(selDoor.doorW || selDoor.w)} color="#d97706" fontSize={10}
-        onChange={v => {
-          const oldX = selDoor.x || 0;
-          const oldW = Math.round(selDoor.doorW || selDoor.w);
-          let newX = oldX;
-          if (selDoor.doorRightIsWall && !selDoor.doorLeftIsWall) {
-            newX = oldX + oldW - v;
-          } else if (!selDoor.doorLeftIsWall && !selDoor.doorRightIsWall) {
-            newX = oldX - (v - oldW) / 2;
-          }
-          updateEl(selDoor.id, { w: v, doorW: v, x: newX, manualW: v });
-        }} />
-      {/* Height input — ВНУТРИ двери, у левого края по центру */}
-      <SvgInput x={dsx + 18} y={dsy + ddh / 2 + 3} width={36} value={Math.round(selDoor.doorH || selDoor.h)} color="#5a8fd4" fontSize={10}
-        onChange={v => {
-          const oldY = selDoor.y || 0;
-          const oldH = Math.round(selDoor.doorH || selDoor.h);
-          let newY = oldY;
-          if (selDoor.doorBottomIsWall && !selDoor.doorTopIsWall) {
-            newY = oldY + oldH - v;
-          } else if (!selDoor.doorTopIsWall && !selDoor.doorBottomIsWall) {
-            newY = oldY - (v - oldH) / 2;
-          }
-          updateEl(selDoor.id, { h: v, doorH: v, y: newY, manualH: v });
-        }} />
-    </>;
-  })()}
+      Рендерится в самом конце SVG чтобы быть ПОВЕРХ всех DIMS и прочих элементов. */}
+  {renderDoorHitZones({ elements, selId, showDoors, frameT, iH, isMobile, onDoorEdgeDrag, updateEl })}
 </svg>
   );
 
