@@ -160,4 +160,46 @@ describe('calcParts', () => {
     expect(facades[0].l).toBe(150 - 6);
     expect(facades[0].w).toBe(400 - 4);
   });
+
+  // ──────────────────────────────────────────────────────────
+  // depth — элемент с нестандартной глубиной попадает в раскрой
+  // ──────────────────────────────────────────────────────────
+  describe('depth поле', () => {
+    it('полка без depth → W = corpus.depth - 4', () => {
+      const shelf = { id: 'sh', type: 'shelf', x: 0, y: 1000, w: 800 };
+      const parts = calcParts(c, [shelf], false);
+      const p = parts.find(p => p.n.startsWith('Полка'));
+      expect(p?.w).toBe(c.depth - 4);
+    });
+
+    it('полка с depth=300 → W = 296 (300-4)', () => {
+      const shelf = { id: 'sh', type: 'shelf', x: 0, y: 1000, w: 800, depth: 300 };
+      const parts = calcParts(c, [shelf], false);
+      const p = parts.find(p => p.n.startsWith('Полка'));
+      expect(p?.w).toBe(296);
+    });
+
+    it('стойка с depth=400 → W = 396', () => {
+      const stud = { id: 's', type: 'stud', x: 600, pTop: 0, pBot: 2100, depth: 400 };
+      const parts = calcParts(c, [stud], false);
+      const p = parts.find(p => p.n.startsWith('Стойка'));
+      expect(p?.w).toBe(396);
+    });
+
+    it('ящики с depth=450 → боковина L = 400 (450-50)', () => {
+      const dr = { id: 'd', type: 'drawers', x: 100, y: 500, w: 400, h: 450, count: 3, drawerHeights: [150, 150, 150], depth: 450 };
+      const parts = calcParts(c, [dr], false);
+      const sides = parts.filter(p => p.n.startsWith('Бок.ящ'));
+      expect(sides[0].l).toBe(400);
+    });
+
+    it('depth=0 или отрицательная → игнорируется, используется corpus.depth', () => {
+      const shelf1 = { id: 'a', type: 'shelf', x: 0, y: 500, w: 800, depth: 0 };
+      const shelf2 = { id: 'b', type: 'shelf', x: 0, y: 1500, w: 800, depth: -100 };
+      const parts = calcParts(c, [shelf1, shelf2], false);
+      const both = parts.filter(p => p.n.startsWith('Полка'));
+      expect(both[0].w).toBe(c.depth - 4);
+      expect(both[1].w).toBe(c.depth - 4);
+    });
+  });
 });

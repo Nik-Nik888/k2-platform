@@ -14,6 +14,17 @@ export interface BaseElement {
   w?: number;
   h?: number;
   _order?: number;
+  /**
+   * Глубина элемента в мм (по оси Z шкафа). Если undefined — используется corpus.depth.
+   * Примеры: полка половинной глубины (300 при корпусе 600), ящик 3/4 длины.
+   */
+  depth?: number;
+  /**
+   * Отступ элемента от задней стенки в мм. Если undefined — 0 (элемент у задней стенки).
+   * Важно для раздвижных дверей на разных рельсах и полок у передней кромки.
+   * Должно выполняться: depthOffset + depth ≤ corpus.depth.
+   */
+  depthOffset?: number;
 }
 
 export interface ShelfElement extends BaseElement {

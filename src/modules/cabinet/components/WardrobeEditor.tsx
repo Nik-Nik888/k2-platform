@@ -568,6 +568,7 @@ export default function WardrobeEditor() {
               iW={iW}
               iH={iH}
               t={t}
+              corpusDepth={corpus.depth}
               mobileDragMode={mobileDragMode}
               setMobileDragMode={setMobileDragMode}
               setMobileSheet={setMobileSheet}

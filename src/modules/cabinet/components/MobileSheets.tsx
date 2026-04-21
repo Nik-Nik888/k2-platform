@@ -4,6 +4,7 @@
  */
 import React from "react";
 import { NumInput } from "./inputs/NumInput";
+import { DepthControl } from "./inputs/DepthControl";
 import { TexturePicker } from "./TexturePicker";
 import { TOOLS, GUIDES, HINGES } from "../constants";
 
@@ -122,6 +123,8 @@ export interface MobilePropsSheetProps {
   iW: number;
   iH: number;
   t: number;
+  /** Глубина корпуса в мм — для DepthControl. */
+  corpusDepth: number;
   mobileDragMode: string | null;
   setMobileDragMode: (v: string | null) => void;
   setMobileSheet: (v: null | 'tools' | 'props' | 'summary') => void;
@@ -130,7 +133,8 @@ export interface MobilePropsSheetProps {
 export function MobilePropsSheet(props: MobilePropsSheetProps) {
   const {
     selEl, elements, updateEl, delSel,
-    iW, iH, t, mobileDragMode, setMobileDragMode, setMobileSheet,
+    iW, iH, t, corpusDepth,
+    mobileDragMode, setMobileDragMode, setMobileSheet,
   } = props;
 
   if (!selEl) {
@@ -393,6 +397,16 @@ export function MobilePropsSheet(props: MobilePropsSheetProps) {
           </div>
         );
       })()}
+
+      {/* Глубина — для всех типов кроме двери (дверь всегда на фронте корпуса) */}
+      {selEl.type !== "door" && (
+        <DepthControl
+          corpusDepth={corpusDepth}
+          depth={selEl.depth}
+          depthOffset={selEl.depthOffset}
+          onChange={({ depth, depthOffset }) => updateEl(selEl.id, { depth, depthOffset })}
+        />
+      )}
 
       {/* Кнопка включения режима перемещения (дублирует indicator в header) */}
       <button

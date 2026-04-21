@@ -6,6 +6,7 @@
  */
 import React from "react";
 import { NumInput } from "./inputs/NumInput";
+import { DepthControl } from "./inputs/DepthControl";
 import { TexturePicker } from "./TexturePicker";
 import { TOOLS, GUIDES, HINGES } from "../constants";
 
@@ -287,6 +288,16 @@ export function DesktopLeftPanel(props: DesktopLeftPanelProps) {
                     }}
                   >⟷ По центру</button>
                 </div>
+              )}
+
+              {/* Глубина — для всех типов кроме двери */}
+              {selEl.type !== "door" && (
+                <DepthControl
+                  corpusDepth={corpus.depth}
+                  depth={selEl.depth}
+                  depthOffset={selEl.depthOffset}
+                  onChange={({ depth, depthOffset }) => updateEl(selEl.id, { depth, depthOffset })}
+                />
               )}
 
               <button onClick={delSel} style={{

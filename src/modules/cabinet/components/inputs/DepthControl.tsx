@@ -1,0 +1,148 @@
+/**
+ * Компонент редактирования глубины элемента (полки/стойки/ящика/штанги).
+ *
+ * Отображение:
+ * - Чекбокс "На всю глубину (Nмм)" — если включён, depth/depthOffset сбрасываются в undefined
+ * - Два NumInput: "Глубина" и "Отступ от задней"
+ * - Визуальный индикатор показывающий какая часть глубины занята элементом
+ *
+ * Валидация: depth + depthOffset ≤ corpus.depth.
+ */
+import { NumInput } from "./NumInput";
+
+export interface DepthControlProps {
+  /** Полная глубина корпуса в мм. */
+  corpusDepth: number;
+  /** Текущая глубина элемента (undefined = на всю глубину корпуса). */
+  depth: number | undefined;
+  /** Отступ от задней стенки в мм (undefined = 0). */
+  depthOffset: number | undefined;
+  /** Callback при изменении. Передаёт { depth, depthOffset } — оба undefined если "на всю". */
+  onChange: (next: { depth: number | undefined; depthOffset: number | undefined }) => void;
+}
+
+export function DepthControl({ corpusDepth, depth, depthOffset, onChange }: DepthControlProps) {
+  const isFull = depth === undefined;
+  const actualDepth = depth ?? corpusDepth;
+  const actualOffset = depthOffset ?? 0;
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>
+        Глубина
+      </div>
+
+      {/* Чекбокс-переключатель */}
+      <button
+        onClick={() => {
+          if (isFull) {
+            // Включаем ручной режим: дефолт = на всю глубину, offset=0
+            onChange({ depth: corpusDepth, depthOffset: 0 });
+          } else {
+            // Выключаем ручной режим: оба undefined
+            onChange({ depth: undefined, depthOffset: undefined });
+          }
+        }}
+        style={{
+          display: "block", width: "100%", textAlign: "left",
+          padding: "10px 12px", borderRadius: 6, fontSize: 12, marginBottom: 8,
+          cursor: "pointer", border: "1px solid",
+          background: isFull ? "rgba(217,119,6,0.12)" : "rgba(100,100,100,0.08)",
+          color: isFull ? "#d97706" : "#888",
+          borderColor: isFull ? "rgba(217,119,6,0.3)" : "#333",
+        }}
+      >
+        {isFull ? `☑ На всю глубину (${corpusDepth}мм)` : "☐ Задать вручную"}
+      </button>
+
+      {/* Inputs — только когда ручной режим */}
+      {!isFull && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+            <div>
+              <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Глубина</div>
+              <NumInput
+                value={actualDepth}
+                onChange={v => {
+                  const clamped = Math.max(50, Math.min(corpusDepth - actualOffset, v));
+                  onChange({ depth: clamped, depthOffset: actualOffset });
+                }}
+                min={50} max={corpusDepth} color="#d97706" width="100%"
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>
+                Отступ от задней
+              </div>
+              <NumInput
+                value={actualOffset}
+                onChange={v => {
+                  const clamped = Math.max(0, Math.min(corpusDepth - actualDepth, v));
+                  onChange({ depth: actualDepth, depthOffset: clamped });
+                }}
+                min={0} max={corpusDepth - actualDepth} color="#d97706" width="100%"
+              />
+            </div>
+          </div>
+
+          {/* Визуальный индикатор — полоса с занятой областью */}
+          <DepthIndicator
+            total={corpusDepth}
+            depth={actualDepth}
+            offset={actualOffset}
+          />
+          <div style={{ fontSize: 10, color: "#666", marginTop: 4, display: "flex", justifyContent: "space-between" }}>
+            <span>← задняя стенка</span>
+            <span>передняя →</span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────
+// DepthIndicator — SVG-полоса показывающая занятую область глубины
+// ───────────────────────────────────────────────────────────────
+
+interface DepthIndicatorProps {
+  total: number;
+  depth: number;
+  offset: number;
+}
+
+function DepthIndicator({ total, depth, offset }: DepthIndicatorProps) {
+  const barW = 100;  // процентная ширина в SVG
+  const barH = 16;
+  const offsetPct = (offset / total) * barW;
+  const depthPct = (depth / total) * barW;
+
+  return (
+    <svg
+      viewBox={`0 0 ${barW} ${barH}`}
+      style={{ width: "100%", height: barH, display: "block" }}
+      preserveAspectRatio="none"
+    >
+      {/* Фон всей глубины */}
+      <rect x={0} y={0} width={barW} height={barH} fill="rgba(50,50,60,0.3)" rx={2} />
+      {/* Занятая область элементом */}
+      <rect
+        x={offsetPct} y={0}
+        width={depthPct} height={barH}
+        fill="rgba(217,119,6,0.5)"
+        stroke="#d97706" strokeWidth={0.5}
+        rx={1}
+      />
+      {/* Риски делений каждые 100мм */}
+      {Array.from({ length: Math.floor(total / 100) }, (_, i) => {
+        const x = ((i + 1) * 100 / total) * barW;
+        return (
+          <line
+            key={i} x1={x} y1={barH - 2} x2={x} y2={barH}
+            stroke="rgba(255,255,255,0.2)" strokeWidth={0.3}
+          />
+        );
+      })}
+    </svg>
+  );
+}

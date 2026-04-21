@@ -57,6 +57,8 @@ export function renderShelf(el: any, ctx: RenderCtx): React.ReactNode {
   else if (elY > ctx.iH - 5) shY = sy - shH;
   else shY = sy - shH / 2;
   const jointGap = 0.3;
+  // Частичная глубина: dashed линия + label «d:N»
+  const hasCustomDepth = typeof el.depth === "number" && el.depth > 0;
   return (
     <g
       key={el.id}
@@ -76,6 +78,7 @@ export function renderShelf(el: any, ctx: RenderCtx): React.ReactNode {
         fill={sel ? "#3b82f6" : ctx.corpusHex}
         stroke={sel ? "#60a5fa" : "#6b5a45"}
         strokeWidth={sel ? 1.2 : 0.5}
+        strokeDasharray={hasCustomDepth ? "3 1.5" : undefined}
       />
       {/* Передняя кромка */}
       <line
@@ -89,6 +92,17 @@ export function renderShelf(el: any, ctx: RenderCtx): React.ReactNode {
       {/* Стыки слева и справа */}
       <line x1={shX + 0.5} y1={shY} x2={shX + 0.5} y2={shY + shH} stroke="rgba(0,0,0,0.25)" strokeWidth={0.3} />
       <line x1={shX + shW - 0.5} y1={shY} x2={shX + shW - 0.5} y2={shY + shH} stroke="rgba(0,0,0,0.25)" strokeWidth={0.3} />
+      {/* Метка глубины — только если задана вручную */}
+      {hasCustomDepth && (
+        <text
+          x={shX + shW - 4}
+          y={shY + shH + 6}
+          textAnchor="end" fontSize={6}
+          fill="#d97706"
+          fontFamily="'IBM Plex Mono',monospace"
+          style={{ pointerEvents: "none" }}
+        >d:{el.depth}</text>
+      )}
     </g>
   );
 }
@@ -210,6 +224,17 @@ export function renderDrawers(el: any, ctx: RenderCtx): React.ReactNode {
           </g>
         );
       })}
+      {/* Метка глубины — если задана вручную */}
+      {typeof el.depth === "number" && el.depth > 0 && (
+        <text
+          x={sx + elW / 2}
+          y={sy - 2}
+          textAnchor="middle" fontSize={6}
+          fill="#d97706"
+          fontFamily="'IBM Plex Mono',monospace"
+          style={{ pointerEvents: "none" }}
+        >d:{el.depth}</text>
+      )}
     </g>
   );
 }
