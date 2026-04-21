@@ -1,14 +1,21 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import Wardrobe3D from "./Wardrobe3D";
-import { TexturePicker, getTextureInfo } from "./TexturePicker";
+import { getTextureInfo } from "./TexturePicker";
 import { useIsMobile } from "@shared/hooks/useIsMobile";
 import BottomSheet from "@shared/components/BottomSheet";
-import { SC, TOOLS, GUIDES, HINGES, MOBILE_EL_LABELS, uid } from "../constants";
-import { NumInput } from "./inputs/NumInput";
+import { SC, MOBILE_EL_LABELS, uid } from "../constants";
 import { renderElement, type RenderCtx } from "./elements";
 import { renderFrame, renderZoneHighlights } from "./frame";
 import { renderDims, renderCorpusDims, renderSelectedDims, renderDoorHitZones } from "./dims";
 import { MobileToolsSheet, MobilePropsSheet, MobileSummarySheet } from "./MobileSheets";
+import { Header } from "./Header";
+import {
+  MobileCanvasWrapper,
+  MobileDragIndicator,
+  MobileZoomIndicator,
+  MobileBottomToolbar,
+} from "./MobileLayout";
+import { DesktopLeftPanel, DesktopRightPanel, DesktopOpenLeftButton, DesktopOpenRightButton } from "./DesktopPanels";
 import { computeZones, findZone } from "../logic/zones";
 import { calcHW, calcParts } from "../logic/calculations";
 import { adjust as pureAdjust } from "../logic/adjust";
@@ -577,47 +584,6 @@ export default function WardrobeEditor() {
 </svg>
   );
 
-  // ══════════════════════════════════════════════════════
-  // MOBILE COMPONENTS (inline) — доступ к замыканию WardrobeEditor
-  // ══════════════════════════════════════════════════════
-
-  const MobileToolbarButton = ({ label, icon, active, highlight, onClick }: {
-    label: string; icon: string; active?: boolean; highlight?: boolean; onClick: () => void;
-  }) => (
-    <button
-      onClick={onClick}
-      style={{
-        flex: 1,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 2,
-        padding: "6px 2px",
-        border: "none",
-        borderRadius: 8,
-        background: active ? "rgba(217,119,6,0.18)" : "transparent",
-        color: active ? "#d97706" : highlight ? "#22c55e" : "#9ca3af",
-        fontSize: 10,
-        fontWeight: 700,
-        fontFamily: "'IBM Plex Mono',monospace",
-        cursor: "pointer",
-        position: "relative",
-        minHeight: 48,
-      }}
-    >
-      <span style={{ fontSize: 18, lineHeight: 1 }}>{icon}</span>
-      <span style={{ fontSize: 9, letterSpacing: "0.02em" }}>{label}</span>
-      {highlight && !active && (
-        <span style={{
-          position: "absolute", top: 4, right: 8,
-          width: 6, height: 6, borderRadius: 3, background: "#22c55e",
-        }} />
-      )}
-    </button>
-  );
-
-
   return (
     <div
       style={{ minHeight: "100vh", width: "100%", color: "#e5e7eb", userSelect: "none", background: "#0b0c10", fontFamily: "'IBM Plex Mono',monospace", boxSizing: "border-box" }}
@@ -628,353 +594,104 @@ export default function WardrobeEditor() {
       onTouchCancel={onUp}
     >
       {/* HEADER */}
-      <div style={{ borderBottom: "1px solid rgba(50,50,60,0.4)", padding: "8px 16px", background: "rgba(11,12,16,0.97)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 28, height: 28, borderRadius: 6, background: "#d97706", display: "flex", alignItems: "center", justifyContent: "center", color: "#000", fontWeight: 900, fontSize: 11 }}>К2</div>
-          <div><h1 style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#d1d5db", margin: 0 }}>Редактор мебели</h1>
-            <p style={{ fontSize: 11, color: "#555", margin: 0 }}>{corpus.width}×{corpus.height}×{corpus.depth} · {showCorpus ? `${t}мм ЛДСП` : "рамка"}</p></div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          {/* Drag mode indicator (mobile) */}
-          {mobileDragMode && isMobile && (
-            <div style={{ padding: "4px 10px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: "rgba(168,85,247,0.15)", color: "#a855f7", border: "1px solid rgba(168,85,247,0.3)", display: "flex", alignItems: "center", gap: 6 }}>
-              ✋ Перемещение
-              <button onClick={() => setMobileDragMode(null)} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 12, fontWeight: 700, padding: 0, lineHeight: 1 }}>✕</button>
-            </div>
-          )}
-          {/* Place mode indicator — показывает активный режим размещения */}
-          {placeMode && <div style={{ padding: "4px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700, background: "rgba(34,197,94,0.15)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.3)" }}>{{ shelf: "━ Полка", stud: "┃ Стойка", drawers: "☰ Ящики", rod: "⎯ Штанга", door: "🚪 Дверь" }[placeMode]} · {(placeMode === "shelf" || placeMode === "stud") ? "можно ставить ещё" : "кликни в проём"} <button onClick={() => { setPlaceMode(null);  }} style={{ marginLeft: 6, background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✕</button></div>}
-          {/* #2: Eye icon for doors toggle */}
-          <button onClick={() => setShowDoors(p => !p)} style={{ padding: "4px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: "pointer", border: "1px solid", background: showDoors ? "rgba(217,119,6,0.12)" : "rgba(100,100,100,0.12)", color: showDoors ? "#d97706" : "#888", borderColor: showDoors ? "rgba(217,119,6,0.3)" : "#444" }}>🚪 Двери {showDoors ? "👁" : "👁‍🗨"}</button>
-          <button onClick={() => setShow3d(true)} style={{ padding: "4px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: "pointer", border: "1px solid rgba(96,165,250,0.3)", background: "rgba(96,165,250,0.12)", color: "#60a5fa" }}>🧊 3D</button>
-        </div>
-      </div>
+      <Header
+        corpus={corpus}
+        showCorpus={showCorpus}
+        t={t}
+        mobileDragMode={mobileDragMode}
+        setMobileDragMode={setMobileDragMode}
+        isMobile={isMobile}
+        placeMode={placeMode}
+        setPlaceMode={setPlaceMode}
+        showDoors={showDoors}
+        setShowDoors={setShowDoors}
+        setShow3d={setShow3d}
+      />
 
       {/* ═══ MOBILE LAYOUT ═══ */}
       {isMobile && (
         <>
-          {/* MOBILE CANVAS */}
-          <div
-            onTouchStart={(e) => { onCanvasTouchStart(e); onCanvasDoubleTap(); }}
-            onTouchMove={onCanvasTouchMove}
-            onTouchEnd={onCanvasTouchEnd}
-            onTouchCancel={onCanvasTouchEnd}
-            style={{
-              padding: 8,
-              paddingBottom: 80, // место для нижней тулбар-плашки
-              minHeight: "calc(100vh - 46px - 64px)",
-              display: "flex",
-              alignItems: "flex-start",
-              justifyContent: "center",
-              width: "100%",
-              boxSizing: "border-box",
-              // При zoom > 1 блокируем touchAction — pan делаем сами через panX/panY.
-              // При zoom = 1 разрешаем pan-y чтобы листалась страница (скроллом).
-              // При drag/режиме перемещения/pinch — тоже блок.
-              touchAction: (drag || mobileDragMode || pinchRef.current || panRef.current || userZoom > 1)
-                ? "none"
-                : "pan-y",
-              overflow: "hidden",
-            }}>
-            {/* Внешняя обёртка — физически занимает size ПОСЛЕ масштабирования,
-                чтобы flex justify-center корректно центрировал. */}
-            <div style={{
-              width: svgW * mobileCanvasScale,
-              height: svgH * mobileCanvasScale,
-              flexShrink: 0,
-              position: "relative",
-              touchAction: userZoom > 1 ? "none" : "auto",
-            }}>
-              <div style={{
-                width: svgW,
-                height: svgH,
-                // Pan через translate + zoom через scale.
-                // transformOrigin: top left — чтобы scale происходил из верхнего-левого
-                // угла и не смещал визуально левый край. Это важно для правильной работы
-                // с обёрткой конкретного размера.
-                transform: `translate(${panX}px, ${panY}px) scale(${mobileCanvasScale})`,
-                transformOrigin: "top left",
-                // Плавность возврата при отпускании.
-                transition: (panRef.current || pinchRef.current) ? "none" : "transform 0.1s ease-out",
-                touchAction: userZoom > 1 ? "none" : "auto",
-              }}>
-                {canvas}
-              </div>
-            </div>
-          </div>
-
-          {/* MOBILE DRAG MODE INDICATOR */}
-          {mobileDragMode && (
-            <div style={{
-              position: "fixed",
-              top: 56,
-              left: "50%",
-              transform: "translateX(-50%)",
-              zIndex: 45,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "6px 14px",
-              borderRadius: 20,
-              background: "rgba(34,197,94,0.15)",
-              border: "1px solid rgba(34,197,94,0.5)",
-              color: "#22c55e",
-              fontSize: 11,
-              fontWeight: 700,
-              fontFamily: "'IBM Plex Mono',monospace",
-              backdropFilter: "blur(8px)",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
-            }}>
-              <span>🖐 Режим перемещения · тяни элемент пальцем</span>
-              <button
-                onClick={() => {
-                  setMobileDragMode(null);
-                  try { if (navigator.vibrate) navigator.vibrate(5); } catch {}
-                }}
-                style={{
-                  border: "none",
-                  background: "rgba(34,197,94,0.2)",
-                  color: "#22c55e",
-                  width: 22,
-                  height: 22,
-                  borderRadius: 11,
-                  fontSize: 11,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: 0,
-                }}
-                title="Выйти из режима"
-              >✕</button>
-            </div>
-          )}
-
-          {/* MOBILE ZOOM INDICATOR */}
-          {userZoom !== 1 && (
-            <div style={{
-              position: "fixed",
-              bottom: 72,
-              right: 12,
-              zIndex: 40,
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "6px 10px",
-              borderRadius: 20,
-              background: "rgba(11,12,16,0.92)",
-              border: "1px solid rgba(217,119,6,0.3)",
-              color: "#d97706",
-              fontSize: 11,
-              fontWeight: 700,
-              fontFamily: "'IBM Plex Mono',monospace",
-              backdropFilter: "blur(8px)",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
-            }}>
-              <span>{Math.round(userZoom * 100)}%</span>
-              <button
-                onClick={() => setUserZoom(1)}
-                style={{
-                  border: "none",
-                  background: "rgba(217,119,6,0.15)",
-                  color: "#d97706",
-                  width: 20,
-                  height: 20,
-                  borderRadius: 10,
-                  fontSize: 11,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: 0,
-                }}
-                title="Сбросить зум"
-              >✕</button>
-            </div>
-          )}
-
-          {/* MOBILE BOTTOM TOOLBAR */}
-          <div style={{
-            position: "fixed",
-            bottom: 0,
-            left: 0,
-            right: 0,
-            zIndex: 50,
-            background: "rgba(11,12,16,0.97)",
-            borderTop: "1px solid rgba(50,50,60,0.5)",
-            display: "flex",
-            justifyContent: "space-around",
-            padding: "8px 4px calc(8px + env(safe-area-inset-bottom))",
-            backdropFilter: "blur(8px)",
-          }}>
-            <MobileToolbarButton
-              label="Инстр."
-              icon="🛠"
-              active={mobileSheet === 'tools'}
-              onClick={() => setMobileSheet(mobileSheet === 'tools' ? null : 'tools')}
-            />
-            <MobileToolbarButton
-              label="Свойства"
-              icon="⚙"
-              active={mobileSheet === 'props'}
-              highlight={!!selEl}
-              onClick={() => setMobileSheet(mobileSheet === 'props' ? null : 'props')}
-            />
-            <MobileToolbarButton
-              label="Итого"
-              icon="📋"
-              active={mobileSheet === 'summary'}
-              onClick={() => setMobileSheet(mobileSheet === 'summary' ? null : 'summary')}
-            />
-            <MobileToolbarButton
-              label="3D"
-              icon="🧊"
-              onClick={() => setShow3d(true)}
-            />
-          </div>
+          <MobileCanvasWrapper
+            canvas={canvas}
+            svgW={svgW}
+            svgH={svgH}
+            mobileCanvasScale={mobileCanvasScale}
+            userZoom={userZoom}
+            panX={panX}
+            panY={panY}
+            pinchRef={pinchRef}
+            panRef={panRef}
+            drag={drag}
+            mobileDragMode={mobileDragMode}
+            onCanvasTouchStart={onCanvasTouchStart}
+            onCanvasTouchMove={onCanvasTouchMove}
+            onCanvasTouchEnd={onCanvasTouchEnd}
+            onCanvasDoubleTap={onCanvasDoubleTap}
+          />
+          <MobileDragIndicator
+            active={!!mobileDragMode}
+            onExit={() => setMobileDragMode(null)}
+          />
+          <MobileZoomIndicator
+            userZoom={userZoom}
+            onReset={() => setUserZoom(1)}
+          />
+          <MobileBottomToolbar
+            mobileSheet={mobileSheet}
+            setMobileSheet={setMobileSheet}
+            selEl={selEl}
+            setShow3d={setShow3d}
+          />
         </>
       )}
 
       {/* ═══ DESKTOP LAYOUT ═══ */}
       {!isMobile && (
       <div style={{ display: "flex", maxWidth: 1600, margin: "0 auto" }}>
-        {/* LEFT PANEL */}
-        <div style={{ width: leftOpen ? 200 : 0, overflow: leftOpen ? "auto" : "hidden", transition: "width 0.2s", borderRight: "1px solid rgba(50,50,60,0.3)", flexShrink: 0, maxHeight: "calc(100vh - 46px)", position: "relative" }}>
-          {leftOpen && <div style={{ padding: 10 }}>
-            <button onClick={() => setLeftOpen(false)} style={{ position: "absolute", top: 4, right: 4, background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: 16 }}>◀</button>
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 10, color: "#555", textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, marginBottom: 6 }}>Рамка</div>
-              <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
-                {[{ k: "width", l: "Ш", mn: 300, mx: 3000 }, { k: "height", l: "В", mn: 300, mx: 2700 }, { k: "depth", l: "Г", mn: 250, mx: 700 }].map(p => <NumInput key={p.k} label={p.l} value={corpus[p.k]} onChange={v => setCorpus(c => ({ ...c, [p.k]: v }))} min={p.mn} max={p.mx} />)}
-              </div>
-              <div style={{ display: "flex", gap: 3, marginBottom: 6 }}>{[16, 18, 22].map(th => <button key={th} onClick={() => setCorpus(c => ({ ...c, thickness: th }))} style={{ flex: 1, padding: "3px 0", borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: "pointer", border: "none", background: corpus.thickness === th ? "#d97706" : "rgba(30,30,40,0.5)", color: corpus.thickness === th ? "#000" : "#6b7280" }}>{th}</button>)}</div>
-              <button onClick={() => setShowCorpus(p => !p)} style={{
-                width: "100%", padding: "5px 0", borderRadius: 4, fontSize: 10, fontWeight: 700,
-                cursor: "pointer", border: "1px solid",
-                background: showCorpus ? "rgba(217,119,6,0.12)" : "rgba(100,100,100,0.08)",
-                color: showCorpus ? "#d97706" : "#666",
-                borderColor: showCorpus ? "rgba(217,119,6,0.3)" : "#333",
-              }}>{showCorpus ? "☑ Корпус ЛДСП" : "☐ Пустая рамка"}</button>
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 10, color: "#555", textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, marginBottom: 6 }}>Добавить</div>
-              {TOOLS.map(it => <button key={it.type} onClick={() => addEl(it.type)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "5px 8px", borderRadius: 4, marginBottom: 2, cursor: "pointer", background: placeMode === it.type ? "rgba(34,197,94,0.15)" : "rgba(30,30,40,0.3)", border: placeMode === it.type ? "1px solid rgba(34,197,94,0.3)" : "1px solid transparent", color: placeMode === it.type ? "#22c55e" : "#d1d5db", fontSize: 11 }}>
-                <span style={{ fontSize: 14, width: 20, textAlign: "center", opacity: 0.5 }}>{it.icon}</span><span style={{ flex: 1 }}>{it.label}</span><span style={{ color: "#444", fontSize: 10 }}>{it.key}</span></button>)}
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <TexturePicker corpusTextureId={corpusTextureId} facadeTextureId={facadeTextureId} onCorpusChange={setCorpusTextureId} onFacadeChange={setFacadeTextureId} customTextures={customTextures} onAddCustom={(tex) => setCustomTextures(prev => [...prev, tex])} customBrands={customBrands} onAddBrand={(name) => setCustomBrands(prev => [...prev, name])} />
-            </div>
-            {/* Props */}
-            {selEl ? <div style={{ background: "rgba(30,30,40,0.5)", border: "1px solid rgba(100,90,70,0.3)", borderRadius: 6, padding: 10 }}>
-              <div style={{ fontSize: 11, color: "#d97706", fontWeight: 700, marginBottom: 6 }}>{{ stud: "Стойка", drawers: "Ящики", shelf: "Полка", rod: "Штанга", door: "Дверь" }[selEl.type]}</div>
-              {selEl.type === "drawers" && (() => {
-                const cnt = selEl.count || 3, heights = selEl.drawerHeights || Array(cnt).fill(150);
-                return <>
-                  <div style={{ marginBottom: 6 }}><div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>Кол-во</div>
-                    <div style={{ display: "flex", gap: 3 }}>{[1, 2, 3, 4, 5].map(n => <button key={n} onClick={() => updateEl(selEl.id, { count: n })} style={{ flex: 1, padding: "4px 0", borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: "pointer", border: "none", background: cnt === n ? "#22c55e" : "rgba(30,30,40,0.5)", color: cnt === n ? "#000" : "#6b7280" }}>{n}</button>)}</div></div>
-                  <div style={{ marginBottom: 6 }}><div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>Высоты</div>
-                    {Array.from({ length: cnt }, (_, i) => <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 3 }}>
-                      <span style={{ fontSize: 10, color: "#555", width: 16 }}>{i + 1}.</span>
-                      <NumInput value={heights[i] || 150} onChange={v => { const nh = [...heights]; nh[i] = Math.max(60, Math.min(600, v)); updateEl(selEl.id, { drawerHeights: nh }); }} min={60} max={600} color="#22c55e" width="100%" /></div>)}
-                    <div style={{ fontSize: 10, color: "#555", marginTop: 4 }}>Σ {heights.slice(0, cnt).reduce((a, b) => a + b, 0)}мм</div></div>
-                  <div style={{ marginBottom: 6 }}><div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>Направляющие</div>
-                    {GUIDES.map(gt => <button key={gt.id} onClick={() => updateEl(selEl.id, { guideType: gt.id })} style={{ display: "block", width: "100%", textAlign: "left", padding: "5px 8px", borderRadius: 4, fontSize: 11, marginBottom: 2, cursor: "pointer", border: "1px solid transparent", background: (selEl.guideType || "roller") === gt.id ? "rgba(34,197,94,0.12)" : "rgba(30,30,40,0.4)", color: (selEl.guideType || "roller") === gt.id ? "#22c55e" : "#9ca3af", borderColor: (selEl.guideType || "roller") === gt.id ? "rgba(34,197,94,0.3)" : "transparent" }}><b>{gt.label}</b> <span style={{ color: "#555" }}>~{gt.p}₽</span></button>)}</div>
-                </>;
-              })()}
-              {selEl.type === "door" && <>
-                <div style={{ marginBottom: 6 }}><div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>Тип петли</div>
-                  {HINGES.map(ht => <button key={ht.id} onClick={() => updateEl(selEl.id, { hingeType: ht.id })} style={{ display: "block", width: "100%", textAlign: "left", padding: "5px 8px", borderRadius: 4, fontSize: 11, marginBottom: 2, cursor: "pointer", border: "1px solid transparent", background: (selEl.hingeType || "overlay") === ht.id ? "rgba(217,119,6,0.12)" : "rgba(30,30,40,0.4)", color: (selEl.hingeType || "overlay") === ht.id ? "#d97706" : "#9ca3af" }}>{ht.label}</button>)}</div>
-                <div style={{ marginBottom: 6 }}><div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>Петли</div>
-                  <div style={{ display: "flex", gap: 3 }}>{["left", "right"].map(s => <button key={s} onClick={() => updateEl(selEl.id, { hingeSide: s })} style={{ flex: 1, padding: "4px 0", borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: "pointer", border: "none", background: selEl.hingeSide === s ? "#d97706" : "rgba(30,30,40,0.5)", color: selEl.hingeSide === s ? "#000" : "#6b7280" }}>{s === "left" ? "← Лево" : "Право →"}</button>)}</div></div>
-                <div style={{ fontSize: 9, color: "#555", marginTop: 4 }}>
-                  {(selEl.hingeType || "overlay") === "overlay" ? "Накл: +14мм корпус / +7мм стойка" : "Вкладная: зазор 2мм"}
-                  {selEl.doorLeft !== undefined && <><br/>Границы: {Math.round(selEl.doorLeft)}–{Math.round(selEl.doorRight)} × {Math.round(selEl.doorTop)}–{Math.round(selEl.doorBottom)}</>}
-                </div>
-              </>}
-              {selEl.type === "stud" && <div>
-                <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
-                  <NumInput label="X" value={Math.round(selEl.x)} onChange={v => updateEl(selEl.id, { x: Math.max(0, Math.min(iW - t, v)) })} min={0} max={iW} color="#60a5fa" />
-                </div>
-                <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
-                  <NumInput label="Верх" value={Math.round(selEl.pTop || 0)} onChange={v => updateEl(selEl.id, { pTop: v, manualPTop: v })} min={0} max={iH} color="#60a5fa" />
-                  <NumInput label="Низ" value={Math.round(selEl.pBot || iH)} onChange={v => updateEl(selEl.id, { pBot: v, manualPBot: v })} min={0} max={iH} color="#60a5fa" />
-                </div>
-                <div style={{ fontSize: 9, color: "#555" }}>Высота: {Math.round((selEl.pBot || iH) - (selEl.pTop || 0))}мм</div>
-                <button
-                  onClick={() => {
-                    const others = elements.filter(e => e.type === "stud" && e.id !== selEl.id).sort((a, b) => a.x - b.x);
-                    let leftX = 0, rightX = iW - t;
-                    for (const s of others) {
-                      if (s.x + t <= selEl.x && s.x + t > leftX) leftX = s.x + t;
-                      if (s.x >= selEl.x + t && s.x < rightX) rightX = s.x;
-                    }
-                    const cx = Math.round((leftX + rightX - t) / 2);
-                    updateEl(selEl.id, { x: Math.max(0, Math.min(iW - t, cx)) });
-                  }}
-                  style={{ width: "100%", padding: "6px 0", borderRadius: 4, marginTop: 6, background: "rgba(96,165,250,0.12)", color: "#60a5fa", fontSize: 11, fontWeight: 700, border: "1px solid rgba(96,165,250,0.3)", cursor: "pointer" }}
-                >⟷ По центру</button>
-              </div>}
-              {selEl.type === "shelf" && <div>
-                <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
-                  <NumInput label="Y" value={Math.round(selEl.y)} onChange={v => updateEl(selEl.id, { y: Math.max(0, Math.min(iH, v)) })} min={0} max={iH} color="#d97706" />
-                </div>
-                <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
-                  <NumInput label="X" value={Math.round(selEl.x || 0)} onChange={v => updateEl(selEl.id, { x: v, manualX: v })} min={0} max={iW} color="#d97706" />
-                  <NumInput label="Ш" value={Math.round(selEl.w || iW)} onChange={v => updateEl(selEl.id, { w: v, manualW: v })} min={20} max={iW} color="#d97706" />
-                </div>
-                <div style={{ fontSize: 9, color: "#555" }}>Длина: {Math.round(selEl.w || iW)}мм</div>
-                <button
-                  onClick={() => {
-                    const myLeft = selEl.x || 0, myRight = myLeft + (selEl.w || iW);
-                    const others = elements.filter(e => {
-                      if (e.type !== "shelf" || e.id === selEl.id) return false;
-                      const eL = e.x || 0, eR = eL + (e.w || iW);
-                      return eR > myLeft + 5 && eL < myRight - 5;
-                    }).sort((a, b) => a.y - b.y);
-                    let topY = 0, botY = iH;
-                    for (const sh of others) {
-                      if (sh.y <= selEl.y && sh.y > topY) topY = sh.y;
-                      if (sh.y >= selEl.y && sh.y < botY) botY = sh.y;
-                    }
-                    const cy = Math.round((topY + botY) / 2);
-                    updateEl(selEl.id, { y: Math.max(0, Math.min(iH, cy)) });
-                  }}
-                  style={{ width: "100%", padding: "6px 0", borderRadius: 4, marginTop: 6, background: "rgba(217,119,6,0.12)", color: "#d97706", fontSize: 11, fontWeight: 700, border: "1px solid rgba(217,119,6,0.3)", cursor: "pointer" }}
-                >⟷ По центру</button>
-              </div>}
-              <button onClick={delSel} style={{ width: "100%", padding: "5px 0", borderRadius: 4, marginTop: 8, background: "rgba(220,38,38,0.12)", color: "#ef4444", fontSize: 11, fontWeight: 700, border: "1px solid rgba(220,38,38,0.2)", cursor: "pointer" }}>✕ Удалить</button>
-            </div> : <div style={{ fontSize: 11, color: "#555", fontStyle: "italic" }}>Кликни элемент</div>}
-          </div>}
-        </div>
-        {!leftOpen && <button onClick={() => setLeftOpen(true)} style={{ position: "fixed", left: 0, top: "50%", transform: "translateY(-50%)", zIndex: 30, width: 24, height: 60, borderRadius: "0 6px 6px 0", background: "#1a1b22", border: "1px solid #333", borderLeft: "none", color: "#888", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>▶</button>}
+        <DesktopLeftPanel
+          leftOpen={leftOpen}
+          setLeftOpen={setLeftOpen}
+          corpus={corpus}
+          setCorpus={setCorpus}
+          showCorpus={showCorpus}
+          setShowCorpus={setShowCorpus}
+          placeMode={placeMode}
+          addEl={addEl}
+          corpusTextureId={corpusTextureId}
+          facadeTextureId={facadeTextureId}
+          setCorpusTextureId={setCorpusTextureId}
+          setFacadeTextureId={setFacadeTextureId}
+          customTextures={customTextures}
+          setCustomTextures={setCustomTextures}
+          customBrands={customBrands}
+          setCustomBrands={setCustomBrands}
+          selEl={selEl}
+          elements={elements}
+          updateEl={updateEl}
+          delSel={delSel}
+          iW={iW}
+          iH={iH}
+          t={t}
+        />
+        {!leftOpen && <DesktopOpenLeftButton onOpen={() => setLeftOpen(true)} />}
 
         {/* SVG */}
         <div style={{ flex: 1, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto", minHeight: "calc(100vh - 46px)" }}>
           {canvas}
         </div>
 
-        {!rightOpen && <button onClick={() => setRightOpen(true)} style={{ position: "fixed", right: 0, top: "50%", transform: "translateY(-50%)", zIndex: 30, width: 24, height: 60, borderRadius: "6px 0 0 6px", background: "#1a1b22", border: "1px solid #333", borderRight: "none", color: "#888", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>◀</button>}
+        {!rightOpen && <DesktopOpenRightButton onOpen={() => setRightOpen(true)} />}
 
-        {/* RIGHT PANEL */}
-        <div style={{ width: rightOpen ? 230 : 0, overflow: rightOpen ? "auto" : "hidden", transition: "width 0.2s", borderLeft: "1px solid rgba(50,50,60,0.3)", flexShrink: 0, maxHeight: "calc(100vh - 46px)" }}>
-          {rightOpen && <>
-            <button onClick={() => setRightOpen(false)} style={{ position: "absolute", right: 8, top: 52, background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: 16, zIndex: 11 }}>▶</button>
-            <div style={{ display: "flex", borderBottom: "1px solid rgba(50,50,60,0.3)", position: "sticky", top: 0, zIndex: 10, background: "#0b0c10" }}>
-              {[{ id: "hardware", l: "Крепёж" }, { id: "parts", l: "Детали" }, { id: "summary", l: "Итого" }].map(tb => <button key={tb.id} onClick={() => setPanel(tb.id)} style={{ flex: 1, padding: "8px 0", fontSize: 10, fontWeight: 700, textTransform: "uppercase", cursor: "pointer", border: "none", background: "transparent", color: panel === tb.id ? "#d97706" : "#555", borderBottom: panel === tb.id ? "2px solid #d97706" : "2px solid transparent" }}>{tb.l}</button>)}
-            </div>
-            <div style={{ padding: 8 }}>
-              {panel === "hardware" && hw.map((h, i) => <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "4px 0", borderBottom: "1px solid rgba(50,50,60,0.15)" }}><span style={{ fontSize: 12 }}>{h.i}</span><div style={{ flex: 1 }}><div style={{ fontSize: 11, color: "#d1d5db" }}>{h.n}</div><div style={{ fontSize: 10, color: "#555" }}>{h.r}</div></div><span style={{ fontSize: 12, color: "#d97706", fontWeight: 900 }}>{h.q}</span></div>)}
-              {panel === "parts" && pts.map((p, i) => <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0", borderBottom: "1px solid rgba(50,50,60,0.15)" }}><div style={{ flex: 1 }}><div style={{ fontSize: 11, color: "#d1d5db" }}>{p.n}</div><div style={{ fontSize: 10, color: "#555", fontFamily: "'IBM Plex Mono',monospace" }}>{p.l}×{p.w}</div></div><span style={{ fontSize: 11, color: "#6b7280" }}>{p.q}</span></div>)}
-              {panel === "summary" && <div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
-                  <div style={{ background: "rgba(30,30,40,0.4)", borderRadius: 6, padding: 10, textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 900, color: "#d97706" }}>{area}</div><div style={{ fontSize: 10, color: "#555" }}>м² ЛДСП</div></div>
-                  <div style={{ background: "rgba(30,30,40,0.4)", borderRadius: 6, padding: 10, textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 900, color: "#d1d5db" }}>{elements.length}</div><div style={{ fontSize: 10, color: "#555" }}>элем.</div></div>
-                </div>
-                <button style={{ width: "100%", padding: "8px 0", borderRadius: 6, background: "#d97706", color: "#000", fontSize: 11, fontWeight: 700, border: "none", cursor: "pointer" }}>📄 Экспорт CSV</button>
-              </div>}
-            </div>
-          </>}
-        </div>
+        <DesktopRightPanel
+          rightOpen={rightOpen}
+          setRightOpen={setRightOpen}
+          panel={panel}
+          setPanel={setPanel}
+          hw={hw}
+          pts={pts}
+          area={area}
+          elements={elements}
+        />
       </div>
       )}
 
