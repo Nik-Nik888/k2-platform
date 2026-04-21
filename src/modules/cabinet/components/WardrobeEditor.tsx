@@ -168,7 +168,7 @@ function SvgInput({ x, y, width, value, onChange, color = "#d97706", anchor = "m
       const num = parseFloat(input);
       if (!isNaN(num)) n = num;
     }
-    if (!isNaN(n) && n > 0 && n < 5000) {
+    if (!isNaN(n) && n >= 0 && n < 5000) {
       onChange(Math.round(n));
     } else {
       setText(String(value));
