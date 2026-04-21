@@ -116,6 +116,7 @@ export function renderStud(el: any, ctx: RenderCtx): React.ReactNode {
   const pBotPx = ((el.pBot || ctx.iH) + ctx.frameT) * SC;
   const pH = pBotPx - pTopPx;
   const jointGap = 0.3;
+  const hasCustomDepth = typeof el.depth === "number" && el.depth > 0;
   return (
     <g
       key={el.id}
@@ -135,6 +136,7 @@ export function renderStud(el: any, ctx: RenderCtx): React.ReactNode {
         fill={sel ? "#3b82f6" : ctx.corpusHex}
         stroke={sel ? "#60a5fa" : "#5a4d3f"}
         strokeWidth={sel ? 1.2 : 0.5}
+        strokeDasharray={hasCustomDepth ? "3 1.5" : undefined}
       />
       {/* Передняя кромка */}
       <line
@@ -151,6 +153,17 @@ export function renderStud(el: any, ctx: RenderCtx): React.ReactNode {
       {/* Конфирматы сверху/снизу */}
       <circle cx={studLeft + studW / 2} cy={pTopPx + jointGap + 3} r={0.8} fill="rgba(0,0,0,0.2)" />
       <circle cx={studLeft + studW / 2} cy={pBotPx - jointGap - 3} r={0.8} fill="rgba(0,0,0,0.2)" />
+      {/* Метка глубины — если задана вручную */}
+      {hasCustomDepth && (
+        <text
+          x={studLeft + studW + 4}
+          y={pTopPx + pH / 2}
+          textAnchor="start" fontSize={6}
+          fill="#d97706"
+          fontFamily="'IBM Plex Mono',monospace"
+          style={{ pointerEvents: "none" }}
+        >d:{el.depth}</text>
+      )}
     </g>
   );
 }

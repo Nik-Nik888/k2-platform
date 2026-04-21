@@ -32,28 +32,46 @@ export function DepthControl({ corpusDepth, depth, depthOffset, onChange }: Dept
         Глубина
       </div>
 
-      {/* Чекбокс-переключатель */}
-      <button
-        onClick={() => {
-          if (isFull) {
-            // Включаем ручной режим: дефолт = на всю глубину, offset=0
-            onChange({ depth: corpusDepth, depthOffset: 0 });
-          } else {
-            // Выключаем ручной режим: оба undefined
-            onChange({ depth: undefined, depthOffset: undefined });
-          }
-        }}
-        style={{
-          display: "block", width: "100%", textAlign: "left",
-          padding: "10px 12px", borderRadius: 6, fontSize: 12, marginBottom: 8,
-          cursor: "pointer", border: "1px solid",
-          background: isFull ? "rgba(217,119,6,0.12)" : "rgba(100,100,100,0.08)",
-          color: isFull ? "#d97706" : "#888",
-          borderColor: isFull ? "rgba(217,119,6,0.3)" : "#333",
-        }}
-      >
-        {isFull ? `☑ На всю глубину (${corpusDepth}мм)` : "☐ Задать вручную"}
-      </button>
+      {/* Toggle: "Вся глубина" vs "Своя глубина" — две кнопки рядом.
+          Активная подсвечена оранжевым, неактивная — серая. Клик по неактивной переключает. */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 8 }}>
+        <button
+          onClick={() => {
+            if (!isFull) onChange({ depth: undefined, depthOffset: undefined });
+          }}
+          style={{
+            padding: "10px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+            cursor: isFull ? "default" : "pointer",
+            border: "1px solid",
+            background: isFull ? "rgba(217,119,6,0.15)" : "rgba(40,40,50,0.5)",
+            color: isFull ? "#d97706" : "#888",
+            borderColor: isFull ? "rgba(217,119,6,0.4)" : "#333",
+          }}
+        >
+          {isFull ? "✓ " : ""}Вся глубина
+          <div style={{ fontSize: 9, fontWeight: 400, marginTop: 2, opacity: 0.7 }}>
+            {corpusDepth}мм
+          </div>
+        </button>
+        <button
+          onClick={() => {
+            if (isFull) onChange({ depth: corpusDepth, depthOffset: 0 });
+          }}
+          style={{
+            padding: "10px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+            cursor: isFull ? "pointer" : "default",
+            border: "1px solid",
+            background: !isFull ? "rgba(217,119,6,0.15)" : "rgba(40,40,50,0.5)",
+            color: !isFull ? "#d97706" : "#888",
+            borderColor: !isFull ? "rgba(217,119,6,0.4)" : "#333",
+          }}
+        >
+          {!isFull ? "✓ " : ""}Своя глубина
+          <div style={{ fontSize: 9, fontWeight: 400, marginTop: 2, opacity: 0.7 }}>
+            {!isFull ? `${actualDepth}мм` : "указать"}
+          </div>
+        </button>
+      </div>
 
       {/* Inputs — только когда ручной режим */}
       {!isFull && (
