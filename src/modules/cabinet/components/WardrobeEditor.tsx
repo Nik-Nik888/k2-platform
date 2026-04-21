@@ -7,6 +7,7 @@ import { SC, TOOLS, GUIDES, HINGES, MOBILE_EL_LABELS, uid } from "../constants";
 import { SvgInput } from "./inputs/SvgInput";
 import { NumInput } from "./inputs/NumInput";
 import { renderElement, type RenderCtx } from "./elements";
+import { renderFrame, renderZoneHighlights } from "./frame";
 import { computeZones, findZone } from "../logic/zones";
 import { calcHW, calcParts } from "../logic/calculations";
 import { adjust as pureAdjust } from "../logic/adjust";
@@ -548,68 +549,16 @@ export default function WardrobeEditor() {
     <pattern id="g" width={100 * SC} height={100 * SC} patternUnits="userSpaceOnUse"><path d={`M ${100 * SC} 0 L 0 0 0 ${100 * SC}`} fill="none" stroke="#161720" strokeWidth={0.5} /></pattern>
   </defs>
   {/* ═══ FRAME / CORPUS ═══ */}
-  {(() => {
-    const cHex = corpusTexInfo.hex || "#8b7355";
-    const cStroke = "#4a3f35";
-    const tPx = t * SC;
-    const wPx = corpus.width * SC;
-    const hPx = corpus.height * SC;
-    const gap = 0.3;
-
-    if (!showCorpus) {
-      // Empty frame — dashed boundary, full area usable
-      return <>
-        <rect x={0} y={0} width={wPx} height={hPx} fill="url(#g)" />
-        <rect x={0} y={0} width={wPx} height={hPx} fill="none"
-          stroke="#4a3f35" strokeWidth={1} strokeDasharray="6 3" />
-        {/* Corner marks */}
-        {[[0,0],[wPx,0],[0,hPx],[wPx,hPx]].map(([cx,cy], i) => (
-          <g key={`c${i}`}>
-            <line x1={cx - (cx > 0 ? 8 : -8)} y1={cy} x2={cx} y2={cy} stroke="#d97706" strokeWidth={0.8} />
-            <line x1={cx} y1={cy - (cy > 0 ? 8 : -8)} x2={cx} y2={cy} stroke="#d97706" strokeWidth={0.8} />
-          </g>
-        ))}
-      </>;
-    }
-
-    return <>
-      {/* Inner background */}
-      <rect x={tPx} y={tPx} width={wPx - 2 * tPx} height={hPx - 2 * tPx} fill="url(#g)" />
-      {/* ДВП back panel — thin line inset */}
-      <rect x={tPx + 1} y={tPx + 1} width={wPx - 2 * tPx - 2} height={hPx - 2 * tPx - 2} fill="none" stroke="rgba(58,53,48,0.25)" strokeWidth={0.5} strokeDasharray="3 2" />
-      {/* Left side — full height */}
-      <rect x={0} y={0} width={tPx} height={hPx} fill={cHex} stroke={cStroke} strokeWidth={0.6} />
-      {/* Right side — full height */}
-      <rect x={wPx - tPx} y={0} width={tPx} height={hPx} fill={cHex} stroke={cStroke} strokeWidth={0.6} />
-      {/* Top — between sides */}
-      <rect x={tPx + gap} y={0} width={wPx - 2 * tPx - 2 * gap} height={tPx} fill={cHex} stroke={cStroke} strokeWidth={0.6} />
-      {/* Bottom — between sides */}
-      <rect x={tPx + gap} y={hPx - tPx} width={wPx - 2 * tPx - 2 * gap} height={tPx} fill={cHex} stroke={cStroke} strokeWidth={0.6} />
-      {/* Joint lines */}
-      <line x1={tPx} y1={tPx} x2={tPx + 6} y2={tPx} stroke="rgba(0,0,0,0.3)" strokeWidth={0.4} />
-      <line x1={wPx - tPx} y1={tPx} x2={wPx - tPx - 6} y2={tPx} stroke="rgba(0,0,0,0.3)" strokeWidth={0.4} />
-      <line x1={tPx} y1={hPx - tPx} x2={tPx + 6} y2={hPx - tPx} stroke="rgba(0,0,0,0.3)" strokeWidth={0.4} />
-      <line x1={wPx - tPx} y1={hPx - tPx} x2={wPx - tPx - 6} y2={hPx - tPx} stroke="rgba(0,0,0,0.3)" strokeWidth={0.4} />
-      {/* Edge banding */}
-      <line x1={0.3} y1={0} x2={0.3} y2={hPx} stroke="rgba(255,255,255,0.08)" strokeWidth={0.3} />
-      <line x1={wPx - 0.3} y1={0} x2={wPx - 0.3} y2={hPx} stroke="rgba(255,255,255,0.08)" strokeWidth={0.3} />
-      <line x1={tPx + gap} y1={0.3} x2={wPx - tPx - gap} y2={0.3} stroke="rgba(255,255,255,0.08)" strokeWidth={0.3} />
-      <line x1={tPx + gap} y1={hPx - 0.3} x2={wPx - tPx - gap} y2={hPx - 0.3} stroke="rgba(255,255,255,0.08)" strokeWidth={0.3} />
-    </>;
-  })()}
+  {renderFrame({
+    width: corpus.width,
+    height: corpus.height,
+    t,
+    showCorpus,
+    corpusHex: corpusTexInfo.hex || "#8b7355",
+  })}
 
   {/* Zone highlights */}
-  {zones.map((z, i) => {
-    const zoneMode = !!placeMode;
-    const isOccupied = zoneMode && (
-      (placeMode === "drawers" && elements.some(e => e.type === "drawers" && e.zoneId === z.id))
-    );
-    return <rect key={`z${i}`} x={(z.sl + frameT) * SC} y={(z.top + frameT) * SC} width={z.sw * SC} height={(z.bot - z.top) * SC}
-      fill={zoneMode ? (isOccupied ? "rgba(239,68,68,0.08)" : "rgba(34,197,94,0.08)") : "rgba(25,23,20,0.3)"}
-      stroke={zoneMode ? (isOccupied ? "rgba(239,68,68,0.2)" : "rgba(34,197,94,0.2)") : "rgba(217,119,6,0.06)"}
-      strokeWidth={zoneMode ? 1 : 0.5} strokeDasharray={zoneMode ? "4 2" : "2 2"}
-      style={zoneMode && !isOccupied ? { cursor: "pointer" } : {}} />;
-  })}
+  {renderZoneHighlights({ zones, placeMode, frameT, elements })}
 
   {elements.map(el => renderElement(el, renderCtx))}
 
