@@ -229,6 +229,11 @@ export default function WardrobeEditor() {
         dY = bounds.top.y + gap;
         dH = (bounds.bottom.y - bounds.top.y) - gap * 2;
       }
+      // Clamp: не даём двери вылезать за рамку
+      if (dX < 0) { dW += dX; dX = 0; }
+      if (dX + dW > iW) dW = iW - dX;
+      if (dY < 0) { dH += dY; dY = 0; }
+      if (dY + dH > iH) dH = iH - dY;
 
       // Автоматический выбор стороны петель: если дверь левее центра своего эффективного проёма
       // — петли слева, если правее — справа (ручки оказываются ближе к центру)
@@ -500,6 +505,11 @@ export default function WardrobeEditor() {
           dX = innerLeft + gap; dW = innerW - gap * 2;
           dY = newBounds.top + gap; dH = (newBounds.bottom - newBounds.top) - gap * 2;
         }
+        // Clamp: дверь никогда не выходит за границы рамки
+        if (dX < 0) { dW += dX; dX = 0; }
+        if (dX + dW > iW) dW = iW - dX;
+        if (dY < 0) { dH += dY; dY = 0; }
+        if (dY + dH > iH) dH = iH - dY;
 
         return prev.map(e => e.id !== drag.id ? e : {
           ...e, x: dX, y: dY, w: dW, h: dH, doorW: dW, doorH: dH,
@@ -1957,6 +1967,19 @@ export default function WardrobeEditor() {
                   <NumInput label="Низ" value={Math.round(selEl.pBot || iH)} onChange={v => updateEl(selEl.id, { pBot: v, manualPBot: v })} min={0} max={iH} color="#60a5fa" />
                 </div>
                 <div style={{ fontSize: 9, color: "#555" }}>Высота: {Math.round((selEl.pBot || iH) - (selEl.pTop || 0))}мм</div>
+                <button
+                  onClick={() => {
+                    const others = elements.filter(e => e.type === "stud" && e.id !== selEl.id).sort((a, b) => a.x - b.x);
+                    let leftX = 0, rightX = iW - t;
+                    for (const s of others) {
+                      if (s.x + t <= selEl.x && s.x + t > leftX) leftX = s.x + t;
+                      if (s.x >= selEl.x + t && s.x < rightX) rightX = s.x;
+                    }
+                    const cx = Math.round((leftX + rightX - t) / 2);
+                    updateEl(selEl.id, { x: Math.max(0, Math.min(iW - t, cx)) });
+                  }}
+                  style={{ width: "100%", padding: "6px 0", borderRadius: 4, marginTop: 6, background: "rgba(96,165,250,0.12)", color: "#60a5fa", fontSize: 11, fontWeight: 700, border: "1px solid rgba(96,165,250,0.3)", cursor: "pointer" }}
+                >⟷ По центру</button>
               </div>}
               {selEl.type === "shelf" && <div>
                 <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
@@ -1967,6 +1990,24 @@ export default function WardrobeEditor() {
                   <NumInput label="Ш" value={Math.round(selEl.w || iW)} onChange={v => updateEl(selEl.id, { w: v, manualW: v })} min={20} max={iW} color="#d97706" />
                 </div>
                 <div style={{ fontSize: 9, color: "#555" }}>Длина: {Math.round(selEl.w || iW)}мм</div>
+                <button
+                  onClick={() => {
+                    const myLeft = selEl.x || 0, myRight = myLeft + (selEl.w || iW);
+                    const others = elements.filter(e => {
+                      if (e.type !== "shelf" || e.id === selEl.id) return false;
+                      const eL = e.x || 0, eR = eL + (e.w || iW);
+                      return eR > myLeft + 5 && eL < myRight - 5;
+                    }).sort((a, b) => a.y - b.y);
+                    let topY = 0, botY = iH;
+                    for (const sh of others) {
+                      if (sh.y <= selEl.y && sh.y > topY) topY = sh.y;
+                      if (sh.y >= selEl.y && sh.y < botY) botY = sh.y;
+                    }
+                    const cy = Math.round((topY + botY) / 2);
+                    updateEl(selEl.id, { y: Math.max(0, Math.min(iH, cy)) });
+                  }}
+                  style={{ width: "100%", padding: "6px 0", borderRadius: 4, marginTop: 6, background: "rgba(217,119,6,0.12)", color: "#d97706", fontSize: 11, fontWeight: 700, border: "1px solid rgba(217,119,6,0.3)", cursor: "pointer" }}
+                >⟷ По центру</button>
               </div>}
               <button onClick={delSel} style={{ width: "100%", padding: "5px 0", borderRadius: 4, marginTop: 8, background: "rgba(220,38,38,0.12)", color: "#ef4444", fontSize: 11, fontWeight: 700, border: "1px solid rgba(220,38,38,0.2)", cursor: "pointer" }}>✕ Удалить</button>
             </div> : <div style={{ fontSize: 11, color: "#555", fontStyle: "italic" }}>Кликни элемент</div>}

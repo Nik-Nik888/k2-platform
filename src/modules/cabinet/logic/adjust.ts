@@ -105,6 +105,11 @@ export function adjust(els: any[], iW: number, iH: number, t: number): any[] {
       const x = Math.max(0, Math.min(iW, el.x || 0));
       const y = Math.max(0, Math.min(iH, el.y || 0));
       const w = Math.max(20, Math.min(iW - x, el.w || 100));
+      // h клампим только для door/drawers (у rod высота 0)
+      if (el.type === "door" || el.type === "drawers") {
+        const h = Math.max(20, Math.min(iH - y, el.h || 100));
+        return { ...el, x, y, w, h };
+      }
       return { ...el, x, y, w };
     }
     return el;
@@ -249,8 +254,15 @@ export function adjust(els: any[], iW: number, iH: number, t: number): any[] {
           const ro = el.doorRightIsWall ? OC : OS;
           const to = el.doorTopIsWall ? OC : OS;
           const bo = el.doorBottomIsWall ? OC : OS;
-          const dX = innerLeft - lo, dW = innerW + lo + ro;
-          const dY = el.doorTop - to, dH = (el.doorBottom - el.doorTop) + to + bo;
+          let dX = innerLeft - lo;
+          let dW = innerW + lo + ro;
+          let dY = el.doorTop - to;
+          let dH = (el.doorBottom - el.doorTop) + to + bo;
+          // Clamp к границам рамки: не даём двери выходить за 0..iW и 0..iH
+          if (dX < 0) { dW += dX; dX = 0; }
+          if (dX + dW > iW) dW = iW - dX;
+          if (dY < 0) { dH += dY; dY = 0; }
+          if (dY + dH > iH) dH = iH - dY;
           return { ...el, x: dX, w: dW, h: dH, doorW: dW, doorH: dH, y: dY };
         } else {
           const gap = 2;
@@ -275,8 +287,13 @@ export function adjust(els: any[], iW: number, iH: number, t: number): any[] {
         const isLW = z.left <= 0, isRW = z.right >= iW;
         const lo = isLW ? OC : OS, ro = isRW ? OC : OS;
         const to = z.top <= 0 ? OC : OS, bo = z.bot >= iH ? OC : OS;
-        const dX = z.sl - lo, dW = z.sw + lo + ro;
-        const dY = z.top - to, dH = (z.bot - z.top) + to + bo;
+        let dX = z.sl - lo, dW = z.sw + lo + ro;
+        let dY = z.top - to, dH = (z.bot - z.top) + to + bo;
+        // Clamp к границам рамки
+        if (dX < 0) { dW += dX; dX = 0; }
+        if (dX + dW > iW) dW = iW - dX;
+        if (dY < 0) { dH += dY; dY = 0; }
+        if (dY + dH > iH) dH = iH - dY;
         return { ...el, x: dX, w: dW, h: dH, doorW: dW, doorH: dH, y: dY, zoneId: z.id, doorTarget: z.id };
       } else {
         const gap = 2;
