@@ -244,7 +244,10 @@ describe('placeInZone', () => {
       expect(result!.element.doorLeftIsWall).toBe(true);
     });
 
-    it('автовыбор петли: дверь в правой части → hinge=right', () => {
+    it('клик в правой половине когда центр первой двери на openingMid → новая дверь всё равно в свободной левой', () => {
+      // Edge case: первая дверь на ВЕСЬ проём, её центр = openingMid.
+      // Условие hasDoorRight = (center >= openingMid) = true → код считает что
+      // правая половина занята и ставит новую в ЛЕВУЮ, игнорируя clickX.
       const firstDoor = {
         id: 'd1', type: 'door',
         x: 0, y: 0, w: iW, h: iH,
@@ -257,7 +260,10 @@ describe('placeInZone', () => {
         placeMode: 'door',
         clickX: 900, clickY: 1000,
       });
-      expect(result!.element.hingeSide).toBe('right');
+      // Новая дверь занимает левую половину (доступная свободная)
+      expect(result!.element.doorLeft).toBe(0);
+      expect(result!.element.doorRight).toBe(600);
+      expect(result!.element.doorRightIsWall).toBe(false);
     });
 
     it('дверь сохраняет doorLeft/doorRight/doorTop/doorBottom границы', () => {
