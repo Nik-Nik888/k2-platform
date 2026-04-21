@@ -1561,18 +1561,31 @@ export default function WardrobeEditor() {
               display: "flex",
               alignItems: "flex-start",
               justifyContent: "center",
-              // Когда активен drag/режим перемещения/pinch — блокируем pan-y (скролл),
-              // иначе разрешаем вертикальный скролл всей страницы
-              touchAction: (drag || mobileDragMode || pinchRef.current) ? "none" : "pan-y",
+              // При зуме > 1 нужна возможность панорамировать увеличенный канвас пальцем —
+              // разрешаем горизонтальный и вертикальный scroll внутри контейнера.
+              // При zoom = 1 оставляем pan-y чтобы листалась страница.
+              // При drag/режиме перемещения — блокируем всё.
+              touchAction: (drag || mobileDragMode || pinchRef.current)
+                ? "none"
+                : (userZoom > 1 ? "pan-x pan-y" : "pan-y"),
+              overflow: userZoom > 1 ? "auto" : "visible",
             }}>
             <div style={{
-              transform: `scale(${mobileCanvasScale})`,
-              transformOrigin: "top center",
-              width: svgW,
-              height: svgH,
+              // Физический размер div'а = размер канваса × зум.
+              // Это нужно чтобы overflow: auto мог прокручивать увеличенное содержимое.
+              width: svgW * mobileCanvasScale,
+              height: svgH * mobileCanvasScale,
               flexShrink: 0,
+              position: "relative",
             }}>
-              {canvas}
+              <div style={{
+                transform: `scale(${mobileCanvasScale})`,
+                transformOrigin: "top left",
+                width: svgW,
+                height: svgH,
+              }}>
+                {canvas}
+              </div>
             </div>
           </div>
 
