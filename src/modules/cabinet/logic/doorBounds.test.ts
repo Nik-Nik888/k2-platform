@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findDoorBounds } from './doorBounds';
+import { findDoorBounds, computeDoorSnapTargets } from './doorBounds';
 
 const iW = 1200, iH = 2100, t = 16;
 
@@ -83,5 +83,54 @@ describe('findDoorBounds', () => {
     // Клик НИЖЕ полки (y=1500): стойка есть
     const bBelow = findDoorBounds([stud, shelf], 300, 1500, iW, iH, t);
     expect(bBelow.right.x).toBe(600);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────
+// computeDoorSnapTargets: регрессия на баг "краевая стойка игнорируется
+// при resize, snap уходит на стену". Причина — два таргета на одной pos.
+// ───────────────────────────────────────────────────────────────
+describe('computeDoorSnapTargets edge-cases', () => {
+  it('краевая стойка x=0 заменяет стену slева — только ОДИН таргет на pos=0', () => {
+    // computeDoorSnapTargets импортирован сверху
+    const stud = { id: 'sL', type: 'stud', x: 0, anchorY: iH / 2 };
+    const { vTargets } = computeDoorSnapTargets([stud], iW, iH, t);
+    const atZero = vTargets.filter((v: any) => v.pos === 0);
+    expect(atZero).toHaveLength(1);
+    // И это должна быть СТОЙКА (innerEdgeFromHighSide=t), а не стена (innerEdgeFromHighSide=0)
+    expect(atZero[0].innerEdgeFromHighSide).toBe(t);
+  });
+
+  it('краевая стойка x=iW-t заменяет стену справа — только ОДИН таргет на pos=iW', () => {
+    // computeDoorSnapTargets импортирован сверху
+    const stud = { id: 'sR', type: 'stud', x: iW - t, anchorY: iH / 2 };
+    const { vTargets } = computeDoorSnapTargets([stud], iW, iH, t);
+    const atRight = vTargets.filter((v: any) => v.pos === iW);
+    expect(atRight).toHaveLength(0); // внешняя стена не добавлена
+    // Зато есть стойка на pos=iW-t с innerEdgeFromLowSide=iW-t
+    const stud1 = vTargets.find((v: any) => v.pos === iW - t);
+    expect(stud1).toBeDefined();
+    expect(stud1!.innerEdgeFromLowSide).toBe(iW - t);
+  });
+
+  it('без краевых стоек — стены 0 и iW присутствуют как раньше', () => {
+    // computeDoorSnapTargets импортирован сверху
+    const stud = { id: 's', type: 'stud', x: 600, anchorY: iH / 2 };
+    const { vTargets } = computeDoorSnapTargets([stud], iW, iH, t);
+    const walls = vTargets.filter((v: any) => v.isWall);
+    expect(walls).toHaveLength(2);
+    expect(walls[0].pos).toBe(0);
+    expect(walls[1].pos).toBe(iW);
+  });
+
+  it('краевая полка y=0 заменяет стену сверху в hTargets', () => {
+    // computeDoorSnapTargets импортирован сверху
+    const shelf = { id: 'sh', type: 'shelf', x: 0, y: 0, w: iW };
+    const { hTargets } = computeDoorSnapTargets([shelf], iW, iH, t);
+    const atZero = hTargets.filter((h: any) => h.pos === 0);
+    expect(atZero).toHaveLength(1);
+    // Полка — это не стена (isWall: false) и innerEdgeFromHighSide = range.bot = t (Smart-Y)
+    expect(atZero[0].isWall).toBe(false);
+    expect(atZero[0].innerEdgeFromHighSide).toBe(t);
   });
 });

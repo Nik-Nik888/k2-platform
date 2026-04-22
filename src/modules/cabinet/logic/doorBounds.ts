@@ -289,11 +289,20 @@ export function computeDoorSnapTargets(
     });
   });
 
+  // Проверка наличия краевой стойки/полки, которая физически замещает внешнюю стену корпуса.
+  // Если такая есть — мы НЕ добавляем стену как отдельный snap-таргет, т.к. она физически
+  // не существует: её место занимает стойка/полка. Иначе получим два таргета на одной pos,
+  // и snap может привязаться к стене вместо стойки, игнорируя её физическую толщину t.
+  const hasEdgeStudLeft = elements.some(e => e.type === "stud" && (e.x || 0) < t + 2);
+  const hasEdgeStudRight = elements.some(e => e.type === "stud" && (e.x || 0) > iW - 2 * t - 2);
+  const hasEdgeShelfTop = elements.some(e => e.type === "shelf" && (e.y || 0) < t + 2);
+  const hasEdgeShelfBot = elements.some(e => e.type === "shelf" && (e.y || 0) > iH - t - 2);
+
   const vTargets: SnapTarget[] = [
-    {
+    ...(hasEdgeStudLeft ? [] : [{
       pos: 0, isWall: true,
       innerEdgeFromLowSide: 0, innerEdgeFromHighSide: 0,
-    },
+    }]),
     ...elements.filter(e => e.type === "stud").map(st => ({
       pos: st.x, isWall: false,
       // Стойка рисуется [x, x+t]. Для дверей/панелей:
@@ -303,17 +312,17 @@ export function computeDoorSnapTargets(
       innerEdgeFromHighSide: st.x + t,
     })),
     ...otherDoorBounds,
-    {
+    ...(hasEdgeStudRight ? [] : [{
       pos: iW, isWall: true,
       innerEdgeFromLowSide: iW, innerEdgeFromHighSide: iW,
-    },
+    }]),
   ].sort((a, b) => a.pos - b.pos);
 
   const hTargets: SnapTarget[] = [
-    {
+    ...(hasEdgeShelfTop ? [] : [{
       pos: 0, isWall: true,
       innerEdgeFromLowSide: 0, innerEdgeFromHighSide: 0,
-    },
+    }]),
     ...elements.filter(e => e.type === "shelf").map(sh => {
       const range = shelfRenderRange(sh, t, iH);
       return {
@@ -327,10 +336,10 @@ export function computeDoorSnapTargets(
         xRight: (sh.x || 0) + (sh.w || iW),
       };
     }),
-    {
+    ...(hasEdgeShelfBot ? [] : [{
       pos: iH, isWall: true,
       innerEdgeFromLowSide: iH, innerEdgeFromHighSide: iH,
-    },
+    }]),
   ].sort((a, b) => a.pos - b.pos);
 
   return { vTargets, hTargets };
