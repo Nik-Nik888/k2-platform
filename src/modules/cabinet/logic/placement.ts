@@ -358,9 +358,12 @@ function placePanel(p: {
   const effRightIsWall = bounds.right.isWall;
 
   // Для insert: панель внутри проёма (не заходит на стойки, не закрывает торцы корпуса).
+  // Границы могут быть стеной (isWall=true, без отступа) или соседом — стойкой/полкой (isWall=false, +t).
   const effInnerLeft = effLeft + (effLeftIsWall ? 0 : t);
-  const effInnerRight = effRight;
+  const effInnerRight = effRight; // панель начинается/заканчивается у x соседа (стойки слева), x соседа справа — её левый край
   const effInnerW = effInnerRight - effInnerLeft;
+  const effInnerTop = bounds.top.y + (bounds.top.isWall ? 0 : t);
+  const effInnerBot = bounds.bottom.y; // y соседа снизу (верхняя кромка полки) — нижняя граница проёма
 
   let dX: number, dW: number, dY: number, dH: number;
 
@@ -375,13 +378,13 @@ function placePanel(p: {
     dY = bounds.top.y - to;
     dH = (bounds.bottom.y - bounds.top.y) + to + bo;
   } else {
-    // Вкладная: СТРОГО в проёме, заполняет весь проём с зазором 2мм
-    // (пользователь сам ужмёт до нужного через resize-ручки или поля)
+    // Вкладная: СТРОГО в проёме, заполняет весь проём с зазором 2мм от КАЖДОГО соседа
+    // (не заходит на стойки/полки/стены)
     const gap = 2;
     dX = effInnerLeft + gap;
     dW = effInnerW - gap * 2;
-    dY = bounds.top.y + gap;
-    dH = (bounds.bottom.y - bounds.top.y) - 2 * gap;
+    dY = effInnerTop + gap;
+    dH = effInnerBot - effInnerTop - 2 * gap;
   }
 
   // Clamp: панель не должна вылезать за рамку
@@ -442,6 +445,9 @@ export function computePanelDimensions(
 
   const effInnerLeft = panelLeft + (panelLeftIsWall ? 0 : t);
   const effInnerW = panelRight - effInnerLeft;
+  // По Y аналогично: если сверху соседняя полка (не стена), её торец занимает t мм.
+  const effInnerTop = panelTop + (panelTopIsWall ? 0 : t);
+  const effInnerBot = panelBottom;
 
   let dX: number, dW: number, dY: number, dH: number;
 
@@ -455,12 +461,12 @@ export function computePanelDimensions(
     dY = panelTop - to;
     dH = (panelBottom - panelTop) + to + bo;
   } else {
-    // insert: внутри проёма с зазором 2мм со всех сторон
+    // insert: внутри проёма с зазором 2мм, не заходя на стойки/полки/стены
     const gap = 2;
     dX = effInnerLeft + gap;
     dW = effInnerW - gap * 2;
-    dY = panelTop + gap;
-    dH = (panelBottom - panelTop) - gap * 2;
+    dY = effInnerTop + gap;
+    dH = effInnerBot - effInnerTop - 2 * gap;
   }
 
   // Clamp к рамке

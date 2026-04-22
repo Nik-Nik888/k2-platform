@@ -150,8 +150,13 @@ export function computeDoorResize(
   const ro = newBounds.rightIsWall ? OC : OS;
   const to = newBounds.topIsWall ? OC : OS;
   const bo = newBounds.bottomIsWall ? OC : OS;
-  const innerLeft = newBounds.left + (newBounds.left > 0 ? t : 0);
-  const innerW = newBounds.right - innerLeft;
+  // Для insert: учитываем толщину соседей (стойка/полка занимают t мм).
+  const innerLeft = newBounds.left + (newBounds.leftIsWall ? 0 : t);
+  const innerRight = newBounds.right;
+  const innerTop = newBounds.top + (newBounds.topIsWall ? 0 : t);
+  const innerBot = newBounds.bottom;
+  const innerW = innerRight - innerLeft;
+  const innerH = innerBot - innerTop;
   const hingeType = el.hingeType || "overlay";
 
   let dX: number, dW: number, dY: number, dH: number;
@@ -161,11 +166,12 @@ export function computeDoorResize(
     dY = newBounds.top - to;
     dH = (newBounds.bottom - newBounds.top) + to + bo;
   } else {
+    // insert: СТРОГО внутри проёма, не заходя на стойки/полки
     const gap = 2;
     dX = innerLeft + gap;
     dW = innerW - gap * 2;
-    dY = newBounds.top + gap;
-    dH = (newBounds.bottom - newBounds.top) - gap * 2;
+    dY = innerTop + gap;
+    dH = innerH - gap * 2;
   }
 
   // Clamp: дверь не может вылезть за рамку
