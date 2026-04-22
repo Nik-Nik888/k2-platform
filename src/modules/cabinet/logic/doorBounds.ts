@@ -141,8 +141,11 @@ export function findDoorBounds(
       return clickY >= sTop - 5 && clickY <= sBot + 5;
     }).map(st => ({
       x: st.x,
-      // Краевая стойка = стена (isWall: true), но физически это элемент шириной t.
-      isWall: st.x < t + 2 || st.x > iW - 2 * t - 2,
+      // Стойка — всегда isWall: false. Даже краевая (x=0 или x=iW-t) физически
+      // это стойка с диапазоном [x, x+t], а не стена корпуса. Раньше мы помечали
+      // краевую как isWall=true, но это ломало adjust(): computeInnerEdgeX(pos=0,
+      // isWall=true) возвращал 0 как для стены, и дверь становилась шире на t.
+      isWall: false,
       innerEdge: st.x, // заглушка, перепишется ниже с учётом стороны
       _studRef: st as any,
     })),
@@ -158,7 +161,8 @@ export function findDoorBounds(
       return clickX >= shLeft - 5 && clickX <= shRight + 5;
     }).map(sh => ({
       y: sh.y,
-      isWall: sh.y < t + 2 || sh.y > iH - t - 2,
+      // Полка — всегда isWall: false. См. комментарий для стоек выше.
+      isWall: false,
       innerEdge: sh.y, // заглушка
       xLeft: sh.x || 0,
       xRight: (sh.x || 0) + (sh.w || iW),

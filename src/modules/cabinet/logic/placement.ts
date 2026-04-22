@@ -498,10 +498,12 @@ export function computePanelDimensions(
 ): PanelDimensionsResult {
   // Восстановим внутренние кромки ниши из сохранённых координат соседей.
   // Для стоек/полок учитывается их физический рендер: стойка [x, x+t], полка — Smart-Y.
-  const niL = computeInnerEdgeX(panelLeft,  /*nicheOnRightSide*/ true,  iW, t);
-  const niR = computeInnerEdgeX(panelRight, /*nicheOnRightSide*/ false, iW, t);
-  const niT = computeInnerEdgeY(panelTop,    /*nicheBelow*/ true,  iH, t);
-  const niB = computeInnerEdgeY(panelBottom, /*nicheBelow*/ false, iH, t);
+  // Параметр isWall критически важен: pos=0 со стеной → innerEdge=0, pos=0 с краевой
+  // стойкой (isWall=false) → innerEdge=t (правая кромка стойки).
+  const niL = computeInnerEdgeX(panelLeft,  /*nicheOnRightSide*/ true,  iW, t, panelLeftIsWall);
+  const niR = computeInnerEdgeX(panelRight, /*nicheOnRightSide*/ false, iW, t, panelRightIsWall);
+  const niT = computeInnerEdgeY(panelTop,    /*nicheBelow*/ true,  iH, t, panelTopIsWall);
+  const niB = computeInnerEdgeY(panelBottom, /*nicheBelow*/ false, iH, t, panelBottomIsWall);
 
   const rect = computeOverlayOrInsertRect({
     niL, niR, niT, niB,
@@ -569,13 +571,30 @@ export function computeDoorDimensions(
  * поэтому случай pos=0 с краевой стойкой крайне редок. При необходимости можно
  * расширить API передачей elements и проверять наличие стойки с x≈0.
  */
+/**
+ * Восстановить innerEdge для X-границы по её сохранённым атрибутам.
+ *
+ * @param pos — координата границы: 0/iW для внешней стены или краевой стойки, st.x для стойки
+ * @param posIsWall — true если pos — это внешняя стена корпуса; false если стойка (включая краевую)
+ * @param nicheOnRightSide — true если ниша справа от границы (bound.left двери),
+ *                          false если ниша слева (bound.right двери)
+ *
+ * Логика:
+ * - Внешняя стена (isWall=true И pos=0/iW): innerEdge = pos (стена не имеет толщины)
+ * - Стойка (isWall=false): рисуется [pos, pos+t]
+ *   - ниша СПРАВА от стойки (nicheOnRightSide=true): innerEdge = pos + t (правая кромка)
+ *   - ниша СЛЕВА от стойки (nicheOnRightSide=false): innerEdge = pos (левая кромка)
+ */
 function computeInnerEdgeX(
   pos: number,
   nicheOnRightSide: boolean,
   iW: number, t: number,
+  posIsWall: boolean = true,
 ): number {
-  if (pos === 0 || pos === iW) return pos; // внешняя стена
-  return nicheOnRightSide ? pos + t : pos; // стойка [pos, pos+t]
+  // Внешняя стена корпуса — нет толщины, innerEdge = pos
+  if (posIsWall && (pos === 0 || pos === iW)) return pos;
+  // Стойка [pos, pos+t]
+  return nicheOnRightSide ? pos + t : pos;
 }
 
 /**
@@ -595,8 +614,10 @@ function computeInnerEdgeY(
   pos: number,
   nicheBelow: boolean,
   iH: number, t: number,
+  posIsWall: boolean = true,
 ): number {
-  if (pos === 0 || pos === iH) return pos; // внешняя стена
+  // Внешняя стена корпуса — нет толщины
+  if (posIsWall && (pos === 0 || pos === iH)) return pos;
   const SMART_Y_EDGE = 5;
   let shTop: number, shBot: number;
   if (pos < SMART_Y_EDGE) { shTop = pos; shBot = pos + t; }
