@@ -362,11 +362,6 @@ function placePanel(p: {
   const effInnerRight = effRight;
   const effInnerW = effInnerRight - effInnerLeft;
 
-  // Определяем «ближнюю» границу к клику — она будет определять позицию панели
-  const midY = (bounds.top.y + bounds.bottom.y) / 2;
-  const nearBottom = clickY > midY; // клик ближе к низу проёма → панель-цоколь внизу
-  const DEFAULT_PANEL_H = 100; // высота по умолчанию (мм) — типовой цоколь
-
   let dX: number, dW: number, dY: number, dH: number;
 
   if (panelType === "overlay") {
@@ -380,20 +375,13 @@ function placePanel(p: {
     dY = bounds.top.y - to;
     dH = (bounds.bottom.y - bounds.top.y) + to + bo;
   } else {
-    // Вкладная: СТРОГО в проёме — от одной границы, высотой 100мм по умолчанию.
-    // Это позволяет сделать цоколь (низ) или антресольную заглушку (верх).
+    // Вкладная: СТРОГО в проёме, заполняет весь проём с зазором 2мм
+    // (пользователь сам ужмёт до нужного через resize-ручки или поля)
     const gap = 2;
     dX = effInnerLeft + gap;
     dW = effInnerW - gap * 2;
-    const openingH = bounds.bottom.y - bounds.top.y;
-    dH = Math.min(DEFAULT_PANEL_H, openingH - 2 * gap);
-    if (nearBottom) {
-      // Цоколь — у низа проёма
-      dY = bounds.bottom.y - gap - dH;
-    } else {
-      // Антресоль / верхняя заглушка — у верха проёма
-      dY = bounds.top.y + gap;
-    }
+    dY = bounds.top.y + gap;
+    dH = (bounds.bottom.y - bounds.top.y) - 2 * gap;
   }
 
   // Clamp: панель не должна вылезать за рамку
@@ -418,5 +406,71 @@ function placePanel(p: {
       _order: order,
     },
     keepPlaceMode: false,
+  };
+}
+
+/**
+ * Пересчитать размеры панели (x, y, w, h) исходя из её границ (panelLeft/Right/Top/Bottom),
+ * флагов isWall и нового panelType. Используется при переключении overlay ↔ insert,
+ * чтобы панель автоматически подстроилась под новый тип, не "заходя" на стенки.
+ */
+export interface PanelDimensionsResult {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  panelW: number;
+  panelH: number;
+}
+
+export function computePanelDimensions(
+  panelLeft: number,
+  panelRight: number,
+  panelTop: number,
+  panelBottom: number,
+  panelLeftIsWall: boolean,
+  panelRightIsWall: boolean,
+  panelTopIsWall: boolean,
+  panelBottomIsWall: boolean,
+  panelType: "overlay" | "insert",
+  iW: number,
+  iH: number,
+  t: number,
+): PanelDimensionsResult {
+  const OC = DOOR_OVERLAY_CORPUS;
+  const OS = DOOR_OVERLAY_STUD;
+
+  const effInnerLeft = panelLeft + (panelLeftIsWall ? 0 : t);
+  const effInnerW = panelRight - effInnerLeft;
+
+  let dX: number, dW: number, dY: number, dH: number;
+
+  if (panelType === "overlay") {
+    const to = panelTopIsWall ? OC : OS;
+    const bo = panelBottomIsWall ? OC : OS;
+    const effLeftOffset = panelLeftIsWall ? OC : OS;
+    const effRightOffset = panelRightIsWall ? OC : OS;
+    dX = effInnerLeft - effLeftOffset;
+    dW = effInnerW + effLeftOffset + effRightOffset;
+    dY = panelTop - to;
+    dH = (panelBottom - panelTop) + to + bo;
+  } else {
+    // insert: внутри проёма с зазором 2мм со всех сторон
+    const gap = 2;
+    dX = effInnerLeft + gap;
+    dW = effInnerW - gap * 2;
+    dY = panelTop + gap;
+    dH = (panelBottom - panelTop) - gap * 2;
+  }
+
+  // Clamp к рамке
+  if (dX < 0) { dW += dX; dX = 0; }
+  if (dX + dW > iW) dW = iW - dX;
+  if (dY < 0) { dH += dY; dY = 0; }
+  if (dY + dH > iH) dH = iH - dY;
+
+  return {
+    x: dX, y: dY, w: dW, h: dH,
+    panelW: dW, panelH: dH,
   };
 }

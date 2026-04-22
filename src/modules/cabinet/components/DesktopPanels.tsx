@@ -9,6 +9,7 @@ import { NumInput } from "./inputs/NumInput";
 import { DepthControl } from "./inputs/DepthControl";
 import { TexturePicker } from "./TexturePicker";
 import { TOOLS, GUIDES, HINGES } from "../constants";
+import { computePanelDimensions } from "../logic/placement";
 
 const SEL_TYPE_LABELS: Record<string, string> = {
   stud: "Стойка", drawers: "Ящики", shelf: "Полка", rod: "Штанга", door: "Дверь",
@@ -228,7 +229,25 @@ export function DesktopLeftPanel(props: DesktopLeftPanelProps) {
                   <div style={{ marginBottom: 6 }}>
                     <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>Тип установки</div>
                     {HINGES.map(pt => (
-                      <button key={pt.id} onClick={() => updateEl(selEl.id, { panelType: pt.id })} style={{
+                      <button key={pt.id} onClick={() => {
+                        // При переключении типа пересчитываем размеры:
+                        // overlay → захватывает больше (выступает за торцы)
+                        // insert → меньше (в проёме с зазором 2мм)
+                        // Это предотвращает баг «заходит на стенки» после переключения.
+                        if (selEl.panelLeft !== undefined) {
+                          const dims = computePanelDimensions(
+                            selEl.panelLeft, selEl.panelRight,
+                            selEl.panelTop, selEl.panelBottom,
+                            selEl.panelLeftIsWall ?? true, selEl.panelRightIsWall ?? true,
+                            selEl.panelTopIsWall ?? true, selEl.panelBottomIsWall ?? true,
+                            pt.id as "overlay" | "insert",
+                            iW, iH, t,
+                          );
+                          updateEl(selEl.id, { panelType: pt.id, ...dims });
+                        } else {
+                          updateEl(selEl.id, { panelType: pt.id });
+                        }
+                      }} style={{
                         display: "block", width: "100%", textAlign: "left",
                         padding: "5px 8px", borderRadius: 4, fontSize: 11, marginBottom: 2,
                         cursor: "pointer", border: "1px solid transparent",
@@ -345,6 +364,7 @@ export function DesktopLeftPanel(props: DesktopLeftPanelProps) {
                   depth={selEl.depth}
                   depthOffset={selEl.depthOffset}
                   onChange={({ depth, depthOffset }) => updateEl(selEl.id, { depth, depthOffset })}
+                  mode={selEl.type === "panel" ? "positionOnly" : "full"}
                 />
               )}
 

@@ -7,6 +7,7 @@ import { NumInput } from "./inputs/NumInput";
 import { DepthControl } from "./inputs/DepthControl";
 import { TexturePicker } from "./TexturePicker";
 import { TOOLS, GUIDES, HINGES } from "../constants";
+import { computePanelDimensions } from "../logic/placement";
 
 // ───────────────────────────────────────────────────────────────
 // MobileToolsSheet — размеры корпуса, выбор инструмента, TexturePicker
@@ -328,7 +329,23 @@ export function MobilePropsSheet(props: MobilePropsSheetProps) {
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Тип установки</div>
             {HINGES.map(pt => (
-              <button key={pt.id} onClick={() => updateEl(selEl.id, { panelType: pt.id })} style={{
+              <button key={pt.id} onClick={() => {
+                // При переключении типа пересчитываем размеры —
+                // иначе панель «зависает» с размерами от другого типа и заходит на стенки.
+                if (selEl.panelLeft !== undefined) {
+                  const dims = computePanelDimensions(
+                    selEl.panelLeft, selEl.panelRight,
+                    selEl.panelTop, selEl.panelBottom,
+                    selEl.panelLeftIsWall ?? true, selEl.panelRightIsWall ?? true,
+                    selEl.panelTopIsWall ?? true, selEl.panelBottomIsWall ?? true,
+                    pt.id as "overlay" | "insert",
+                    iW, iH, t,
+                  );
+                  updateEl(selEl.id, { panelType: pt.id, ...dims });
+                } else {
+                  updateEl(selEl.id, { panelType: pt.id });
+                }
+              }} style={{
                 display: "block", width: "100%", textAlign: "left",
                 padding: "12px 14px", borderRadius: 6, fontSize: 13, marginBottom: 6,
                 cursor: "pointer", border: "1px solid transparent",
@@ -467,13 +484,15 @@ export function MobilePropsSheet(props: MobilePropsSheetProps) {
         );
       })()}
 
-      {/* Глубина — для всех типов кроме двери (дверь всегда на фронте корпуса) */}
+      {/* Глубина — для всех типов кроме двери (дверь всегда на фронте корпуса).
+          Для panel используем упрощённый UI "Положение по глубине". */}
       {selEl.type !== "door" && (
         <DepthControl
           corpusDepth={corpusDepth}
           depth={selEl.depth}
           depthOffset={selEl.depthOffset}
           onChange={({ depth, depthOffset }) => updateEl(selEl.id, { depth, depthOffset })}
+          mode={selEl.type === "panel" ? "positionOnly" : "full"}
         />
       )}
 
