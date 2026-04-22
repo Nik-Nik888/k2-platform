@@ -145,38 +145,36 @@ export function computeDoorResize(
     }
   }
 
-  // Вычисляем реальные размеры двери в зависимости от hingeType
+  // ═══ Внутренние кромки ниши (единая логика) ═══
   const lo = newBounds.leftIsWall ? OC : OS;
   const ro = newBounds.rightIsWall ? OC : OS;
   const to = newBounds.topIsWall ? OC : OS;
   const bo = newBounds.bottomIsWall ? OC : OS;
-  // Для insert: учитываем толщину соседей. Полка в 2D centered на Y если в середине,
-  // поэтому её реальные кромки — [y±t/2] в середине, [y, y+t] у верха, [y-t, y] у низа.
-  const shelfEdgeBelow = (y: number) =>
-    y < 5 ? y + t : y > iH - 5 ? y : y + t / 2;
-  const shelfEdgeAbove = (y: number) =>
-    y < 5 ? y : y > iH - 5 ? y - t : y - t / 2;
-  const innerLeft = newBounds.left + (newBounds.leftIsWall ? 0 : t);
-  const innerRight = newBounds.right;
-  const innerTop = newBounds.topIsWall ? newBounds.top : shelfEdgeBelow(newBounds.top);
-  const innerBot = newBounds.bottomIsWall ? newBounds.bottom : shelfEdgeAbove(newBounds.bottom);
-  const innerW = innerRight - innerLeft;
-  const innerH = innerBot - innerTop;
+
+  const innerEdgeRightOf = (x: number, isWall: boolean) => isWall ? x : x + t / 2;
+  const innerEdgeLeftOf = (x: number, isWall: boolean) => isWall ? x : x - t / 2;
+  const innerEdgeBelow = (y: number, isWall: boolean) => isWall ? y : y + t / 2;
+  const innerEdgeAbove = (y: number, isWall: boolean) => isWall ? y : y - t / 2;
+
+  const niL = innerEdgeRightOf(newBounds.left, newBounds.leftIsWall);
+  const niR = innerEdgeLeftOf(newBounds.right, newBounds.rightIsWall);
+  const niT = innerEdgeBelow(newBounds.top, newBounds.topIsWall);
+  const niB = innerEdgeAbove(newBounds.bottom, newBounds.bottomIsWall);
   const hingeType = el.hingeType || "overlay";
 
   let dX: number, dW: number, dY: number, dH: number;
   if (hingeType === "overlay") {
-    dX = innerLeft - lo;
-    dW = innerW + lo + ro;
-    dY = newBounds.top - to;
-    dH = (newBounds.bottom - newBounds.top) + to + bo;
+    dX = niL - lo;
+    dW = (niR - niL) + lo + ro;
+    dY = niT - to;
+    dH = (niB - niT) + to + bo;
   } else {
-    // insert: СТРОГО внутри проёма, не заходя на стойки/полки
+    // Вкладная: ВНУТРИ ниши с зазором 2мм по периметру
     const gap = 2;
-    dX = innerLeft + gap;
-    dW = innerW - gap * 2;
-    dY = innerTop + gap;
-    dH = innerH - gap * 2;
+    dX = niL + gap;
+    dW = (niR - niL) - gap * 2;
+    dY = niT + gap;
+    dH = (niB - niT) - gap * 2;
   }
 
   // Clamp: дверь не может вылезть за рамку

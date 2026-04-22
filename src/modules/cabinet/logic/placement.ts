@@ -275,23 +275,37 @@ function placeDoor(p: {
     }
   }
 
-  const effLeftOffset = effLeftIsWall ? OC : OS;
-  const effRightOffset = effRightIsWall ? OC : OS;
-  const effInnerLeft = effLeft + (effLeftIsWall ? 0 : t);
-  const effInnerW = effRight - effInnerLeft;
+  // ═══ Внутренние кромки ниши (унифицированная логика) ═══
+  // Стена (isWall=true): координата = уже внутренняя кромка
+  // Стойка/полка в середине: рисуется centered [c-t/2, c+t/2], внутренняя кромка = c±t/2
+  const innerEdgeRightOf = (x: number, isWall: boolean) => isWall ? x : x + t / 2;
+  const innerEdgeLeftOf = (x: number, isWall: boolean) => isWall ? x : x - t / 2;
+  const innerEdgeBelow = (y: number, isWall: boolean) => isWall ? y : y + t / 2;
+  const innerEdgeAbove = (y: number, isWall: boolean) => isWall ? y : y - t / 2;
+
+  const niL = innerEdgeRightOf(effLeft, effLeftIsWall);
+  const niR = innerEdgeLeftOf(effRight, effRightIsWall);
+  const niT = innerEdgeBelow(bounds.top.y, bounds.top.isWall);
+  const niB = innerEdgeAbove(bounds.bottom.y, bounds.bottom.isWall);
 
   let dX: number, dW: number, dY: number, dH: number;
   if (hingeType === "overlay") {
-    dX = effInnerLeft - effLeftOffset;
-    dW = effInnerW + effLeftOffset + effRightOffset;
-    dY = bounds.top.y - to;
-    dH = (bounds.bottom.y - bounds.top.y) + to + bo;
+    // Накладная: выступает за кромки ниши на 14/7мм
+    const leftOvh = effLeftIsWall ? OC : OS;
+    const rightOvh = effRightIsWall ? OC : OS;
+    const topOvh = bounds.top.isWall ? OC : OS;
+    const botOvh = bounds.bottom.isWall ? OC : OS;
+    dX = niL - leftOvh;
+    dW = (niR - niL) + leftOvh + rightOvh;
+    dY = niT - topOvh;
+    dH = (niB - niT) + topOvh + botOvh;
   } else {
+    // Вкладная: ВНУТРИ ниши с зазором 2мм по периметру
     const gap = 2;
-    dX = effInnerLeft + gap;
-    dW = effInnerW - gap * 2;
-    dY = bounds.top.y + gap;
-    dH = (bounds.bottom.y - bounds.top.y) - gap * 2;
+    dX = niL + gap;
+    dW = (niR - niL) - gap * 2;
+    dY = niT + gap;
+    dH = (niB - niT) - gap * 2;
   }
   // Clamp: не даём двери вылезать за рамку
   if (dX < 0) { dW += dX; dX = 0; }
@@ -357,52 +371,46 @@ function placePanel(p: {
   const effLeftIsWall = bounds.left.isWall;
   const effRightIsWall = bounds.right.isWall;
 
-  // Полка в 2D рисуется centered на своей Y: [y-t/2, y+t/2] если в середине,
-  // [y, y+t] если у верха (y<5), [y-t, y] если у низа (y>iH-5).
-  // Для insert панели нужна нижняя кромка верхней полки и верхняя кромка нижней полки.
-  const shelfEdgeBelow = (y: number) => {
-    // Нижняя кромка полки находящейся на оси y
-    if (y < 5) return y + t;                    // у верха: [y, y+t], нижняя кромка = y+t
-    if (y > iH - 5) return y;                    // у низа: [y-t, y], нижняя кромка = y
-    return y + t / 2;                             // в середине: [y-t/2, y+t/2], нижняя кромка = y+t/2
-  };
-  const shelfEdgeAbove = (y: number) => {
-    // Верхняя кромка полки находящейся на оси y
-    if (y < 5) return y;                         // у верха: [y, y+t], верхняя кромка = y
-    if (y > iH - 5) return y - t;                // у низа: [y-t, y], верхняя кромка = y-t
-    return y - t / 2;                             // в середине: верхняя кромка = y-t/2
-  };
+  // ═══ Единая логика "внутренняя кромка ниши" для любой стороны ═══
+  // Сосед может быть стеной (isWall=true, край корпуса или краевая стойка/полка) ИЛИ
+  // стойкой/полкой в середине шкафа (isWall=false, рисуется centered на своей оси).
+  // Внутренняя кромка = "куда начинается пустое пространство ниши".
+  //
+  // Стена: её координата = уже внутренняя кромка (стена физически снаружи)
+  // Стойка/полка в середине: рисуется [c-t/2, c+t/2], значит
+  //   - внутренняя кромка справа от неё = c + t/2
+  //   - внутренняя кромка слева от неё  = c - t/2
+  // Стойка/полка у края (isWall=true из findDoorBounds): координата = внутренняя кромка
+  const innerEdgeRightOf = (x: number, isWall: boolean) => isWall ? x : x + t / 2;
+  const innerEdgeLeftOf = (x: number, isWall: boolean) => isWall ? x : x - t / 2;
+  const innerEdgeBelow = (y: number, isWall: boolean) => isWall ? y : y + t / 2;
+  const innerEdgeAbove = (y: number, isWall: boolean) => isWall ? y : y - t / 2;
 
-  // Для insert: панель внутри проёма (не заходит на стойки, не закрывает торцы корпуса).
-  // Границы могут быть стеной (isWall=true, без отступа) или соседом — стойкой/полкой (isWall=false, +t).
-  const effInnerLeft = effLeft + (effLeftIsWall ? 0 : t);
-  const effInnerRight = effRight;
-  const effInnerW = effInnerRight - effInnerLeft;
-  // Верхняя граница проёма = нижняя кромка полки/стены сверху
-  const effInnerTop = bounds.top.isWall ? bounds.top.y : shelfEdgeBelow(bounds.top.y);
-  // Нижняя граница проёма = верхняя кромка полки/стены снизу
-  const effInnerBot = bounds.bottom.isWall ? bounds.bottom.y : shelfEdgeAbove(bounds.bottom.y);
+  // Внутренние кромки ниши (куда будет вставлена панель)
+  const niL = innerEdgeRightOf(effLeft, effLeftIsWall);    // ниша начинается справа от левого соседа
+  const niR = innerEdgeLeftOf(effRight, effRightIsWall);   // ниша заканчивается слева от правого соседа
+  const niT = innerEdgeBelow(bounds.top.y, bounds.top.isWall);
+  const niB = innerEdgeAbove(bounds.bottom.y, bounds.bottom.isWall);
 
   let dX: number, dW: number, dY: number, dH: number;
 
   if (panelType === "overlay") {
-    // Накладная: выступает за габариты проёма, закрывает торцы (как дверь)
-    const to = bounds.top.isWall ? OC : OS;
-    const bo = bounds.bottom.isWall ? OC : OS;
-    const effLeftOffset = effLeftIsWall ? OC : OS;
-    const effRightOffset = effRightIsWall ? OC : OS;
-    dX = effInnerLeft - effLeftOffset;
-    dW = effInnerW + effLeftOffset + effRightOffset;
-    dY = bounds.top.y - to;
-    dH = (bounds.bottom.y - bounds.top.y) + to + bo;
+    // Накладная: выступает за границы ниши — закрывает торцы соседей/стен
+    const leftOvh = effLeftIsWall ? OC : OS;
+    const rightOvh = effRightIsWall ? OC : OS;
+    const topOvh = bounds.top.isWall ? OC : OS;
+    const botOvh = bounds.bottom.isWall ? OC : OS;
+    dX = niL - leftOvh;
+    dW = (niR - niL) + leftOvh + rightOvh;
+    dY = niT - topOvh;
+    dH = (niB - niT) + topOvh + botOvh;
   } else {
-    // Вкладная: СТРОГО в проёме, заполняет весь проём с зазором 2мм от КАЖДОГО соседа
-    // (не заходит на стойки/полки/стены)
+    // Вкладная: ВНУТРИ ниши с зазором 2мм по периметру
     const gap = 2;
-    dX = effInnerLeft + gap;
-    dW = effInnerW - gap * 2;
-    dY = effInnerTop + gap;
-    dH = effInnerBot - effInnerTop - 2 * gap;
+    dX = niL + gap;
+    dW = (niR - niL) - gap * 2;
+    dY = niT + gap;
+    dH = (niB - niT) - gap * 2;
   }
 
   // Clamp: панель не должна вылезать за рамку
@@ -461,36 +469,35 @@ export function computePanelDimensions(
   const OC = DOOR_OVERLAY_CORPUS;
   const OS = DOOR_OVERLAY_STUD;
 
-  // Smart-Y: полка в 2D centered на оси Y если в середине, поэтому её кромки
-  // зависят от того, где она находится (у верха / у низа / в середине).
-  const shelfEdgeBelow = (y: number) =>
-    y < 5 ? y + t : y > iH - 5 ? y : y + t / 2;
-  const shelfEdgeAbove = (y: number) =>
-    y < 5 ? y : y > iH - 5 ? y - t : y - t / 2;
+  // ═══ Внутренние кромки ниши (единая логика для X и Y) ═══
+  const innerEdgeRightOf = (x: number, isWall: boolean) => isWall ? x : x + t / 2;
+  const innerEdgeLeftOf = (x: number, isWall: boolean) => isWall ? x : x - t / 2;
+  const innerEdgeBelow = (y: number, isWall: boolean) => isWall ? y : y + t / 2;
+  const innerEdgeAbove = (y: number, isWall: boolean) => isWall ? y : y - t / 2;
 
-  const effInnerLeft = panelLeft + (panelLeftIsWall ? 0 : t);
-  const effInnerW = panelRight - effInnerLeft;
-  const effInnerTop = panelTopIsWall ? panelTop : shelfEdgeBelow(panelTop);
-  const effInnerBot = panelBottomIsWall ? panelBottom : shelfEdgeAbove(panelBottom);
+  const niL = innerEdgeRightOf(panelLeft, panelLeftIsWall);
+  const niR = innerEdgeLeftOf(panelRight, panelRightIsWall);
+  const niT = innerEdgeBelow(panelTop, panelTopIsWall);
+  const niB = innerEdgeAbove(panelBottom, panelBottomIsWall);
 
   let dX: number, dW: number, dY: number, dH: number;
 
   if (panelType === "overlay") {
-    const to = panelTopIsWall ? OC : OS;
-    const bo = panelBottomIsWall ? OC : OS;
-    const effLeftOffset = panelLeftIsWall ? OC : OS;
-    const effRightOffset = panelRightIsWall ? OC : OS;
-    dX = effInnerLeft - effLeftOffset;
-    dW = effInnerW + effLeftOffset + effRightOffset;
-    dY = panelTop - to;
-    dH = (panelBottom - panelTop) + to + bo;
+    const leftOvh = panelLeftIsWall ? OC : OS;
+    const rightOvh = panelRightIsWall ? OC : OS;
+    const topOvh = panelTopIsWall ? OC : OS;
+    const botOvh = panelBottomIsWall ? OC : OS;
+    dX = niL - leftOvh;
+    dW = (niR - niL) + leftOvh + rightOvh;
+    dY = niT - topOvh;
+    dH = (niB - niT) + topOvh + botOvh;
   } else {
-    // insert: внутри проёма с зазором 2мм, не заходя на стойки/полки/стены
+    // Вкладная: ВНУТРИ ниши с зазором 2мм по периметру
     const gap = 2;
-    dX = effInnerLeft + gap;
-    dW = effInnerW - gap * 2;
-    dY = effInnerTop + gap;
-    dH = effInnerBot - effInnerTop - 2 * gap;
+    dX = niL + gap;
+    dW = (niR - niL) - gap * 2;
+    dY = niT + gap;
+    dH = (niB - niT) - gap * 2;
   }
 
   // Clamp к рамке
