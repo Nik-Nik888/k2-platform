@@ -10,6 +10,7 @@ import { DepthControl } from "./inputs/DepthControl";
 import { TexturePicker } from "./TexturePicker";
 import { TOOLS, GUIDES, HINGES } from "../constants";
 import { computePanelDimensions, computeDoorDimensions } from "../logic/placement";
+import { findDoorBounds } from "../logic/doorBounds";
 
 const SEL_TYPE_LABELS: Record<string, string> = {
   stud: "Стойка", drawers: "Ящики", shelf: "Полка", rod: "Штанга", door: "Дверь",
@@ -194,20 +195,25 @@ export function DesktopLeftPanel(props: DesktopLeftPanelProps) {
                     <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>Тип петли</div>
                     {HINGES.map(ht => (
                       <button key={ht.id} onClick={() => {
-                        // Пересчитываем размеры двери при смене типа (overlay ↔ insert)
-                        if (selEl.doorLeft !== undefined) {
-                          const dims = computeDoorDimensions(
-                            selEl.doorLeft, selEl.doorRight,
-                            selEl.doorTop, selEl.doorBottom,
-                            selEl.doorLeftIsWall ?? true, selEl.doorRightIsWall ?? true,
-                            selEl.doorTopIsWall ?? true, selEl.doorBottomIsWall ?? true,
-                            ht.id as "overlay" | "insert",
-                            iW, iH, t,
-                          );
-                          updateEl(selEl.id, { hingeType: ht.id, ...dims });
-                        } else {
-                          updateEl(selEl.id, { hingeType: ht.id });
-                        }
+                        const cx = (selEl.x || 0) + (selEl.w || 400) / 2;
+                        const cy = (selEl.y || 0) + (selEl.h || 600) / 2;
+                        const bounds = findDoorBounds(elements, cx, cy, iW, iH, t);
+                        const dims = computeDoorDimensions(
+                          bounds.left.x ?? 0, bounds.right.x ?? iW,
+                          bounds.top.y ?? 0, bounds.bottom.y ?? iH,
+                          bounds.left.isWall, bounds.right.isWall,
+                          bounds.top.isWall, bounds.bottom.isWall,
+                          ht.id as "overlay" | "insert",
+                          iW, iH, t,
+                        );
+                        updateEl(selEl.id, {
+                          hingeType: ht.id,
+                          ...dims,
+                          doorLeft: bounds.left.x ?? 0, doorRight: bounds.right.x ?? iW,
+                          doorTop: bounds.top.y ?? 0, doorBottom: bounds.bottom.y ?? iH,
+                          doorLeftIsWall: bounds.left.isWall, doorRightIsWall: bounds.right.isWall,
+                          doorTopIsWall: bounds.top.isWall, doorBottomIsWall: bounds.bottom.isWall,
+                        });
                       }} style={{
                         display: "block", width: "100%", textAlign: "left",
                         padding: "5px 8px", borderRadius: 4, fontSize: 11, marginBottom: 2,
@@ -245,23 +251,26 @@ export function DesktopLeftPanel(props: DesktopLeftPanelProps) {
                     <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>Тип установки</div>
                     {HINGES.map(pt => (
                       <button key={pt.id} onClick={() => {
-                        // При переключении типа пересчитываем размеры:
-                        // overlay → захватывает больше (выступает за торцы)
-                        // insert → меньше (в проёме с зазором 2мм)
-                        // Это предотвращает баг «заходит на стенки» после переключения.
-                        if (selEl.panelLeft !== undefined) {
-                          const dims = computePanelDimensions(
-                            selEl.panelLeft, selEl.panelRight,
-                            selEl.panelTop, selEl.panelBottom,
-                            selEl.panelLeftIsWall ?? true, selEl.panelRightIsWall ?? true,
-                            selEl.panelTopIsWall ?? true, selEl.panelBottomIsWall ?? true,
-                            pt.id as "overlay" | "insert",
-                            iW, iH, t,
-                          );
-                          updateEl(selEl.id, { panelType: pt.id, ...dims });
-                        } else {
-                          updateEl(selEl.id, { panelType: pt.id });
-                        }
+                        // При переключении типа берём свежие границы проёма.
+                        const cx = (selEl.x || 0) + (selEl.w || 400) / 2;
+                        const cy = (selEl.y || 0) + (selEl.h || 100) / 2;
+                        const bounds = findDoorBounds(elements, cx, cy, iW, iH, t);
+                        const dims = computePanelDimensions(
+                          bounds.left.x ?? 0, bounds.right.x ?? iW,
+                          bounds.top.y ?? 0, bounds.bottom.y ?? iH,
+                          bounds.left.isWall, bounds.right.isWall,
+                          bounds.top.isWall, bounds.bottom.isWall,
+                          pt.id as "overlay" | "insert",
+                          iW, iH, t,
+                        );
+                        updateEl(selEl.id, {
+                          panelType: pt.id,
+                          ...dims,
+                          panelLeft: bounds.left.x ?? 0, panelRight: bounds.right.x ?? iW,
+                          panelTop: bounds.top.y ?? 0, panelBottom: bounds.bottom.y ?? iH,
+                          panelLeftIsWall: bounds.left.isWall, panelRightIsWall: bounds.right.isWall,
+                          panelTopIsWall: bounds.top.isWall, panelBottomIsWall: bounds.bottom.isWall,
+                        });
                       }} style={{
                         display: "block", width: "100%", textAlign: "left",
                         padding: "5px 8px", borderRadius: 4, fontSize: 11, marginBottom: 2,
