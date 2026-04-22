@@ -280,6 +280,14 @@ function placeDoor(p: {
   const effInnerLeft = effLeft + (effLeftIsWall ? 0 : t);
   const effInnerW = effRight - effInnerLeft;
 
+  // Smart-Y: реальные кромки полки зависят от её положения
+  const shelfEdgeBelow = (y: number) =>
+    y < 5 ? y + t : y > iH - 5 ? y : y + t / 2;
+  const shelfEdgeAbove = (y: number) =>
+    y < 5 ? y : y > iH - 5 ? y - t : y - t / 2;
+  const effInnerTop = bounds.top.isWall ? bounds.top.y : shelfEdgeBelow(bounds.top.y);
+  const effInnerBot = bounds.bottom.isWall ? bounds.bottom.y : shelfEdgeAbove(bounds.bottom.y);
+
   let dX: number, dW: number, dY: number, dH: number;
   if (hingeType === "overlay") {
     dX = effInnerLeft - effLeftOffset;
@@ -287,11 +295,12 @@ function placeDoor(p: {
     dY = bounds.top.y - to;
     dH = (bounds.bottom.y - bounds.top.y) + to + bo;
   } else {
+    // insert: внутри проёма с зазором 2мм от торца каждого соседа
     const gap = 2;
     dX = effInnerLeft + gap;
     dW = effInnerW - gap * 2;
-    dY = bounds.top.y + gap;
-    dH = (bounds.bottom.y - bounds.top.y) - gap * 2;
+    dY = effInnerTop + gap;
+    dH = effInnerBot - effInnerTop - 2 * gap;
   }
   // Clamp: не даём двери вылезать за рамку
   if (dX < 0) { dW += dX; dX = 0; }
@@ -502,5 +511,44 @@ export function computePanelDimensions(
   return {
     x: dX, y: dY, w: dW, h: dH,
     panelW: dW, panelH: dH,
+  };
+}
+
+/**
+ * Пересчитать размеры двери при переключении overlay ↔ insert.
+ * Вызывается из UI свойств двери когда пользователь меняет hingeType.
+ * Реализация: обёртка над computePanelDimensions (логика идентична).
+ */
+export interface DoorDimensionsResult {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  doorW: number;
+  doorH: number;
+}
+
+export function computeDoorDimensions(
+  doorLeft: number,
+  doorRight: number,
+  doorTop: number,
+  doorBottom: number,
+  doorLeftIsWall: boolean,
+  doorRightIsWall: boolean,
+  doorTopIsWall: boolean,
+  doorBottomIsWall: boolean,
+  hingeType: "overlay" | "insert",
+  iW: number,
+  iH: number,
+  t: number,
+): DoorDimensionsResult {
+  const r = computePanelDimensions(
+    doorLeft, doorRight, doorTop, doorBottom,
+    doorLeftIsWall, doorRightIsWall, doorTopIsWall, doorBottomIsWall,
+    hingeType, iW, iH, t,
+  );
+  return {
+    x: r.x, y: r.y, w: r.w, h: r.h,
+    doorW: r.panelW, doorH: r.panelH,
   };
 }

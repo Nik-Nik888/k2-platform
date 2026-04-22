@@ -9,7 +9,7 @@ import { NumInput } from "./inputs/NumInput";
 import { DepthControl } from "./inputs/DepthControl";
 import { TexturePicker } from "./TexturePicker";
 import { TOOLS, GUIDES, HINGES } from "../constants";
-import { computePanelDimensions } from "../logic/placement";
+import { computePanelDimensions, computeDoorDimensions } from "../logic/placement";
 
 const SEL_TYPE_LABELS: Record<string, string> = {
   stud: "Стойка", drawers: "Ящики", shelf: "Полка", rod: "Штанга", door: "Дверь",
@@ -193,7 +193,22 @@ export function DesktopLeftPanel(props: DesktopLeftPanelProps) {
                   <div style={{ marginBottom: 6 }}>
                     <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>Тип петли</div>
                     {HINGES.map(ht => (
-                      <button key={ht.id} onClick={() => updateEl(selEl.id, { hingeType: ht.id })} style={{
+                      <button key={ht.id} onClick={() => {
+                        // Пересчитываем размеры двери при смене типа (overlay ↔ insert)
+                        if (selEl.doorLeft !== undefined) {
+                          const dims = computeDoorDimensions(
+                            selEl.doorLeft, selEl.doorRight,
+                            selEl.doorTop, selEl.doorBottom,
+                            selEl.doorLeftIsWall ?? true, selEl.doorRightIsWall ?? true,
+                            selEl.doorTopIsWall ?? true, selEl.doorBottomIsWall ?? true,
+                            ht.id as "overlay" | "insert",
+                            iW, iH, t,
+                          );
+                          updateEl(selEl.id, { hingeType: ht.id, ...dims });
+                        } else {
+                          updateEl(selEl.id, { hingeType: ht.id });
+                        }
+                      }} style={{
                         display: "block", width: "100%", textAlign: "left",
                         padding: "5px 8px", borderRadius: 4, fontSize: 11, marginBottom: 2,
                         cursor: "pointer", border: "1px solid transparent",
