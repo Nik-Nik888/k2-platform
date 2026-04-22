@@ -150,11 +150,16 @@ export function computeDoorResize(
   const ro = newBounds.rightIsWall ? OC : OS;
   const to = newBounds.topIsWall ? OC : OS;
   const bo = newBounds.bottomIsWall ? OC : OS;
-  // Для insert: учитываем толщину соседей (стойка/полка занимают t мм).
+  // Для insert: учитываем толщину соседей. Полка в 2D centered на Y если в середине,
+  // поэтому её реальные кромки — [y±t/2] в середине, [y, y+t] у верха, [y-t, y] у низа.
+  const shelfEdgeBelow = (y: number) =>
+    y < 5 ? y + t : y > iH - 5 ? y : y + t / 2;
+  const shelfEdgeAbove = (y: number) =>
+    y < 5 ? y : y > iH - 5 ? y - t : y - t / 2;
   const innerLeft = newBounds.left + (newBounds.leftIsWall ? 0 : t);
   const innerRight = newBounds.right;
-  const innerTop = newBounds.top + (newBounds.topIsWall ? 0 : t);
-  const innerBot = newBounds.bottom;
+  const innerTop = newBounds.topIsWall ? newBounds.top : shelfEdgeBelow(newBounds.top);
+  const innerBot = newBounds.bottomIsWall ? newBounds.bottom : shelfEdgeAbove(newBounds.bottom);
   const innerW = innerRight - innerLeft;
   const innerH = innerBot - innerTop;
   const hingeType = el.hingeType || "overlay";

@@ -357,13 +357,31 @@ function placePanel(p: {
   const effLeftIsWall = bounds.left.isWall;
   const effRightIsWall = bounds.right.isWall;
 
+  // Полка в 2D рисуется centered на своей Y: [y-t/2, y+t/2] если в середине,
+  // [y, y+t] если у верха (y<5), [y-t, y] если у низа (y>iH-5).
+  // Для insert панели нужна нижняя кромка верхней полки и верхняя кромка нижней полки.
+  const shelfEdgeBelow = (y: number) => {
+    // Нижняя кромка полки находящейся на оси y
+    if (y < 5) return y + t;                    // у верха: [y, y+t], нижняя кромка = y+t
+    if (y > iH - 5) return y;                    // у низа: [y-t, y], нижняя кромка = y
+    return y + t / 2;                             // в середине: [y-t/2, y+t/2], нижняя кромка = y+t/2
+  };
+  const shelfEdgeAbove = (y: number) => {
+    // Верхняя кромка полки находящейся на оси y
+    if (y < 5) return y;                         // у верха: [y, y+t], верхняя кромка = y
+    if (y > iH - 5) return y - t;                // у низа: [y-t, y], верхняя кромка = y-t
+    return y - t / 2;                             // в середине: верхняя кромка = y-t/2
+  };
+
   // Для insert: панель внутри проёма (не заходит на стойки, не закрывает торцы корпуса).
   // Границы могут быть стеной (isWall=true, без отступа) или соседом — стойкой/полкой (isWall=false, +t).
   const effInnerLeft = effLeft + (effLeftIsWall ? 0 : t);
-  const effInnerRight = effRight; // панель начинается/заканчивается у x соседа (стойки слева), x соседа справа — её левый край
+  const effInnerRight = effRight;
   const effInnerW = effInnerRight - effInnerLeft;
-  const effInnerTop = bounds.top.y + (bounds.top.isWall ? 0 : t);
-  const effInnerBot = bounds.bottom.y; // y соседа снизу (верхняя кромка полки) — нижняя граница проёма
+  // Верхняя граница проёма = нижняя кромка полки/стены сверху
+  const effInnerTop = bounds.top.isWall ? bounds.top.y : shelfEdgeBelow(bounds.top.y);
+  // Нижняя граница проёма = верхняя кромка полки/стены снизу
+  const effInnerBot = bounds.bottom.isWall ? bounds.bottom.y : shelfEdgeAbove(bounds.bottom.y);
 
   let dX: number, dW: number, dY: number, dH: number;
 
@@ -443,11 +461,17 @@ export function computePanelDimensions(
   const OC = DOOR_OVERLAY_CORPUS;
   const OS = DOOR_OVERLAY_STUD;
 
+  // Smart-Y: полка в 2D centered на оси Y если в середине, поэтому её кромки
+  // зависят от того, где она находится (у верха / у низа / в середине).
+  const shelfEdgeBelow = (y: number) =>
+    y < 5 ? y + t : y > iH - 5 ? y : y + t / 2;
+  const shelfEdgeAbove = (y: number) =>
+    y < 5 ? y : y > iH - 5 ? y - t : y - t / 2;
+
   const effInnerLeft = panelLeft + (panelLeftIsWall ? 0 : t);
   const effInnerW = panelRight - effInnerLeft;
-  // По Y аналогично: если сверху соседняя полка (не стена), её торец занимает t мм.
-  const effInnerTop = panelTop + (panelTopIsWall ? 0 : t);
-  const effInnerBot = panelBottom;
+  const effInnerTop = panelTopIsWall ? panelTop : shelfEdgeBelow(panelTop);
+  const effInnerBot = panelBottomIsWall ? panelBottom : shelfEdgeAbove(panelBottom);
 
   let dX: number, dW: number, dY: number, dH: number;
 
