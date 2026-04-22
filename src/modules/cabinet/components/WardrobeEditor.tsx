@@ -47,7 +47,19 @@ export default function WardrobeEditor() {
   const [show3d, setShow3d] = useState(false);
   /* Unified placement: click tool → highlight zones → click zone → place element
      For doors: special mode where user picks 4 boundaries */
-  const [placeMode, setPlaceMode] = useState(null); // null | "shelf" | "stud" | "drawers" | "rod" | "door"
+  const [placeMode, setPlaceMode] = useState(null); // null | "shelf" | "stud" | "drawers" | "rod" | "door" | "panel"
+  /**
+   * Пре-настройки для новой двери/панели. Показываются в плавающем меню
+   * при активном placeMode === 'door' / 'panel', чтобы первая же дверь встала
+   * с нужными параметрами без необходимости переключать тип потом.
+   */
+  const [doorPrefs, setDoorPrefs] = useState<{
+    hingeType: "overlay" | "insert";
+    hingeSide: "left" | "right" | "auto";
+  }>({ hingeType: "overlay", hingeSide: "auto" });
+  const [panelPrefs, setPanelPrefs] = useState<{
+    panelType: "overlay" | "insert";
+  }>({ panelType: "insert" });
 
   // Mobile state — ВСЕ объявления вместе, чтобы минификатор не ломал порядок
   const isMobile = useIsMobile(768);
@@ -111,6 +123,10 @@ export default function WardrobeEditor() {
       elements,
       order: orderRef.current++,
       findDoorBounds,
+      // Пре-настройки — применяются только для соответствующего режима
+      doorHingeType: doorPrefs.hingeType,
+      doorHingeSide: doorPrefs.hingeSide,
+      panelType: panelPrefs.panelType,
     });
     if (!result) {
       setPlaceMode(null);
@@ -121,7 +137,7 @@ export default function WardrobeEditor() {
       setPlaceMode(null);
       setSelId(result.element.id);
     }
-  }, [placeMode, elements, adjust, iW, iH, t, findDoorBounds]);
+  }, [placeMode, elements, adjust, iW, iH, t, findDoorBounds, doorPrefs, panelPrefs]);
 
   const delSel = useCallback(() => { if (!selId) return; setElements(prev => adjust(prev.filter(e => e.id !== selId))); setSelId(null); }, [selId, adjust]);
 
@@ -144,12 +160,19 @@ export default function WardrobeEditor() {
     const cx = (selEl.x || 0) + (selEl.w || 400) / 2;
     const cy = (selEl.y || 0) + (selEl.h || 600) / 2;
     const fresh = pureFindDoorBounds(elements, cx, cy, iW, iH, t);
-    const leftIsWall = Math.abs(selEl.doorLeft - (fresh.left.x ?? 0)) < 5
+    // Синхронизируем doorLeft/Right со свежими границами: если стойка/стена рядом
+    // (в пределах 5мм от сохранённого значения) — используем актуальную координату.
+    // Это лечит легаси-данные, где doorLeft/Right мог быть записан с ошибкой ±t/2.
+    const syncL = Math.abs(selEl.doorLeft - (fresh.left.x ?? 0)) < 20
+      ? (fresh.left.x ?? 0) : selEl.doorLeft;
+    const syncR = Math.abs(selEl.doorRight - (fresh.right.x ?? iW)) < 20
+      ? (fresh.right.x ?? iW) : selEl.doorRight;
+    const leftIsWall = Math.abs(selEl.doorLeft - (fresh.left.x ?? 0)) < 20
       ? fresh.left.isWall : false;
-    const rightIsWall = Math.abs(selEl.doorRight - (fresh.right.x ?? iW)) < 5
+    const rightIsWall = Math.abs(selEl.doorRight - (fresh.right.x ?? iW)) < 20
       ? fresh.right.isWall : false;
     const dims = computeDoorDimensions(
-      selEl.doorLeft, selEl.doorRight,
+      syncL, syncR,
       fresh.top.y, fresh.bottom.y,
       leftIsWall, rightIsWall,
       fresh.top.isWall, fresh.bottom.isWall,
@@ -157,6 +180,7 @@ export default function WardrobeEditor() {
     );
     updateEl(selEl.id, {
       hingeType: newType, ...dims,
+      doorLeft: syncL, doorRight: syncR,
       doorTop: fresh.top.y, doorBottom: fresh.bottom.y,
       doorLeftIsWall: leftIsWall, doorRightIsWall: rightIsWall,
       doorTopIsWall: fresh.top.isWall, doorBottomIsWall: fresh.bottom.isWall,
@@ -586,6 +610,84 @@ export default function WardrobeEditor() {
         setShowDoors={setShowDoors}
         setShow3d={setShow3d}
       />
+
+      {/* ═══ PRE-PLACEMENT PREFS ═══
+          Плавающее меню свойств для НОВОЙ двери/панели — появляется при активации
+          соответствующего placeMode. Позволяет выбрать тип (overlay/insert) и сторону
+          петель ДО клика в проёме, чтобы первая же дверь/панель встала с правильными
+          параметрами. */}
+      {placeMode === "door" && (
+        <div style={{
+          position: "fixed", top: isMobile ? 60 : 68, left: "50%", transform: "translateX(-50%)",
+          zIndex: 50, background: "rgba(18,18,28,0.96)", border: "1px solid rgba(217,119,6,0.4)",
+          borderRadius: 8, padding: "10px 12px", boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+          display: "flex", alignItems: "center", gap: 10, fontSize: 12,
+          fontFamily: "'IBM Plex Mono',monospace",
+        }}>
+          <span style={{ color: "#d97706", fontWeight: 700, marginRight: 4 }}>ДВЕРЬ:</span>
+
+          {/* Тип двери */}
+          <span style={{ color: "#9ca3af", fontSize: 10, textTransform: "uppercase" }}>Тип</span>
+          <div style={{ display: "flex", gap: 2 }}>
+            {(["overlay", "insert"] as const).map(ht => (
+              <button key={ht} onClick={() => setDoorPrefs(p => ({ ...p, hingeType: ht }))} style={{
+                padding: "5px 10px", borderRadius: 4, fontSize: 11, cursor: "pointer",
+                border: "1px solid " + (doorPrefs.hingeType === ht ? "#d97706" : "rgba(100,100,110,0.3)"),
+                background: doorPrefs.hingeType === ht ? "rgba(217,119,6,0.18)" : "rgba(30,30,40,0.5)",
+                color: doorPrefs.hingeType === ht ? "#d97706" : "#9ca3af", fontWeight: 600,
+              }}>{ht === "overlay" ? "Накл." : "Вклад."}</button>
+            ))}
+          </div>
+
+          {/* Петли */}
+          <span style={{ color: "#9ca3af", fontSize: 10, textTransform: "uppercase", marginLeft: 4 }}>Петли</span>
+          <div style={{ display: "flex", gap: 2 }}>
+            {(["left", "auto", "right"] as const).map(hs => (
+              <button key={hs} onClick={() => setDoorPrefs(p => ({ ...p, hingeSide: hs }))} style={{
+                padding: "5px 10px", borderRadius: 4, fontSize: 11, cursor: "pointer",
+                border: "1px solid " + (doorPrefs.hingeSide === hs ? "#d97706" : "rgba(100,100,110,0.3)"),
+                background: doorPrefs.hingeSide === hs ? "rgba(217,119,6,0.18)" : "rgba(30,30,40,0.5)",
+                color: doorPrefs.hingeSide === hs ? "#d97706" : "#9ca3af", fontWeight: 600,
+              }}>{hs === "left" ? "◀ Лев" : hs === "right" ? "Прав ▶" : "Авто"}</button>
+            ))}
+          </div>
+
+          {/* Отмена */}
+          <button onClick={() => setPlaceMode(null)} style={{
+            marginLeft: 6, padding: "5px 8px", borderRadius: 4, fontSize: 11, cursor: "pointer",
+            border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)",
+            color: "#ef4444", fontWeight: 600,
+          }}>× Отмена</button>
+        </div>
+      )}
+
+      {placeMode === "panel" && (
+        <div style={{
+          position: "fixed", top: isMobile ? 60 : 68, left: "50%", transform: "translateX(-50%)",
+          zIndex: 50, background: "rgba(18,18,28,0.96)", border: "1px solid rgba(96,165,250,0.4)",
+          borderRadius: 8, padding: "10px 12px", boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+          display: "flex", alignItems: "center", gap: 10, fontSize: 12,
+          fontFamily: "'IBM Plex Mono',monospace",
+        }}>
+          <span style={{ color: "#60a5fa", fontWeight: 700, marginRight: 4 }}>ПАНЕЛЬ:</span>
+          <span style={{ color: "#9ca3af", fontSize: 10, textTransform: "uppercase" }}>Тип</span>
+          <div style={{ display: "flex", gap: 2 }}>
+            {(["overlay", "insert"] as const).map(pt => (
+              <button key={pt} onClick={() => setPanelPrefs({ panelType: pt })} style={{
+                padding: "5px 10px", borderRadius: 4, fontSize: 11, cursor: "pointer",
+                border: "1px solid " + (panelPrefs.panelType === pt ? "#60a5fa" : "rgba(100,100,110,0.3)"),
+                background: panelPrefs.panelType === pt ? "rgba(96,165,250,0.18)" : "rgba(30,30,40,0.5)",
+                color: panelPrefs.panelType === pt ? "#60a5fa" : "#9ca3af", fontWeight: 600,
+              }}>{pt === "overlay" ? "Накл." : "Вклад."}</button>
+            ))}
+          </div>
+          <button onClick={() => setPlaceMode(null)} style={{
+            marginLeft: 6, padding: "5px 8px", borderRadius: 4, fontSize: 11, cursor: "pointer",
+            border: "1px solid rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.1)",
+            color: "#ef4444", fontWeight: 600,
+          }}>× Отмена</button>
+        </div>
+      )}
 
       {/* ═══ MOBILE LAYOUT ═══ */}
       {isMobile && (

@@ -413,4 +413,91 @@ describe('placeInZone', () => {
       expect(dims.h).toBe(iH - 4);
     });
   });
+
+  // ───────────────────────────────────────────────────────────────
+  // Pre-placement preferences: дверь/панель должны сразу ставиться
+  // с выбранным типом и стороной петель (задача №3).
+  // ───────────────────────────────────────────────────────────────
+  describe('pre-placement preferences (preset)', () => {
+    it('door с doorHingeType="insert" — первая дверь сразу вкладная с зазором 2мм', () => {
+      const result = placeInZone({
+        ...makeCtx(),
+        placeMode: 'door',
+        clickX: 600, clickY: 1000,
+        doorHingeType: 'insert',
+        doorHingeSide: 'auto',
+      });
+      expect(result!.element.hingeType).toBe('insert');
+      // Пустой шкаф: niL=0, niR=iW, dX=2, dW=iW-4
+      expect(result!.element.x).toBe(2);
+      expect(result!.element.w).toBe(iW - 4);
+    });
+
+    it('door с doorHingeSide="left" — петли слева независимо от позиции', () => {
+      // Центральная дверь в пустом шкафу — автологика дала бы "right" (клик был бы слева),
+      // но явный preset "left" должен выиграть.
+      const result = placeInZone({
+        ...makeCtx(),
+        placeMode: 'door',
+        clickX: 900, clickY: 1000, // клик в правой половине
+        doorHingeType: 'overlay',
+        doorHingeSide: 'left',
+      });
+      expect(result!.element.hingeSide).toBe('left');
+    });
+
+    it('door с doorHingeSide="right" — петли справа даже при клике в левой половине', () => {
+      const result = placeInZone({
+        ...makeCtx(),
+        placeMode: 'door',
+        clickX: 300, clickY: 1000,
+        doorHingeType: 'overlay',
+        doorHingeSide: 'right',
+      });
+      expect(result!.element.hingeSide).toBe('right');
+    });
+
+    it('door с doorHingeSide="auto" — автовыбор как раньше (по центру двери vs проёма)', () => {
+      // Одиночная дверь на весь проём — центр двери ровно в центре проёма,
+      // doorCenterX < openingCenterX → left
+      const result = placeInZone({
+        ...makeCtx(),
+        placeMode: 'door',
+        clickX: 600, clickY: 1000,
+        doorHingeType: 'overlay',
+        doorHingeSide: 'auto',
+      });
+      // В пустом шкафу overlay-дверь центрирована → hingeSide 'left' или 'right' по доле
+      // Главное что это одно из двух, а не 'auto' в результате.
+      expect(['left', 'right']).toContain(result!.element.hingeSide);
+    });
+
+    it('panel с panelType="overlay" — первая панель сразу накладная (не insert по умолчанию)', () => {
+      const result = placeInZone({
+        ...makeCtx(),
+        placeMode: 'panel',
+        clickX: 600, clickY: 1000,
+        panelType: 'overlay',
+      });
+      expect(result!.element.panelType).toBe('overlay');
+    });
+
+    it('panel без preset → остаётся insert (backward compat)', () => {
+      const result = placeInZone({
+        ...makeCtx(),
+        placeMode: 'panel',
+        clickX: 600, clickY: 1000,
+      });
+      expect(result!.element.panelType).toBe('insert');
+    });
+
+    it('door без preset → остаётся overlay (backward compat)', () => {
+      const result = placeInZone({
+        ...makeCtx(),
+        placeMode: 'door',
+        clickX: 600, clickY: 1000,
+      });
+      expect(result!.element.hingeType).toBe('overlay');
+    });
+  });
 });

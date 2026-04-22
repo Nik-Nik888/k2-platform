@@ -57,6 +57,18 @@ export interface PlacementCtx {
   order: number;
   /** Функция нахождения 4-х граничных линий вокруг точки клика. */
   findDoorBounds: (clickX: number, clickY: number) => DoorBoundsResult;
+  /**
+   * Пре-настройки для новой двери (используются только при placeMode === 'door').
+   * Если не заданы — дверь ставится как overlay с автовыбором стороны петель.
+   */
+  doorHingeType?: "overlay" | "insert";
+  /** 'auto' = по центру двери относительно проёма (старое поведение). */
+  doorHingeSide?: "left" | "right" | "auto";
+  /**
+   * Пре-настройки для новой панели (используются только при placeMode === 'panel').
+   * Если не задан — панель ставится как insert (старое поведение).
+   */
+  panelType?: "overlay" | "insert";
 }
 
 export interface PlacementResult {
@@ -82,10 +94,17 @@ export function placeInZone(ctx: PlacementCtx): PlacementResult | null {
     return placeRod({ id, order, clickX, clickY, t, elements, findDoorBounds });
   }
   if (placeMode === "door") {
-    return placeDoor({ id, order, clickX, clickY, iW, iH, t, elements, findDoorBounds });
+    return placeDoor({
+      id, order, clickX, clickY, iW, iH, t, elements, findDoorBounds,
+      hingeType: ctx.doorHingeType ?? "overlay",
+      hingeSide: ctx.doorHingeSide ?? "auto",
+    });
   }
   if (placeMode === "panel") {
-    return placePanel({ id, order, clickX, clickY, iW, iH, t, elements, findDoorBounds });
+    return placePanel({
+      id, order, clickX, clickY, iW, iH, t, elements, findDoorBounds,
+      panelType: ctx.panelType ?? "insert",
+    });
   }
   return null;
 }
@@ -246,11 +265,11 @@ function placeDoor(p: {
   iW: number; iH: number; t: number;
   elements: any[];
   findDoorBounds: (x: number, y: number) => DoorBoundsResult;
+  hingeType: "overlay" | "insert";
+  hingeSide: "left" | "right" | "auto";
 }): PlacementResult {
-  const { id, order, clickX, clickY, iW, iH, t, elements, findDoorBounds } = p;
+  const { id, order, clickX, clickY, iW, iH, t, elements, findDoorBounds, hingeType, hingeSide } = p;
   const bounds = findDoorBounds(clickX, clickY);
-
-  const hingeType = "overlay";
 
   // Уже существующие двери в этом же проёме (совпадающие top/bottom границы) —
   // чтобы новая дверь делила проём пополам, а не накладывалась.
@@ -312,11 +331,14 @@ function placeDoor(p: {
     iW, iH,
   });
 
-  // Автовыбор стороны петель — петли у стенки, ручка в центр проёма:
-  // - если делим проём пополам (sameBoundsDoors): смотрим в какую половину встала дверь
-  // - иначе — по центру двери относительно проёма
+  // Сторона петель: если пользователь явно выбрал — используем его выбор.
+  // Если 'auto' — петли у стенки, ручка в центр проёма:
+  //   - если делим проём пополам (sameBoundsDoors): смотрим в какую половину встала дверь
+  //   - иначе — по центру двери относительно проёма
   let autoHingeSide: "left" | "right";
-  if (sameBoundsDoors.length > 0) {
+  if (hingeSide === "left" || hingeSide === "right") {
+    autoHingeSide = hingeSide;
+  } else if (sameBoundsDoors.length > 0) {
     autoHingeSide = effRight <= openingMid + 1 ? "left" : "right";
   } else {
     const doorCenterX = dX + dW / 2;
@@ -351,13 +373,10 @@ function placePanel(p: {
   iW: number; iH: number; t: number;
   elements: any[];
   findDoorBounds: (x: number, y: number) => DoorBoundsResult;
+  panelType: "overlay" | "insert";
 }): PlacementResult {
-  const { id, order, clickX, clickY, iW, iH, findDoorBounds } = p;
+  const { id, order, clickX, clickY, iW, iH, findDoorBounds, panelType } = p;
   const bounds = findDoorBounds(clickX, clickY);
-
-  // По умолчанию панель вкладная (insert) — чаще всего это цоколь или
-  // декоративная заглушка, которая не должна закрывать торцы корпуса.
-  const panelType: "overlay" | "insert" = "insert";
 
   const niL = bounds.left.innerEdge;
   const niR = bounds.right.innerEdge;

@@ -260,16 +260,19 @@ export function MobilePropsSheet(props: MobilePropsSheetProps) {
                   const cx = (selEl.x || 0) + (selEl.w || 400) / 2;
                   const cy = (selEl.y || 0) + (selEl.h || 600) / 2;
                   const fresh = findDoorBounds(elements, cx, cy, iW, iH, t);
-                  // Для X: если сохранённая граница совпадает со свежей — используем её isWall флаг.
-                  // Если не совпадает (делённый проём) — сохранённая граница это другая дверь, не стена.
-                  const leftIsWall = Math.abs(selEl.doorLeft - (fresh.left.x ?? 0)) < 5
-                    ? fresh.left.isWall
-                    : false;
-                  const rightIsWall = Math.abs(selEl.doorRight - (fresh.right.x ?? iW)) < 5
-                    ? fresh.right.isWall
-                    : false;
+                  // Синхронизируем doorLeft/Right со свежими: если близко (20мм) — используем
+                  // актуальную координату соседа. Это лечит легаси-данные, где doorLeft/Right
+                  // мог быть записан с ошибкой ±t.
+                  const syncL = Math.abs(selEl.doorLeft - (fresh.left.x ?? 0)) < 20
+                    ? (fresh.left.x ?? 0) : selEl.doorLeft;
+                  const syncR = Math.abs(selEl.doorRight - (fresh.right.x ?? iW)) < 20
+                    ? (fresh.right.x ?? iW) : selEl.doorRight;
+                  const leftIsWall = Math.abs(selEl.doorLeft - (fresh.left.x ?? 0)) < 20
+                    ? fresh.left.isWall : false;
+                  const rightIsWall = Math.abs(selEl.doorRight - (fresh.right.x ?? iW)) < 20
+                    ? fresh.right.isWall : false;
                   const dims = computeDoorDimensions(
-                    selEl.doorLeft, selEl.doorRight,
+                    syncL, syncR,
                     fresh.top.y, fresh.bottom.y,
                     leftIsWall, rightIsWall,
                     fresh.top.isWall, fresh.bottom.isWall,
@@ -278,6 +281,7 @@ export function MobilePropsSheet(props: MobilePropsSheetProps) {
                   );
                   updateEl(selEl.id, {
                     hingeType: ht.id, ...dims,
+                    doorLeft: syncL, doorRight: syncR,
                     doorTop: fresh.top.y, doorBottom: fresh.bottom.y,
                     doorLeftIsWall: leftIsWall, doorRightIsWall: rightIsWall,
                     doorTopIsWall: fresh.top.isWall, doorBottomIsWall: fresh.bottom.isWall,

@@ -199,12 +199,17 @@ export function DesktopLeftPanel(props: DesktopLeftPanelProps) {
                           const cx = (selEl.x || 0) + (selEl.w || 400) / 2;
                           const cy = (selEl.y || 0) + (selEl.h || 600) / 2;
                           const fresh = findDoorBounds(elements, cx, cy, iW, iH, t);
-                          const leftIsWall = Math.abs(selEl.doorLeft - (fresh.left.x ?? 0)) < 5
+                          // Синхронизируем doorLeft/Right со свежими — лечит легаси-значения.
+                          const syncL = Math.abs(selEl.doorLeft - (fresh.left.x ?? 0)) < 20
+                            ? (fresh.left.x ?? 0) : selEl.doorLeft;
+                          const syncR = Math.abs(selEl.doorRight - (fresh.right.x ?? iW)) < 20
+                            ? (fresh.right.x ?? iW) : selEl.doorRight;
+                          const leftIsWall = Math.abs(selEl.doorLeft - (fresh.left.x ?? 0)) < 20
                             ? fresh.left.isWall : false;
-                          const rightIsWall = Math.abs(selEl.doorRight - (fresh.right.x ?? iW)) < 5
+                          const rightIsWall = Math.abs(selEl.doorRight - (fresh.right.x ?? iW)) < 20
                             ? fresh.right.isWall : false;
                           const dims = computeDoorDimensions(
-                            selEl.doorLeft, selEl.doorRight,
+                            syncL, syncR,
                             fresh.top.y, fresh.bottom.y,
                             leftIsWall, rightIsWall,
                             fresh.top.isWall, fresh.bottom.isWall,
@@ -213,6 +218,7 @@ export function DesktopLeftPanel(props: DesktopLeftPanelProps) {
                           );
                           updateEl(selEl.id, {
                             hingeType: ht.id, ...dims,
+                            doorLeft: syncL, doorRight: syncR,
                             doorTop: fresh.top.y, doorBottom: fresh.bottom.y,
                             doorLeftIsWall: leftIsWall, doorRightIsWall: rightIsWall,
                             doorTopIsWall: fresh.top.isWall, doorBottomIsWall: fresh.bottom.isWall,
