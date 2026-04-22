@@ -8,6 +8,7 @@
  * - Manual overrides (manualX/manualW/manualPTop/manualPBot) игнорируют авто-пересчёт.
  */
 import { computeZones, findZone } from "./zones";
+import { computeDoorDimensions, computePanelDimensions } from "./placement";
 
 export function computeStudBounds(
   stud: any, allEls: any[],
@@ -243,36 +244,20 @@ export function adjust(els: any[], iW: number, iH: number, t: number): any[] {
     }
     if (el.type === "door") {
       if (el.manualW || el.manualH) return el;
-      // Двери с сохранёнными границами (новая система)
+      // Двери с сохранёнными границами (новая система).
+      // Используем computeDoorDimensions из placement.ts — единая формула с правильным
+      // учётом Smart-Y полок, физического [x,x+t] стоек и актуального INSERT_GAP.
       if (el.doorLeft !== undefined) {
-        const OC = 14, OS = 7;
         const ht = el.hingeType || "overlay";
-        const innerLeft = el.doorLeft + (el.doorLeft > 0 ? t : 0);
-        const innerW = el.doorRight - innerLeft;
-        if (ht === "overlay") {
-          const lo = el.doorLeftIsWall ? OC : OS;
-          const ro = el.doorRightIsWall ? OC : OS;
-          const to = el.doorTopIsWall ? OC : OS;
-          const bo = el.doorBottomIsWall ? OC : OS;
-          let dX = innerLeft - lo;
-          let dW = innerW + lo + ro;
-          let dY = el.doorTop - to;
-          let dH = (el.doorBottom - el.doorTop) + to + bo;
-          // Clamp к границам рамки: не даём двери выходить за 0..iW и 0..iH
-          if (dX < 0) { dW += dX; dX = 0; }
-          if (dX + dW > iW) dW = iW - dX;
-          if (dY < 0) { dH += dY; dY = 0; }
-          if (dY + dH > iH) dH = iH - dY;
-          return { ...el, x: dX, w: dW, h: dH, doorW: dW, doorH: dH, y: dY };
-        } else {
-          const gap = 2;
-          return {
-            ...el, x: innerLeft + gap, w: innerW - gap * 2,
-            h: (el.doorBottom - el.doorTop) - gap * 2,
-            doorW: innerW - gap * 2, doorH: (el.doorBottom - el.doorTop) - gap * 2,
-            y: el.doorTop + gap,
-          };
-        }
+        const d = computeDoorDimensions(
+          el.doorLeft, el.doorRight,
+          el.doorTop ?? 0, el.doorBottom ?? iH,
+          el.doorLeftIsWall ?? true, el.doorRightIsWall ?? true,
+          el.doorTopIsWall ?? true, el.doorBottomIsWall ?? true,
+          ht as "overlay" | "insert",
+          iW, iH, t,
+        );
+        return { ...el, x: d.x, y: d.y, w: d.w, h: d.h, doorW: d.doorW, doorH: d.doorH };
       }
       // Legacy zone-based двери (backward compat)
       const targetId = el.doorTarget;
@@ -296,7 +281,7 @@ export function adjust(els: any[], iW: number, iH: number, t: number): any[] {
         if (dY + dH > iH) dH = iH - dY;
         return { ...el, x: dX, w: dW, h: dH, doorW: dW, doorH: dH, y: dY, zoneId: z.id, doorTarget: z.id };
       } else {
-        const gap = 2;
+        const gap = 3;
         const dW = z.sw - gap * 2, dH = (z.bot - z.top) - gap * 2;
         return { ...el, x: z.sl + gap, w: dW, h: dH, doorW: dW, doorH: dH, y: z.top + gap, zoneId: z.id, doorTarget: z.id };
       }
