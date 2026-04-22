@@ -10,6 +10,7 @@ import { DepthControl } from "./inputs/DepthControl";
 import { TexturePicker } from "./TexturePicker";
 import { TOOLS, GUIDES, HINGES } from "../constants";
 import { computePanelDimensions, computeDoorDimensions } from "../logic/placement";
+import { findDoorBounds } from "../logic/doorBounds";
 
 const SEL_TYPE_LABELS: Record<string, string> = {
   stud: "Стойка", drawers: "Ящики", shelf: "Полка", rod: "Штанга", door: "Дверь",

@@ -8,6 +8,7 @@ import { DepthControl } from "./inputs/DepthControl";
 import { TexturePicker } from "./TexturePicker";
 import { TOOLS, GUIDES, HINGES } from "../constants";
 import { computePanelDimensions, computeDoorDimensions } from "../logic/placement";
+import { findDoorBounds } from "../logic/doorBounds";
 
 // ───────────────────────────────────────────────────────────────
 // MobileToolsSheet — размеры корпуса, выбор инструмента, TexturePicker
