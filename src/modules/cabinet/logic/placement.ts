@@ -15,11 +15,32 @@
  *   if (!result) return;
  *   setElements(prev => adjust([...prev, result.element]));
  *   if (!result.keepPlaceMode) { setPlaceMode(null); setSelId(result.element.id); }
+ *
+ * ───────────────────────────────────────────────────────────────
+ * ВАЖНО по геометрии insert/overlay режимов:
+ *
+ * Для дверей и панелей используется поле bound.innerEdge, вычисленное в doorBounds.ts
+ * с учётом Smart-Y рендера полок и физического размещения стоек [x, x+t].
+ *
+ * Внутренняя кромка ниши = та сторона соседа, которая обращена в нишу.
+ * - Для внешней стены корпуса: innerEdge = координата стены
+ * - Для стойки слева от ниши: innerEdge = x + t (правая кромка)
+ * - Для стойки справа от ниши: innerEdge = x (левая кромка)
+ * - Для полки у верха (sh.y<5, рендер [y, y+t]): innerEdge сверху от ниши = y + t
+ * - Для полки у низа (sh.y>iH-5, рендер [y-t, y]): innerEdge снизу от ниши = y - t
+ * - Для полки в середине (рендер [y-t/2, y+t/2]): ±t/2 от sh.y
+ *
+ * INSERT: дверь/панель ВНУТРИ ниши с зазором 2мм по периметру
+ * OVERLAY: дверь/панель выступает за кромку ниши на OC=14 (стена) или OS=7 (стойка/полка)
+ * ───────────────────────────────────────────────────────────────
  */
 import { uid, DOOR_OVERLAY_CORPUS, DOOR_OVERLAY_STUD } from "../constants";
 import type { DoorBoundsResult } from "./doorBounds";
 
 export type PlaceMode = "shelf" | "stud" | "drawers" | "rod" | "door" | "panel";
+
+/** Зазор между вкладной дверью/панелью и кромкой ниши (мм). */
+const INSERT_GAP = 2;
 
 export interface PlacementCtx {
   placeMode: PlaceMode;
@@ -229,11 +250,6 @@ function placeDoor(p: {
   const { id, order, clickX, clickY, iW, iH, t, elements, findDoorBounds } = p;
   const bounds = findDoorBounds(clickX, clickY);
 
-  const OC = DOOR_OVERLAY_CORPUS;  // накладка на стенку корпуса
-  const OS = DOOR_OVERLAY_STUD;    // накладка на стойку
-  const to = bounds.top.isWall ? OC : OS;
-  const bo = bounds.bottom.isWall ? OC : OS;
-
   const hingeType = "overlay";
 
   // Уже существующие двери в этом же проёме (совпадающие top/bottom границы) —
@@ -254,6 +270,9 @@ function placeDoor(p: {
   let effRight = bounds.right.x;
   let effLeftIsWall = bounds.left.isWall;
   let effRightIsWall = bounds.right.isWall;
+  // Стартуем с уже посчитанных innerEdge из bounds; при делении проёма они пересчитываются.
+  let effLeftInnerEdge = bounds.left.innerEdge;
+  let effRightInnerEdge = bounds.right.innerEdge;
 
   if (sameBoundsDoors.length > 0) {
     const hasDoorLeft = sameBoundsDoors.some(d => ((d.doorLeft || 0) + (d.doorRight || iW)) / 2 < openingMid);
@@ -263,66 +282,43 @@ function placeDoor(p: {
     } else if (hasDoorLeft && !hasDoorRight) {
       effLeft = openingMid;
       effLeftIsWall = false;
+      effLeftInnerEdge = openingMid; // на середине проёма — край соседней двери
     } else if (!hasDoorLeft && hasDoorRight) {
       effRight = openingMid;
       effRightIsWall = false;
+      effRightInnerEdge = openingMid;
     } else if (wantLeftHalf) {
       effRight = openingMid;
       effRightIsWall = false;
+      effRightInnerEdge = openingMid;
     } else {
       effLeft = openingMid;
       effLeftIsWall = false;
+      effLeftInnerEdge = openingMid;
     }
   }
 
-  // ═══ Внутренние кромки ниши (унифицированная логика) ═══
-  // Стена (isWall=true): координата = уже внутренняя кромка
-  // Стойка/полка в середине: рисуется centered [c-t/2, c+t/2], внутренняя кромка = c±t/2
-  const innerEdgeRightOf = (x: number, isWall: boolean) => isWall ? x : x + t / 2;
-  const innerEdgeLeftOf = (x: number, isWall: boolean) => isWall ? x : x - t / 2;
-  const innerEdgeBelow = (y: number, isWall: boolean) => isWall ? y : y + t / 2;
-  const innerEdgeAbove = (y: number, isWall: boolean) => isWall ? y : y - t / 2;
+  // ═══ Границы ниши — через innerEdge каждого соседа ═══
+  const niL = effLeftInnerEdge;
+  const niR = effRightInnerEdge;
+  const niT = bounds.top.innerEdge;
+  const niB = bounds.bottom.innerEdge;
 
-  const niL = innerEdgeRightOf(effLeft, effLeftIsWall);
-  const niR = innerEdgeLeftOf(effRight, effRightIsWall);
-  const niT = innerEdgeBelow(bounds.top.y, bounds.top.isWall);
-  const niB = innerEdgeAbove(bounds.bottom.y, bounds.bottom.isWall);
-
-  let dX: number, dW: number, dY: number, dH: number;
-  if (hingeType === "overlay") {
-    // Накладная: выступает за кромки ниши на 14/7мм
-    const leftOvh = effLeftIsWall ? OC : OS;
-    const rightOvh = effRightIsWall ? OC : OS;
-    const topOvh = bounds.top.isWall ? OC : OS;
-    const botOvh = bounds.bottom.isWall ? OC : OS;
-    dX = niL - leftOvh;
-    dW = (niR - niL) + leftOvh + rightOvh;
-    dY = niT - topOvh;
-    dH = (niB - niT) + topOvh + botOvh;
-  } else {
-    // Вкладная: ВНУТРИ ниши с зазором 2мм по периметру
-    const gap = 2;
-    dX = niL + gap;
-    dW = (niR - niL) - gap * 2;
-    dY = niT + gap;
-    dH = (niB - niT) - gap * 2;
-  }
-  // Clamp: не даём двери вылезать за рамку
-  if (dX < 0) { dW += dX; dX = 0; }
-  if (dX + dW > iW) dW = iW - dX;
-  if (dY < 0) { dH += dY; dY = 0; }
-  if (dY + dH > iH) dH = iH - dY;
+  const { x: dX, y: dY, w: dW, h: dH } = computeOverlayOrInsertRect({
+    niL, niR, niT, niB,
+    leftIsWall: effLeftIsWall, rightIsWall: effRightIsWall,
+    topIsWall: bounds.top.isWall, bottomIsWall: bounds.bottom.isWall,
+    mode: hingeType,
+    iW, iH,
+  });
 
   // Автовыбор стороны петель — петли у стенки, ручка в центр проёма:
   // - если делим проём пополам (sameBoundsDoors): смотрим в какую половину встала дверь
   // - иначе — по центру двери относительно проёма
   let autoHingeSide: "left" | "right";
   if (sameBoundsDoors.length > 0) {
-    // Заняли левую половину (effRight урезан до openingMid) → петли слева
-    // Заняли правую половину (effLeft = openingMid) → петли справа
     autoHingeSide = effRight <= openingMid + 1 ? "left" : "right";
   } else {
-    // Одиночная дверь: по центру двери относительно проёма
     const doorCenterX = dX + dW / 2;
     const openingCenterX = (effLeft + effRight) / 2;
     autoHingeSide = doorCenterX < openingCenterX ? "left" : "right";
@@ -356,68 +352,25 @@ function placePanel(p: {
   elements: any[];
   findDoorBounds: (x: number, y: number) => DoorBoundsResult;
 }): PlacementResult {
-  const { id, order, clickX, clickY, iW, iH, t, findDoorBounds } = p;
+  const { id, order, clickX, clickY, iW, iH, findDoorBounds } = p;
   const bounds = findDoorBounds(clickX, clickY);
-
-  const OC = DOOR_OVERLAY_CORPUS;
-  const OS = DOOR_OVERLAY_STUD;
 
   // По умолчанию панель вкладная (insert) — чаще всего это цоколь или
   // декоративная заглушка, которая не должна закрывать торцы корпуса.
   const panelType: "overlay" | "insert" = "insert";
 
-  const effLeft = bounds.left.x;
-  const effRight = bounds.right.x;
-  const effLeftIsWall = bounds.left.isWall;
-  const effRightIsWall = bounds.right.isWall;
+  const niL = bounds.left.innerEdge;
+  const niR = bounds.right.innerEdge;
+  const niT = bounds.top.innerEdge;
+  const niB = bounds.bottom.innerEdge;
 
-  // ═══ Единая логика "внутренняя кромка ниши" для любой стороны ═══
-  // Сосед может быть стеной (isWall=true, край корпуса или краевая стойка/полка) ИЛИ
-  // стойкой/полкой в середине шкафа (isWall=false, рисуется centered на своей оси).
-  // Внутренняя кромка = "куда начинается пустое пространство ниши".
-  //
-  // Стена: её координата = уже внутренняя кромка (стена физически снаружи)
-  // Стойка/полка в середине: рисуется [c-t/2, c+t/2], значит
-  //   - внутренняя кромка справа от неё = c + t/2
-  //   - внутренняя кромка слева от неё  = c - t/2
-  // Стойка/полка у края (isWall=true из findDoorBounds): координата = внутренняя кромка
-  const innerEdgeRightOf = (x: number, isWall: boolean) => isWall ? x : x + t / 2;
-  const innerEdgeLeftOf = (x: number, isWall: boolean) => isWall ? x : x - t / 2;
-  const innerEdgeBelow = (y: number, isWall: boolean) => isWall ? y : y + t / 2;
-  const innerEdgeAbove = (y: number, isWall: boolean) => isWall ? y : y - t / 2;
-
-  // Внутренние кромки ниши (куда будет вставлена панель)
-  const niL = innerEdgeRightOf(effLeft, effLeftIsWall);    // ниша начинается справа от левого соседа
-  const niR = innerEdgeLeftOf(effRight, effRightIsWall);   // ниша заканчивается слева от правого соседа
-  const niT = innerEdgeBelow(bounds.top.y, bounds.top.isWall);
-  const niB = innerEdgeAbove(bounds.bottom.y, bounds.bottom.isWall);
-
-  let dX: number, dW: number, dY: number, dH: number;
-
-  if (panelType === "overlay") {
-    // Накладная: выступает за границы ниши — закрывает торцы соседей/стен
-    const leftOvh = effLeftIsWall ? OC : OS;
-    const rightOvh = effRightIsWall ? OC : OS;
-    const topOvh = bounds.top.isWall ? OC : OS;
-    const botOvh = bounds.bottom.isWall ? OC : OS;
-    dX = niL - leftOvh;
-    dW = (niR - niL) + leftOvh + rightOvh;
-    dY = niT - topOvh;
-    dH = (niB - niT) + topOvh + botOvh;
-  } else {
-    // Вкладная: ВНУТРИ ниши с зазором 2мм по периметру
-    const gap = 2;
-    dX = niL + gap;
-    dW = (niR - niL) - gap * 2;
-    dY = niT + gap;
-    dH = (niB - niT) - gap * 2;
-  }
-
-  // Clamp: панель не должна вылезать за рамку
-  if (dX < 0) { dW += dX; dX = 0; }
-  if (dX + dW > iW) dW = iW - dX;
-  if (dY < 0) { dH += dY; dY = 0; }
-  if (dY + dH > iH) dH = iH - dY;
+  const { x: dX, y: dY, w: dW, h: dH } = computeOverlayOrInsertRect({
+    niL, niR, niT, niB,
+    leftIsWall: bounds.left.isWall, rightIsWall: bounds.right.isWall,
+    topIsWall: bounds.top.isWall, bottomIsWall: bounds.bottom.isWall,
+    mode: panelType,
+    iW, iH,
+  });
 
   return {
     element: {
@@ -425,12 +378,10 @@ function placePanel(p: {
       x: dX, y: dY, w: dW, h: dH,
       panelW: dW, panelH: dH,
       panelType,
-      panelLeft: effLeft, panelRight: effRight,
+      panelLeft: bounds.left.x, panelRight: bounds.right.x,
       panelTop: bounds.top.y, panelBottom: bounds.bottom.y,
-      panelLeftIsWall: effLeftIsWall, panelRightIsWall: effRightIsWall,
+      panelLeftIsWall: bounds.left.isWall, panelRightIsWall: bounds.right.isWall,
       panelTopIsWall: bounds.top.isWall, panelBottomIsWall: bounds.bottom.isWall,
-      // depthOffset: по умолчанию утоплена к задней стенке (классический цоколь)
-      // Пользователь может переключить на 0 или другое значение.
       depthOffset: 0,
       _order: order,
     },
@@ -438,10 +389,65 @@ function placePanel(p: {
   };
 }
 
+// ───────────────────────────────────────────────────────────────
+// Общая функция расчёта прямоугольника двери/панели из кромок ниши.
+// Используется в placeDoor, placePanel, computePanelDimensions, computeDoorDimensions.
+// ───────────────────────────────────────────────────────────────
+
+interface OverlayOrInsertInput {
+  /** Внутренние кромки ниши (mm): niL/niR — X-кромки, niT/niB — Y-кромки. */
+  niL: number; niR: number; niT: number; niB: number;
+  leftIsWall: boolean; rightIsWall: boolean;
+  topIsWall: boolean; bottomIsWall: boolean;
+  mode: "overlay" | "insert";
+  iW: number; iH: number;
+}
+
+function computeOverlayOrInsertRect(inp: OverlayOrInsertInput): {
+  x: number; y: number; w: number; h: number;
+} {
+  const { niL, niR, niT, niB, leftIsWall, rightIsWall, topIsWall, bottomIsWall, mode, iW, iH } = inp;
+  const OC = DOOR_OVERLAY_CORPUS;
+  const OS = DOOR_OVERLAY_STUD;
+
+  let x: number, y: number, w: number, h: number;
+
+  if (mode === "overlay") {
+    // Накладная: выступает за кромки ниши на OC (стена) или OS (стойка/полка)
+    const leftOvh = leftIsWall ? OC : OS;
+    const rightOvh = rightIsWall ? OC : OS;
+    const topOvh = topIsWall ? OC : OS;
+    const botOvh = bottomIsWall ? OC : OS;
+    x = niL - leftOvh;
+    w = (niR - niL) + leftOvh + rightOvh;
+    y = niT - topOvh;
+    h = (niB - niT) + topOvh + botOvh;
+  } else {
+    // Вкладная: ВНУТРИ ниши с зазором 2мм по периметру
+    x = niL + INSERT_GAP;
+    w = (niR - niL) - INSERT_GAP * 2;
+    y = niT + INSERT_GAP;
+    h = (niB - niT) - INSERT_GAP * 2;
+  }
+
+  // Clamp: не вылезать за рамку
+  if (x < 0) { w += x; x = 0; }
+  if (x + w > iW) w = iW - x;
+  if (y < 0) { h += y; y = 0; }
+  if (y + h > iH) h = iH - y;
+
+  return { x, y, w, h };
+}
+
 /**
  * Пересчитать размеры панели (x, y, w, h) исходя из её границ (panelLeft/Right/Top/Bottom),
  * флагов isWall и нового panelType. Используется при переключении overlay ↔ insert,
  * чтобы панель автоматически подстроилась под новый тип, не "заходя" на стенки.
+ *
+ * ВАЖНО: принимает исходные координаты соседей (panelLeft/Right/Top/Bottom),
+ * а внутри сама восстанавливает innerEdge через bounds-проверку рефа на elements.
+ * Для этого нужны elements — добавлен необязательным параметром; если не передан,
+ * используется упрощённая геометрия (со Smart-Y и thickness-offset).
  */
 export interface PanelDimensionsResult {
   x: number;
@@ -466,49 +472,24 @@ export function computePanelDimensions(
   iH: number,
   t: number,
 ): PanelDimensionsResult {
-  const OC = DOOR_OVERLAY_CORPUS;
-  const OS = DOOR_OVERLAY_STUD;
+  // Восстановим внутренние кромки ниши из сохранённых координат соседей.
+  // Для стоек/полок учитывается их физический рендер: стойка [x, x+t], полка — Smart-Y.
+  const niL = computeInnerEdgeX(panelLeft,  /*nicheOnRightSide*/ true,  iW, t);
+  const niR = computeInnerEdgeX(panelRight, /*nicheOnRightSide*/ false, iW, t);
+  const niT = computeInnerEdgeY(panelTop,    /*nicheBelow*/ true,  iH, t);
+  const niB = computeInnerEdgeY(panelBottom, /*nicheBelow*/ false, iH, t);
 
-  // ═══ Внутренние кромки ниши (единая логика для X и Y) ═══
-  const innerEdgeRightOf = (x: number, isWall: boolean) => isWall ? x : x + t / 2;
-  const innerEdgeLeftOf = (x: number, isWall: boolean) => isWall ? x : x - t / 2;
-  const innerEdgeBelow = (y: number, isWall: boolean) => isWall ? y : y + t / 2;
-  const innerEdgeAbove = (y: number, isWall: boolean) => isWall ? y : y - t / 2;
-
-  const niL = innerEdgeRightOf(panelLeft, panelLeftIsWall);
-  const niR = innerEdgeLeftOf(panelRight, panelRightIsWall);
-  const niT = innerEdgeBelow(panelTop, panelTopIsWall);
-  const niB = innerEdgeAbove(panelBottom, panelBottomIsWall);
-
-  let dX: number, dW: number, dY: number, dH: number;
-
-  if (panelType === "overlay") {
-    const leftOvh = panelLeftIsWall ? OC : OS;
-    const rightOvh = panelRightIsWall ? OC : OS;
-    const topOvh = panelTopIsWall ? OC : OS;
-    const botOvh = panelBottomIsWall ? OC : OS;
-    dX = niL - leftOvh;
-    dW = (niR - niL) + leftOvh + rightOvh;
-    dY = niT - topOvh;
-    dH = (niB - niT) + topOvh + botOvh;
-  } else {
-    // Вкладная: ВНУТРИ ниши с зазором 2мм по периметру
-    const gap = 2;
-    dX = niL + gap;
-    dW = (niR - niL) - gap * 2;
-    dY = niT + gap;
-    dH = (niB - niT) - gap * 2;
-  }
-
-  // Clamp к рамке
-  if (dX < 0) { dW += dX; dX = 0; }
-  if (dX + dW > iW) dW = iW - dX;
-  if (dY < 0) { dH += dY; dY = 0; }
-  if (dY + dH > iH) dH = iH - dY;
+  const rect = computeOverlayOrInsertRect({
+    niL, niR, niT, niB,
+    leftIsWall: panelLeftIsWall, rightIsWall: panelRightIsWall,
+    topIsWall: panelTopIsWall, bottomIsWall: panelBottomIsWall,
+    mode: panelType,
+    iW, iH,
+  });
 
   return {
-    x: dX, y: dY, w: dW, h: dH,
-    panelW: dW, panelH: dH,
+    x: rect.x, y: rect.y, w: rect.w, h: rect.h,
+    panelW: rect.w, panelH: rect.h,
   };
 }
 
@@ -537,4 +518,65 @@ export function computeDoorDimensions(
     x: r.x, y: r.y, w: r.w, h: r.h,
     doorW: r.panelW, doorH: r.panelH,
   };
+}
+
+// ───────────────────────────────────────────────────────────────
+// Helpers: восстановление innerEdge по сохранённой координате + isWall
+// Используются в computePanelDimensions/computeDoorDimensions при переключении
+// типа (overlay ↔ insert) уже существующего элемента.
+// ───────────────────────────────────────────────────────────────
+
+/**
+ * Восстановить innerEdge для X-границы по её сохранённым атрибутам.
+ *
+ * @param pos — координата границы: 0/iW для внешней стены, st.x для стойки
+ * @param nicheOnRightSide — true если ниша справа от границы (bound.left двери),
+ *                          false если ниша слева (bound.right двери)
+ *
+ * Логика:
+ * - Внешняя стена корпуса (pos===0 или pos===iW): innerEdge = pos
+ * - Стойка (любое другое pos): физический рендер [pos, pos+t]
+ *   → innerEdge = pos+t, если ниша справа (bound.left)
+ *   → innerEdge = pos,   если ниша слева  (bound.right)
+ *
+ * ПРИМЕЧАНИЕ: если бы у нас была краевая стойка ровно на pos=0, хелпер принял бы её
+ * за внешнюю стену. На практике placeDoor сохраняет doorLeft = bounds.left.x,
+ * а для краевой стойки bounds.left.x = st.x (обычно 0…5 в зависимости от snap),
+ * поэтому случай pos=0 с краевой стойкой крайне редок. При необходимости можно
+ * расширить API передачей elements и проверять наличие стойки с x≈0.
+ */
+function computeInnerEdgeX(
+  pos: number,
+  nicheOnRightSide: boolean,
+  iW: number, t: number,
+): number {
+  if (pos === 0 || pos === iW) return pos; // внешняя стена
+  return nicheOnRightSide ? pos + t : pos; // стойка [pos, pos+t]
+}
+
+/**
+ * Восстановить innerEdge для Y-границы с учётом Smart-Y рендера полок.
+ *
+ * @param pos — координата границы: 0/iH для внешней стены, sh.y для полки
+ * @param nicheBelow — true если ниша снизу от границы (bound.top двери),
+ *                    false если ниша сверху (bound.bottom двери)
+ *
+ * Логика синхронизирована с renderShelf() в elements.tsx и shelfRenderRange() в doorBounds.ts:
+ * - Внешняя стена корпуса (pos===0 или pos===iH): innerEdge = pos
+ * - Полка у верха (pos<5):   рендер [pos, pos+t]     → innerEdge = pos+t (ниша снизу)
+ * - Полка у низа (pos>iH-5): рендер [pos-t, pos]     → innerEdge = pos-t (ниша сверху)
+ * - Полка в середине:        рендер [pos-t/2, pos+t/2] → ±t/2 от pos
+ */
+function computeInnerEdgeY(
+  pos: number,
+  nicheBelow: boolean,
+  iH: number, t: number,
+): number {
+  if (pos === 0 || pos === iH) return pos; // внешняя стена
+  const SMART_Y_EDGE = 5;
+  let shTop: number, shBot: number;
+  if (pos < SMART_Y_EDGE) { shTop = pos; shBot = pos + t; }
+  else if (pos > iH - SMART_Y_EDGE) { shTop = pos - t; shBot = pos; }
+  else { shTop = pos - t / 2; shBot = pos + t / 2; }
+  return nicheBelow ? shBot : shTop;
 }

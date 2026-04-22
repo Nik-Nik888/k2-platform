@@ -277,8 +277,8 @@ export default function WardrobeEditor() {
 
   /* Build sorted boundary lists for door resize snapping */
   const doorSnapTargets = useMemo(
-    () => computeDoorSnapTargets(elements, iW, iH),
-    [elements, iW, iH],
+    () => computeDoorSnapTargets(elements, iW, iH, t),
+    [elements, iW, iH, t],
   );
 
   // Применение фактического перемещения — вызывается из RAF через useDragHandlers

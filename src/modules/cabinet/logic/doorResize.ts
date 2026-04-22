@@ -1,9 +1,23 @@
 /**
  * Пересчёт двери при resize: snap к ближайшим границам, clamp к соседним дверям,
  * clamp к рамке. Чистая функция без state.
+ *
+ * При snap к таргету (стена / стойка / полка / край другой двери) получаем
+ * корректную ВНУТРЕННЮЮ кромку ниши из поля SnapTarget.innerEdgeFromLowSide/HighSide,
+ * которое уже учитывает:
+ * - физический рендер стойки [x, x+t]
+ * - Smart-Y рендер полки ([y, y+t] / [y-t, y] / [y-t/2, y+t/2])
+ * - внешние стены корпуса (innerEdge = pos)
+ *
+ * Это критично для insert-режима, где дверь должна стоять в проёме с зазором 2мм
+ * по периметру: если брать просто координату snap-таргета, дверь уедет на t/2
+ * либо залезет на стойку, либо оставит кривой зазор.
  */
 import { SnapTarget } from "./doorBounds";
 import { DOOR_OVERLAY_CORPUS as OC, DOOR_OVERLAY_STUD as OS } from "../constants";
+
+/** Зазор между вкладной дверью/панелью и кромкой ниши (мм). */
+const INSERT_GAP = 2;
 
 export interface DoorResizeBounds {
   left: number;
@@ -14,6 +28,15 @@ export interface DoorResizeBounds {
   rightIsWall: boolean;
   topIsWall: boolean;
   bottomIsWall: boolean;
+  /**
+   * Корректные внутренние кромки ниши (mm) — берутся из SnapTarget при snap'е.
+   * Для сторон, не затронутых текущим drag, остаются с прошлого резайза или
+   * восстанавливаются из `left/right/top/bottom` + `isWall` через computeInnerEdge*.
+   */
+  innerEdgeLeft: number;
+  innerEdgeRight: number;
+  innerEdgeTop: number;
+  innerEdgeBottom: number;
 }
 
 export interface DoorResizeResult {
@@ -56,15 +79,24 @@ export function computeDoorResize(
   iH: number,
   t: number,
 ): DoorResizeResult {
+  // Стартовые границы двери. innerEdge восстанавливаем из сохранённых полей
+  // через хелперы (Smart-Y для полок, [x, x+t] для стоек).
+  const left = el.doorLeft ?? 0;
+  const right = el.doorRight ?? iW;
+  const top = el.doorTop ?? 0;
+  const bottom = el.doorBottom ?? iH;
+  const leftIsWall = el.doorLeftIsWall ?? true;
+  const rightIsWall = el.doorRightIsWall ?? true;
+  const topIsWall = el.doorTopIsWall ?? true;
+  const bottomIsWall = el.doorBottomIsWall ?? true;
+
   const newBounds: DoorResizeBounds = {
-    left: el.doorLeft ?? 0,
-    right: el.doorRight ?? iW,
-    top: el.doorTop ?? 0,
-    bottom: el.doorBottom ?? iH,
-    leftIsWall: el.doorLeftIsWall ?? true,
-    rightIsWall: el.doorRightIsWall ?? true,
-    topIsWall: el.doorTopIsWall ?? true,
-    bottomIsWall: el.doorBottomIsWall ?? true,
+    left, right, top, bottom,
+    leftIsWall, rightIsWall, topIsWall, bottomIsWall,
+    innerEdgeLeft: computeInnerEdgeX(left, /*nicheOnRightSide*/ true, iW, t),
+    innerEdgeRight: computeInnerEdgeX(right, /*nicheOnRightSide*/ false, iW, t),
+    innerEdgeTop: computeInnerEdgeY(top, /*nicheBelow*/ true, iH, t),
+    innerEdgeBottom: computeInnerEdgeY(bottom, /*nicheBelow*/ false, iH, t),
   };
 
   // Snap к ближайшему H-таргету для top/bottom
@@ -78,8 +110,18 @@ export function computeDoorResize(
       if (d < bestDist) { bestDist = d; best = ht; }
     }
     if (best) {
-      if (edge === "top") { newBounds.top = best.pos; newBounds.topIsWall = best.isWall; }
-      else { newBounds.bottom = best.pos; newBounds.bottomIsWall = best.isWall; }
+      if (edge === "top") {
+        newBounds.top = best.pos;
+        newBounds.topIsWall = best.isWall;
+        // Мы подцепились к таргету СВЕРХУ от двери → ниша снизу от таргета
+        // → берём кромку со стороны больших Y (highSide)
+        newBounds.innerEdgeTop = best.innerEdgeFromHighSide;
+      } else {
+        newBounds.bottom = best.pos;
+        newBounds.bottomIsWall = best.isWall;
+        // Таргет СНИЗУ от двери → ниша сверху от таргета → кромка со стороны меньших Y
+        newBounds.innerEdgeBottom = best.innerEdgeFromLowSide;
+      }
     }
   }
 
@@ -94,8 +136,17 @@ export function computeDoorResize(
       if (d < bestDist) { bestDist = d; best = vt; }
     }
     if (best) {
-      if (edge === "left") { newBounds.left = best.pos; newBounds.leftIsWall = best.isWall; }
-      else { newBounds.right = best.pos; newBounds.rightIsWall = best.isWall; }
+      if (edge === "left") {
+        newBounds.left = best.pos;
+        newBounds.leftIsWall = best.isWall;
+        // Таргет СЛЕВА от двери → ниша справа от таргета → кромка со стороны больших X
+        newBounds.innerEdgeLeft = best.innerEdgeFromHighSide;
+      } else {
+        newBounds.right = best.pos;
+        newBounds.rightIsWall = best.isWall;
+        // Таргет СПРАВА от двери → ниша слева от таргета → кромка со стороны меньших X
+        newBounds.innerEdgeRight = best.innerEdgeFromLowSide;
+      }
     }
   }
 
@@ -115,6 +166,7 @@ export function computeDoorResize(
       if (d.doorLeft >= newBounds.left && newBounds.right > d.doorLeft) {
         newBounds.right = d.doorLeft;
         newBounds.rightIsWall = false;
+        newBounds.innerEdgeRight = d.doorLeft; // край соседней двери — кромка ниши
       }
     }
   } else if (edge === "left") {
@@ -123,6 +175,7 @@ export function computeDoorResize(
       if (d.doorRight <= newBounds.right && newBounds.left < d.doorRight) {
         newBounds.left = d.doorRight;
         newBounds.leftIsWall = false;
+        newBounds.innerEdgeLeft = d.doorRight;
       }
     }
   } else if (edge === "bottom") {
@@ -132,6 +185,7 @@ export function computeDoorResize(
       if (dTop >= newBounds.top && newBounds.bottom > dTop) {
         newBounds.bottom = dTop;
         newBounds.bottomIsWall = false;
+        newBounds.innerEdgeBottom = dTop;
       }
     }
   } else if (edge === "top") {
@@ -141,40 +195,34 @@ export function computeDoorResize(
       if (dBot <= newBounds.bottom && newBounds.top < dBot) {
         newBounds.top = dBot;
         newBounds.topIsWall = false;
+        newBounds.innerEdgeTop = dBot;
       }
     }
   }
 
-  // ═══ Внутренние кромки ниши (единая логика) ═══
-  const lo = newBounds.leftIsWall ? OC : OS;
-  const ro = newBounds.rightIsWall ? OC : OS;
-  const to = newBounds.topIsWall ? OC : OS;
-  const bo = newBounds.bottomIsWall ? OC : OS;
-
-  const innerEdgeRightOf = (x: number, isWall: boolean) => isWall ? x : x + t / 2;
-  const innerEdgeLeftOf = (x: number, isWall: boolean) => isWall ? x : x - t / 2;
-  const innerEdgeBelow = (y: number, isWall: boolean) => isWall ? y : y + t / 2;
-  const innerEdgeAbove = (y: number, isWall: boolean) => isWall ? y : y - t / 2;
-
-  const niL = innerEdgeRightOf(newBounds.left, newBounds.leftIsWall);
-  const niR = innerEdgeLeftOf(newBounds.right, newBounds.rightIsWall);
-  const niT = innerEdgeBelow(newBounds.top, newBounds.topIsWall);
-  const niB = innerEdgeAbove(newBounds.bottom, newBounds.bottomIsWall);
+  // ═══ Расчёт итогового прямоугольника двери из кромок ниши ═══
+  const niL = newBounds.innerEdgeLeft;
+  const niR = newBounds.innerEdgeRight;
+  const niT = newBounds.innerEdgeTop;
+  const niB = newBounds.innerEdgeBottom;
   const hingeType = el.hingeType || "overlay";
 
   let dX: number, dW: number, dY: number, dH: number;
   if (hingeType === "overlay") {
+    const lo = newBounds.leftIsWall ? OC : OS;
+    const ro = newBounds.rightIsWall ? OC : OS;
+    const to = newBounds.topIsWall ? OC : OS;
+    const bo = newBounds.bottomIsWall ? OC : OS;
     dX = niL - lo;
     dW = (niR - niL) + lo + ro;
     dY = niT - to;
     dH = (niB - niT) + to + bo;
   } else {
     // Вкладная: ВНУТРИ ниши с зазором 2мм по периметру
-    const gap = 2;
-    dX = niL + gap;
-    dW = (niR - niL) - gap * 2;
-    dY = niT + gap;
-    dH = (niB - niT) - gap * 2;
+    dX = niL + INSERT_GAP;
+    dW = (niR - niL) - INSERT_GAP * 2;
+    dY = niT + INSERT_GAP;
+    dH = (niB - niT) - INSERT_GAP * 2;
   }
 
   // Clamp: дверь не может вылезть за рамку
@@ -260,4 +308,33 @@ export function computePanelResize(
     panelLeftIsWall: res.doorLeftIsWall, panelRightIsWall: res.doorRightIsWall,
     panelTopIsWall: res.doorTopIsWall, panelBottomIsWall: res.doorBottomIsWall,
   };
+}
+
+// ───────────────────────────────────────────────────────────────
+// Helpers: восстановление innerEdge по сохранённой координате
+// Дублируются из placement.ts чтобы не создавать циклическую зависимость
+// и иметь полный контроль в этом файле. Логика идентична.
+// ───────────────────────────────────────────────────────────────
+
+function computeInnerEdgeX(
+  pos: number,
+  nicheOnRightSide: boolean,
+  iW: number, t: number,
+): number {
+  if (pos === 0 || pos === iW) return pos; // внешняя стена
+  return nicheOnRightSide ? pos + t : pos; // стойка [pos, pos+t]
+}
+
+function computeInnerEdgeY(
+  pos: number,
+  nicheBelow: boolean,
+  iH: number, t: number,
+): number {
+  if (pos === 0 || pos === iH) return pos; // внешняя стена
+  const SMART_Y_EDGE = 5;
+  let shTop: number, shBot: number;
+  if (pos < SMART_Y_EDGE) { shTop = pos; shBot = pos + t; }
+  else if (pos > iH - SMART_Y_EDGE) { shTop = pos - t; shBot = pos; }
+  else { shTop = pos - t / 2; shBot = pos + t / 2; }
+  return nicheBelow ? shBot : shTop;
 }
