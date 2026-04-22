@@ -6,7 +6,7 @@ import BottomSheet from "@shared/components/BottomSheet";
 import { SC, MOBILE_EL_LABELS } from "../constants";
 import { renderElement, type RenderCtx } from "./elements";
 import { renderFrame, renderZoneHighlights } from "./frame";
-import { renderDims, renderCorpusDims, renderSelectedDims, renderDoorHitZones, renderPanelHitZones } from "./dims";
+import { renderDims, renderCorpusDims, renderSelectedDims, renderDoorHitZones, renderPanelHitZones, renderDoorQuickToolbar } from "./dims";
 import { MobileToolsSheet, MobilePropsSheet, MobileSummarySheet } from "./MobileSheets";
 import { Header } from "./Header";
 import {
@@ -23,7 +23,7 @@ import { findDoorBounds as pureFindDoorBounds, computeDoorSnapTargets } from "..
 import { computeDoorResize, computePanelResize } from "../logic/doorResize";
 import { moveElement } from "../logic/elementDrag";
 import { computeTopLevelCols, computeDims, applyHorizDimChange, applyVertDimChange } from "../logic/dims";
-import { placeInZone as purePlaceInZone } from "../logic/placement";
+import { placeInZone as purePlaceInZone, computeDoorDimensions } from "../logic/placement";
 import { useDragHandlers } from "../hooks/useDragHandlers";
 import { useMobileTouch } from "../hooks/useMobileTouch";
 /* ═══════════════════════════════
@@ -137,6 +137,36 @@ export default function WardrobeEditor() {
       return adjust(next);
     });
   }, [adjust]);
+
+  /* Быстрые колбэки для всплывающего тулбара двери (смена типа и стороны петель). */
+  const changeDoorType = useCallback((newType: "overlay" | "insert") => {
+    if (!selEl || selEl.type !== "door" || selEl.doorLeft === undefined) return;
+    const cx = (selEl.x || 0) + (selEl.w || 400) / 2;
+    const cy = (selEl.y || 0) + (selEl.h || 600) / 2;
+    const fresh = pureFindDoorBounds(elements, cx, cy, iW, iH, t);
+    const leftIsWall = Math.abs(selEl.doorLeft - (fresh.left.x ?? 0)) < 5
+      ? fresh.left.isWall : false;
+    const rightIsWall = Math.abs(selEl.doorRight - (fresh.right.x ?? iW)) < 5
+      ? fresh.right.isWall : false;
+    const dims = computeDoorDimensions(
+      selEl.doorLeft, selEl.doorRight,
+      fresh.top.y, fresh.bottom.y,
+      leftIsWall, rightIsWall,
+      fresh.top.isWall, fresh.bottom.isWall,
+      newType, iW, iH, t,
+    );
+    updateEl(selEl.id, {
+      hingeType: newType, ...dims,
+      doorTop: fresh.top.y, doorBottom: fresh.bottom.y,
+      doorLeftIsWall: leftIsWall, doorRightIsWall: rightIsWall,
+      doorTopIsWall: fresh.top.isWall, doorBottomIsWall: fresh.bottom.isWall,
+    });
+  }, [selEl, elements, iW, iH, t, updateEl]);
+
+  const changeDoorHingeSide = useCallback((side: "left" | "right") => {
+    if (!selEl || selEl.type !== "door") return;
+    updateEl(selEl.id, { hingeSide: side });
+  }, [selEl, updateEl]);
 
   const toSvg = useCallback((e) => {
     const svg = svgRef.current; if (!svg) return { x: 0, y: 0 };
@@ -493,6 +523,43 @@ export default function WardrobeEditor() {
       Рендерится в самом конце SVG чтобы быть ПОВЕРХ всех DIMS и прочих элементов. */}
   {renderDoorHitZones({ elements, selId, showDoors, frameT, iH, isMobile, onDoorEdgeDrag, updateEl })}
   {renderPanelHitZones({ elements, selId, frameT, iH, isMobile, onPanelEdgeDrag, updateEl })}
+
+  {/* ═══ DOOR QUICK TOOLBAR ═══
+      Всплывающий тулбар над выделенной дверью: переключение Накл/Вклад + петли. */}
+  {renderDoorQuickToolbar({
+    elements, selId, frameT, iW, iH, t, showDoors, isMobile,
+    onTypeChange: (hingeType) => {
+      const d = elements.find(e => e.id === selId && e.type === "door");
+      if (!d || d.doorLeft === undefined) {
+        if (d) updateEl(d.id, { hingeType });
+        return;
+      }
+      // Свежие bounds для актуальных Y-границ и isWall флагов
+      const cx = (d.x || 0) + (d.w || 400) / 2;
+      const cy = (d.y || 0) + (d.h || 600) / 2;
+      const fresh = pureFindDoorBounds(elements, cx, cy, iW, iH, t);
+      const leftIsWall = Math.abs(d.doorLeft - (fresh.left.x ?? 0)) < 5
+        ? fresh.left.isWall : false;
+      const rightIsWall = Math.abs(d.doorRight - (fresh.right.x ?? iW)) < 5
+        ? fresh.right.isWall : false;
+      const dims = computeDoorDimensions(
+        d.doorLeft, d.doorRight,
+        fresh.top.y, fresh.bottom.y,
+        leftIsWall, rightIsWall,
+        fresh.top.isWall, fresh.bottom.isWall,
+        hingeType, iW, iH, t,
+      );
+      updateEl(d.id, {
+        hingeType, ...dims,
+        doorTop: fresh.top.y, doorBottom: fresh.bottom.y,
+        doorLeftIsWall: leftIsWall, doorRightIsWall: rightIsWall,
+        doorTopIsWall: fresh.top.isWall, doorBottomIsWall: fresh.bottom.isWall,
+      });
+    },
+    onHingeSideChange: (side) => {
+      if (selId) updateEl(selId, { hingeSide: side });
+    },
+  })}
 </svg>
   );
 

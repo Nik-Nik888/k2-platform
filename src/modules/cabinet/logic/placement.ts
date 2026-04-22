@@ -308,19 +308,27 @@ function placeDoor(p: {
   if (dY < 0) { dH += dY; dY = 0; }
   if (dY + dH > iH) dH = iH - dY;
 
-  // Автовыбор стороны петель — петли у стенки, ручка в центр проёма:
-  // - если делим проём пополам (sameBoundsDoors): смотрим в какую половину встала дверь
-  // - иначе — по центру двери относительно проёма
+  // Автовыбор стороны петель: петли у БЛИЖНЕЙ стены корпуса.
+  // Дверь слева (у левой стены) → петли слева.
+  // Дверь справа (у правой стены) → петли справа.
+  // Это даёт привычный способ открывания: двери распахиваются к центру.
   let autoHingeSide: "left" | "right";
   if (sameBoundsDoors.length > 0) {
-    // Заняли левую половину (effRight урезан до openingMid) → петли слева
-    // Заняли правую половину (effLeft = openingMid) → петли справа
+    // В делённом проёме: петли с края (у стены), к центру — ручка.
+    // Левая половина (effRight<=mid) → стена слева → петли слева.
+    // Правая половина → стена справа → петли справа.
     autoHingeSide = effRight <= openingMid + 1 ? "left" : "right";
   } else {
-    // Одиночная дверь: по центру двери относительно проёма
-    const doorCenterX = dX + dW / 2;
-    const openingCenterX = (effLeft + effRight) / 2;
-    autoHingeSide = doorCenterX < openingCenterX ? "left" : "right";
+    // Одиночная дверь: смотрим какой бок ближе к стене (isWall=true).
+    // Если слева стена, справа — сосед → петли слева.
+    if (effLeftIsWall && !effRightIsWall) autoHingeSide = "left";
+    else if (effRightIsWall && !effLeftIsWall) autoHingeSide = "right";
+    else {
+      // Обе стороны одинаковые — смотрим по позиции двери в проёме
+      const doorCenterX = dX + dW / 2;
+      const openingCenterX = (effLeft + effRight) / 2;
+      autoHingeSide = doorCenterX < openingCenterX ? "left" : "right";
+    }
   }
 
   return {

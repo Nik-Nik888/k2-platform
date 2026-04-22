@@ -52,23 +52,53 @@ export function findDoorBounds(
     return { sTop, sBot };
   };
 
-  // Краевые стойки/полки превращаются в "стены"
-  const studNearLeft = allStuds.some(st => st.x < t + 2);
-  const studNearRight = allStuds.some(st => st.x > iW - 2 * t - 2);
-  const shelfNearTop = allShelves.some(sh => sh.y < t + 2);
-  const shelfNearBot = allShelves.some(sh => sh.y > iH - t - 2);
+  // Краевые стойки/полки: если стойка/полка стоит у самого края корпуса
+  // (в пределах t+2), она физически заменяет стенку корпуса. Для логики дверей
+  // она должна трактоваться как СТЕНА (isWall: true) — иначе insert дверь
+  // будет пытаться обойти её изнутри, а накладная — даст неправильный напуск.
+  //
+  // ВАЖНО: проверка учитывает Y клика (для стоек) и X клика (для полок) —
+  // полка слева не отменяет стену сверху для клика справа, если полка туда не доходит.
+  const studNearLeft = allStuds.some(st =>
+    st.x < t + 2 && (() => {
+      const { sTop, sBot } = getStudRealRange(st);
+      return clickY >= sTop - 5 && clickY <= sBot + 5;
+    })(),
+  );
+  const studNearRight = allStuds.some(st =>
+    st.x > iW - 2 * t - 2 && (() => {
+      const { sTop, sBot } = getStudRealRange(st);
+      return clickY >= sTop - 5 && clickY <= sBot + 5;
+    })(),
+  );
+  const shelfNearTop = allShelves.some(sh => {
+    if (sh.y >= t + 2) return false;
+    const shLeft = sh.x || 0, shRight = shLeft + (sh.w || iW);
+    return clickX >= shLeft - 5 && clickX <= shRight + 5;
+  });
+  const shelfNearBot = allShelves.some(sh => {
+    if (sh.y <= iH - t - 2) return false;
+    const shLeft = sh.x || 0, shRight = shLeft + (sh.w || iW);
+    return clickX >= shLeft - 5 && clickX <= shRight + 5;
+  });
 
-  // Вертикальные границы: стены + стойки которые действительно проходят через этот Y
+  // Вертикальные границы: стены + стойки которые действительно проходят через этот Y.
+  // Краевые стойки выступают в роли стен (isWall: true).
   const vBounds: DoorBound[] = [
     ...(studNearLeft ? [] : [{ x: 0, isWall: true }]),
     ...allStuds.filter(st => {
       const { sTop, sBot } = getStudRealRange(st);
       return clickY >= sTop - 5 && clickY <= sBot + 5;
-    }).map(st => ({ x: st.x, isWall: false })),
+    }).map(st => ({
+      x: st.x,
+      // Краевая стойка = стена: её x у самого края корпуса
+      isWall: st.x < t + 2 || st.x > iW - 2 * t - 2,
+    })),
     ...(studNearRight ? [] : [{ x: iW, isWall: true }]),
   ].sort((a, b) => (a.x ?? 0) - (b.x ?? 0));
 
-  // Горизонтальные границы: стены + полки на этом X
+  // Горизонтальные границы: стены + полки на этом X.
+  // Краевая полка (сверху/снизу у края корпуса) выступает в роли стены.
   const hBounds: DoorBound[] = [
     ...(shelfNearTop ? [] : [{ y: 0, isWall: true }]),
     ...allShelves.filter(sh => {
@@ -76,7 +106,8 @@ export function findDoorBounds(
       return clickX >= shLeft - 5 && clickX <= shRight + 5;
     }).map(sh => ({
       y: sh.y,
-      isWall: false,
+      // Краевая полка = стена: её y у верха/низа корпуса
+      isWall: sh.y < t + 2 || sh.y > iH - t - 2,
       xLeft: sh.x || 0,
       xRight: (sh.x || 0) + (sh.w || iW),
     })),

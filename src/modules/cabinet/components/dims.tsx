@@ -428,3 +428,103 @@ export function renderPanelHitZones(ctx: PanelHitZonesCtx): React.ReactNode {
     </>
   );
 }
+
+// ───────────────────────────────────────────────────────────────
+// renderDoorQuickToolbar — всплывающий тулбар рядом с выделенной дверью
+// Кнопки: Вкладная/Накладная, Петли Лево/Право — чтобы не надо было
+// открывать mobile sheet или боковую панель для частых действий.
+// ───────────────────────────────────────────────────────────────
+
+export interface DoorQuickToolbarCtx {
+  elements: any[];
+  selId: string | null;
+  frameT: number;
+  iW: number;
+  iH: number;
+  t: number;
+  showDoors: boolean;
+  isMobile: boolean;
+  onTypeChange: (hingeType: "overlay" | "insert") => void;
+  onHingeSideChange: (side: "left" | "right") => void;
+}
+
+export function renderDoorQuickToolbar(ctx: DoorQuickToolbarCtx): React.ReactNode {
+  const { elements, selId, frameT, iH, showDoors, isMobile, onTypeChange, onHingeSideChange } = ctx;
+  const selDoor = elements.find(e => e.id === selId && e.type === "door" && showDoors);
+  if (!selDoor) return null;
+
+  const dsx = ((selDoor.x || 0) + frameT) * SC;
+  const dsy = ((selDoor.y || 0) + frameT) * SC;
+  const ddw = (selDoor.w || 100) * SC;
+  const ddh = (selDoor.h || iH) * SC;
+
+  // Позиция тулбара: над дверью по центру. Если дверь у верха — под ней.
+  const BAR_H = isMobile ? 30 : 22;
+  const BAR_W = isMobile ? 190 : 150;
+  const barX = dsx + ddw / 2 - BAR_W / 2;
+  const aboveDoor = dsy > BAR_H + 10;
+  const barY = aboveDoor ? dsy - BAR_H - 6 : dsy + ddh + 6;
+
+  const currentType = selDoor.hingeType || "overlay";
+  const currentSide = selDoor.hingeSide || "right";
+
+  const btnW = isMobile ? 45 : 36;
+  const fontSize = isMobile ? 11 : 9;
+
+  // Используем foreignObject для HTML-кнопок с onClick (SVG onClick работает криво на touch)
+  return (
+    <foreignObject x={barX} y={barY} width={BAR_W} height={BAR_H} style={{ pointerEvents: "all" }}>
+      <div
+        style={{
+          display: "flex", gap: 2, padding: 2,
+          background: "rgba(15, 16, 22, 0.95)",
+          border: "1px solid #333", borderRadius: 6,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.5)",
+          height: BAR_H - 4,
+        }}
+        onMouseDown={e => e.stopPropagation()}
+        onTouchStart={e => e.stopPropagation()}
+      >
+        {/* Type: overlay/insert */}
+        <button
+          onClick={e => { e.stopPropagation(); onTypeChange("overlay"); }}
+          style={{
+            width: btnW, fontSize, padding: 0,
+            background: currentType === "overlay" ? "#d97706" : "transparent",
+            color: currentType === "overlay" ? "#000" : "#aaa",
+            border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 600,
+          }}
+        >Накл.</button>
+        <button
+          onClick={e => { e.stopPropagation(); onTypeChange("insert"); }}
+          style={{
+            width: btnW, fontSize, padding: 0,
+            background: currentType === "insert" ? "#d97706" : "transparent",
+            color: currentType === "insert" ? "#000" : "#aaa",
+            border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 600,
+          }}
+        >Вклад.</button>
+        <div style={{ width: 1, background: "#333", margin: "0 2px" }} />
+        {/* Hinge side */}
+        <button
+          onClick={e => { e.stopPropagation(); onHingeSideChange("left"); }}
+          style={{
+            width: btnW, fontSize, padding: 0,
+            background: currentSide === "left" ? "#d97706" : "transparent",
+            color: currentSide === "left" ? "#000" : "#aaa",
+            border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 600,
+          }}
+        >◀ Лев</button>
+        <button
+          onClick={e => { e.stopPropagation(); onHingeSideChange("right"); }}
+          style={{
+            width: btnW, fontSize, padding: 0,
+            background: currentSide === "right" ? "#d97706" : "transparent",
+            color: currentSide === "right" ? "#000" : "#aaa",
+            border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 600,
+          }}
+        >Прав ▶</button>
+      </div>
+    </foreignObject>
+  );
+}
