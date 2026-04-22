@@ -249,31 +249,39 @@ export function MobilePropsSheet(props: MobilePropsSheetProps) {
             <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Тип петли</div>
             {HINGES.map(ht => (
               <button key={ht.id} onClick={() => {
-                // При смене типа (overlay ↔ insert) пересчитываем размеры двери
-                // используя СОХРАНЁННЫЕ границы проёма (doorLeft/Right/Top/Bottom).
+                // При смене типа (overlay ↔ insert) пересчитываем размеры двери.
+                // Комбинированный подход:
+                // - X-границы (doorLeft/doorRight) берём из сохранённых — они учитывают
+                //   деление проёма между соседними дверями
+                // - Y-границы и isWall флаги берём из СВЕЖЕГО findDoorBounds по центру двери —
+                //   старые могут быть устаревшими (полка была, её удалили и т.п.)
                 if (selEl.doorLeft !== undefined) {
-                  // DEBUG: временно логируем что именно передаётся
-                  console.log("[k2-debug] switching door type →", ht.id, {
-                    doorLeft: selEl.doorLeft, doorRight: selEl.doorRight,
-                    doorTop: selEl.doorTop, doorBottom: selEl.doorBottom,
-                    doorLeftIsWall: selEl.doorLeftIsWall,
-                    doorRightIsWall: selEl.doorRightIsWall,
-                    doorTopIsWall: selEl.doorTopIsWall,
-                    doorBottomIsWall: selEl.doorBottomIsWall,
-                    current: { x: selEl.x, y: selEl.y, w: selEl.w, h: selEl.h },
-                  });
+                  const cx = (selEl.x || 0) + (selEl.w || 400) / 2;
+                  const cy = (selEl.y || 0) + (selEl.h || 600) / 2;
+                  const fresh = findDoorBounds(elements, cx, cy, iW, iH, t);
+                  // Для X: если сохранённая граница совпадает со свежей — используем её isWall флаг.
+                  // Если не совпадает (делённый проём) — сохранённая граница это другая дверь, не стена.
+                  const leftIsWall = Math.abs(selEl.doorLeft - (fresh.left.x ?? 0)) < 5
+                    ? fresh.left.isWall
+                    : false;
+                  const rightIsWall = Math.abs(selEl.doorRight - (fresh.right.x ?? iW)) < 5
+                    ? fresh.right.isWall
+                    : false;
                   const dims = computeDoorDimensions(
                     selEl.doorLeft, selEl.doorRight,
-                    selEl.doorTop, selEl.doorBottom,
-                    selEl.doorLeftIsWall ?? true, selEl.doorRightIsWall ?? true,
-                    selEl.doorTopIsWall ?? true, selEl.doorBottomIsWall ?? true,
+                    fresh.top.y, fresh.bottom.y,
+                    leftIsWall, rightIsWall,
+                    fresh.top.isWall, fresh.bottom.isWall,
                     ht.id as "overlay" | "insert",
                     iW, iH, t,
                   );
-                  console.log("[k2-debug] → computed dims:", dims);
-                  updateEl(selEl.id, { hingeType: ht.id, ...dims });
+                  updateEl(selEl.id, {
+                    hingeType: ht.id, ...dims,
+                    doorTop: fresh.top.y, doorBottom: fresh.bottom.y,
+                    doorLeftIsWall: leftIsWall, doorRightIsWall: rightIsWall,
+                    doorTopIsWall: fresh.top.isWall, doorBottomIsWall: fresh.bottom.isWall,
+                  });
                 } else {
-                  console.log("[k2-debug] door has NO doorLeft — only flag change");
                   updateEl(selEl.id, { hingeType: ht.id });
                 }
               }} style={{
