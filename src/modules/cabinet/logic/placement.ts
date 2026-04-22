@@ -280,14 +280,6 @@ function placeDoor(p: {
   const effInnerLeft = effLeft + (effLeftIsWall ? 0 : t);
   const effInnerW = effRight - effInnerLeft;
 
-  // Smart-Y: реальные кромки полки зависят от её положения
-  const shelfEdgeBelow = (y: number) =>
-    y < 5 ? y + t : y > iH - 5 ? y : y + t / 2;
-  const shelfEdgeAbove = (y: number) =>
-    y < 5 ? y : y > iH - 5 ? y - t : y - t / 2;
-  const effInnerTop = bounds.top.isWall ? bounds.top.y : shelfEdgeBelow(bounds.top.y);
-  const effInnerBot = bounds.bottom.isWall ? bounds.bottom.y : shelfEdgeAbove(bounds.bottom.y);
-
   let dX: number, dW: number, dY: number, dH: number;
   if (hingeType === "overlay") {
     dX = effInnerLeft - effLeftOffset;
@@ -295,12 +287,11 @@ function placeDoor(p: {
     dY = bounds.top.y - to;
     dH = (bounds.bottom.y - bounds.top.y) + to + bo;
   } else {
-    // insert: внутри проёма с зазором 2мм от торца каждого соседа
     const gap = 2;
     dX = effInnerLeft + gap;
     dW = effInnerW - gap * 2;
-    dY = effInnerTop + gap;
-    dH = effInnerBot - effInnerTop - 2 * gap;
+    dY = bounds.top.y + gap;
+    dH = (bounds.bottom.y - bounds.top.y) - gap * 2;
   }
   // Clamp: не даём двери вылезать за рамку
   if (dX < 0) { dW += dX; dX = 0; }
@@ -308,27 +299,19 @@ function placeDoor(p: {
   if (dY < 0) { dH += dY; dY = 0; }
   if (dY + dH > iH) dH = iH - dY;
 
-  // Автовыбор стороны петель: петли у БЛИЖНЕЙ стены корпуса.
-  // Дверь слева (у левой стены) → петли слева.
-  // Дверь справа (у правой стены) → петли справа.
-  // Это даёт привычный способ открывания: двери распахиваются к центру.
+  // Автовыбор стороны петель — петли у стенки, ручка в центр проёма:
+  // - если делим проём пополам (sameBoundsDoors): смотрим в какую половину встала дверь
+  // - иначе — по центру двери относительно проёма
   let autoHingeSide: "left" | "right";
   if (sameBoundsDoors.length > 0) {
-    // В делённом проёме: петли с края (у стены), к центру — ручка.
-    // Левая половина (effRight<=mid) → стена слева → петли слева.
-    // Правая половина → стена справа → петли справа.
+    // Заняли левую половину (effRight урезан до openingMid) → петли слева
+    // Заняли правую половину (effLeft = openingMid) → петли справа
     autoHingeSide = effRight <= openingMid + 1 ? "left" : "right";
   } else {
-    // Одиночная дверь: смотрим какой бок ближе к стене (isWall=true).
-    // Если слева стена, справа — сосед → петли слева.
-    if (effLeftIsWall && !effRightIsWall) autoHingeSide = "left";
-    else if (effRightIsWall && !effLeftIsWall) autoHingeSide = "right";
-    else {
-      // Обе стороны одинаковые — смотрим по позиции двери в проёме
-      const doorCenterX = dX + dW / 2;
-      const openingCenterX = (effLeft + effRight) / 2;
-      autoHingeSide = doorCenterX < openingCenterX ? "left" : "right";
-    }
+    // Одиночная дверь: по центру двери относительно проёма
+    const doorCenterX = dX + dW / 2;
+    const openingCenterX = (effLeft + effRight) / 2;
+    autoHingeSide = doorCenterX < openingCenterX ? "left" : "right";
   }
 
   return {
@@ -524,31 +507,19 @@ export function computePanelDimensions(
 
 /**
  * Пересчитать размеры двери при переключении overlay ↔ insert.
- * Вызывается из UI свойств двери когда пользователь меняет hingeType.
- * Реализация: обёртка над computePanelDimensions (логика идентична).
+ * Обёртка над computePanelDimensions (логика идентична).
  */
 export interface DoorDimensionsResult {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  doorW: number;
-  doorH: number;
+  x: number; y: number; w: number; h: number;
+  doorW: number; doorH: number;
 }
 
 export function computeDoorDimensions(
-  doorLeft: number,
-  doorRight: number,
-  doorTop: number,
-  doorBottom: number,
-  doorLeftIsWall: boolean,
-  doorRightIsWall: boolean,
-  doorTopIsWall: boolean,
-  doorBottomIsWall: boolean,
+  doorLeft: number, doorRight: number, doorTop: number, doorBottom: number,
+  doorLeftIsWall: boolean, doorRightIsWall: boolean,
+  doorTopIsWall: boolean, doorBottomIsWall: boolean,
   hingeType: "overlay" | "insert",
-  iW: number,
-  iH: number,
-  t: number,
+  iW: number, iH: number, t: number,
 ): DoorDimensionsResult {
   const r = computePanelDimensions(
     doorLeft, doorRight, doorTop, doorBottom,
