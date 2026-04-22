@@ -243,13 +243,16 @@ export function renderDoorHitZones(ctx: DoorHitZonesCtx): React.ReactNode {
   const ddw = (selDoor.w || 100) * SC;
   const ddh = (selDoor.h || iH) * SC;
   const HIT = isMobile ? 44 : 10;
+  // Для узкой/низкой двери: hit-зоны не должны перекрываться по центру.
+  const hitV = Math.min(HIT, Math.max(10, ddh / 3));
+  const hitH = Math.min(HIT, Math.max(10, ddw / 3));
 
   return (
     <>
       {/* TOP hit-zone */}
       <rect
-        x={dsx + ddw / 2 - HIT} y={dsy - HIT / 2}
-        width={HIT * 2} height={HIT}
+        x={dsx + ddw / 2 - HIT} y={dsy - hitV / 2}
+        width={HIT * 2} height={hitV}
         fill="transparent"
         style={{ cursor: "ns-resize" }}
         onMouseDown={e => onDoorEdgeDrag(e, selDoor, "top")}
@@ -257,8 +260,8 @@ export function renderDoorHitZones(ctx: DoorHitZonesCtx): React.ReactNode {
       />
       {/* BOTTOM */}
       <rect
-        x={dsx + ddw / 2 - HIT} y={dsy + ddh - HIT / 2}
-        width={HIT * 2} height={HIT}
+        x={dsx + ddw / 2 - HIT} y={dsy + ddh - hitV / 2}
+        width={HIT * 2} height={hitV}
         fill="transparent"
         style={{ cursor: "ns-resize" }}
         onMouseDown={e => onDoorEdgeDrag(e, selDoor, "bottom")}
@@ -266,8 +269,8 @@ export function renderDoorHitZones(ctx: DoorHitZonesCtx): React.ReactNode {
       />
       {/* LEFT */}
       <rect
-        x={dsx - HIT / 2} y={dsy + ddh / 2 - HIT}
-        width={HIT} height={HIT * 2}
+        x={dsx - hitH / 2} y={dsy + ddh / 2 - HIT}
+        width={hitH} height={HIT * 2}
         fill="transparent"
         style={{ cursor: "ew-resize" }}
         onMouseDown={e => onDoorEdgeDrag(e, selDoor, "left")}
@@ -275,8 +278,8 @@ export function renderDoorHitZones(ctx: DoorHitZonesCtx): React.ReactNode {
       />
       {/* RIGHT */}
       <rect
-        x={dsx + ddw - HIT / 2} y={dsy + ddh / 2 - HIT}
-        width={HIT} height={HIT * 2}
+        x={dsx + ddw - hitH / 2} y={dsy + ddh / 2 - HIT}
+        width={hitH} height={HIT * 2}
         fill="transparent"
         style={{ cursor: "ew-resize" }}
         onMouseDown={e => onDoorEdgeDrag(e, selDoor, "right")}
@@ -344,13 +347,18 @@ export function renderPanelHitZones(ctx: PanelHitZonesCtx): React.ReactNode {
   const ppw = (selPanel.w || 100) * SC;
   const pph = (selPanel.h || iH) * SC;
   const HIT = isMobile ? 44 : 10;
+  // Для маленькой панели: высота TOP/BOTTOM зон не более трети высоты панели,
+  // чтобы зоны не перекрывались (иначе тап в центре срабатывает на BOTTOM).
+  // Аналогично для тонкой панели и LEFT/RIGHT.
+  const hitV = Math.min(HIT, Math.max(10, pph / 3));
+  const hitH = Math.min(HIT, Math.max(10, ppw / 3));
 
   return (
     <>
       {/* TOP */}
       <rect
-        x={psx + ppw / 2 - HIT} y={psy - HIT / 2}
-        width={HIT * 2} height={HIT}
+        x={psx + ppw / 2 - HIT} y={psy - hitV / 2}
+        width={HIT * 2} height={hitV}
         fill="transparent"
         style={{ cursor: "ns-resize" }}
         onMouseDown={e => onPanelEdgeDrag(e, selPanel, "top")}
@@ -358,8 +366,8 @@ export function renderPanelHitZones(ctx: PanelHitZonesCtx): React.ReactNode {
       />
       {/* BOTTOM */}
       <rect
-        x={psx + ppw / 2 - HIT} y={psy + pph - HIT / 2}
-        width={HIT * 2} height={HIT}
+        x={psx + ppw / 2 - HIT} y={psy + pph - hitV / 2}
+        width={HIT * 2} height={hitV}
         fill="transparent"
         style={{ cursor: "ns-resize" }}
         onMouseDown={e => onPanelEdgeDrag(e, selPanel, "bottom")}
@@ -367,8 +375,8 @@ export function renderPanelHitZones(ctx: PanelHitZonesCtx): React.ReactNode {
       />
       {/* LEFT */}
       <rect
-        x={psx - HIT / 2} y={psy + pph / 2 - HIT}
-        width={HIT} height={HIT * 2}
+        x={psx - hitH / 2} y={psy + pph / 2 - HIT}
+        width={hitH} height={HIT * 2}
         fill="transparent"
         style={{ cursor: "ew-resize" }}
         onMouseDown={e => onPanelEdgeDrag(e, selPanel, "left")}
@@ -376,8 +384,8 @@ export function renderPanelHitZones(ctx: PanelHitZonesCtx): React.ReactNode {
       />
       {/* RIGHT */}
       <rect
-        x={psx + ppw - HIT / 2} y={psy + pph / 2 - HIT}
-        width={HIT} height={HIT * 2}
+        x={psx + ppw - hitH / 2} y={psy + pph / 2 - HIT}
+        width={hitH} height={HIT * 2}
         fill="transparent"
         style={{ cursor: "ew-resize" }}
         onMouseDown={e => onPanelEdgeDrag(e, selPanel, "right")}

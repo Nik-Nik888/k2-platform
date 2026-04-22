@@ -56,6 +56,22 @@ export default function WardrobeEditor() {
   const [userZoom, setUserZoom] = useState<number>(1);
   const lastTapElRef = useRef<{ id: string | null; time: number }>({ id: null, time: 0 });
 
+  // Peek mode: hover/long-tap на дверь/панель делает её полупрозрачной (видно что внутри).
+  const [peekId, setPeekId] = useState<string | null>(null);
+  const peekTimerRef = useRef<number | null>(null);
+  const onPeekIn = useCallback((id: string) => {
+    // На десктопе — сразу по hover. На мобильном — по long-tap через 400мс в onPointerDown.
+    if (!isMobile) setPeekId(id);
+  }, [isMobile]);
+  const onPeekOut = useCallback((id: string) => {
+    // Снимаем peek только если он относился именно к этому элементу
+    setPeekId(curr => curr === id ? null : curr);
+    if (peekTimerRef.current) {
+      clearTimeout(peekTimerRef.current);
+      peekTimerRef.current = null;
+    }
+  }, []);
+
   const orderRef = useRef(1);
   const svgRef = useRef(null);
 
@@ -175,6 +191,15 @@ export default function WardrobeEditor() {
       const now = Date.now();
       const isDoubleTap = lastTapElRef.current.id === el.id && (now - lastTapElRef.current.time) < 500;
       lastTapElRef.current = { id: el.id, time: now };
+
+      // Long-press на дверь/панель (400мс) → включить peek-режим (полупрозрачность)
+      if (el.type === "door" || el.type === "panel") {
+        if (peekTimerRef.current) clearTimeout(peekTimerRef.current);
+        peekTimerRef.current = window.setTimeout(() => {
+          setPeekId(el.id);
+          try { if (navigator.vibrate) navigator.vibrate(20); } catch {}
+        }, 400);
+      }
 
       if (isDoubleTap) {
         // Двойной тап → активируем drag-режим и сразу начинаем перемещение
@@ -297,7 +322,21 @@ export default function WardrobeEditor() {
     });
   }, [drag, toSvg, iW, iH, t, adjust, doorSnapTargets]);
 
-  const { onMove, onUp } = useDragHandlers(drag, applyDragMove, setDrag);
+  const { onMove, onUp: rawOnUp } = useDragHandlers(drag, applyDragMove, setDrag);
+
+  // Обёртка onUp: очищает peek-timer (если пользователь отпустил до 400мс — peek не включается)
+  const onUp = useCallback((e: any) => {
+    if (peekTimerRef.current) {
+      clearTimeout(peekTimerRef.current);
+      peekTimerRef.current = null;
+    }
+    // На мобильном: peek гасится когда палец отпущен (короткий показ)
+    if (isMobile) {
+      // Задержка чтобы пользователь успел увидеть что под дверью, даже если quickly released
+      setTimeout(() => setPeekId(null), 1500);
+    }
+    rawOnUp(e);
+  }, [rawOnUp, isMobile]);
 
   useEffect(() => {
     const h = (e) => {
@@ -360,8 +399,9 @@ export default function WardrobeEditor() {
     corpusHex: corpusTexInfo.hex || "#8b7355",
     facadeHex: facadeTexInfo.hex || "#f2efe8",
     facadeName: facadeTexInfo.name || "",
+    peekId, onPeekIn, onPeekOut,
     onDown,
-  }), [iW, iH, t, frameT, selId, placeMode, isMobile, showDoors, corpusTexInfo, facadeTexInfo, onDown]);
+  }), [iW, iH, t, frameT, selId, placeMode, isMobile, showDoors, corpusTexInfo, facadeTexInfo, peekId, onPeekIn, onPeekOut, onDown]);
 
   // Блокируем скролл страницы и pull-to-refresh когда идёт drag или активен режим перемещения
   useEffect(() => {
@@ -434,7 +474,12 @@ export default function WardrobeEditor() {
   {/* Zone highlights */}
   {renderZoneHighlights({ zones, placeMode, frameT, elements })}
 
-  {elements.map(el => renderElement(el, renderCtx))}
+  {/* Сортированный рендер: сначала стойки/полки/ящики/штанги, в конце двери и панели.
+      Это нужно чтобы торцы полок/стоек прятались под передними элементами (дверь/панель). */}
+  {[...elements].sort((a, b) => {
+    const order = (t: string) => (t === "door" || t === "panel") ? 1 : 0;
+    return order(a.type) - order(b.type);
+  }).map(el => renderElement(el, renderCtx))}
 
   {/* DIMS */}
   {renderDims({ dims, frameT, iH, getDimDir, changeHorizDim, changeVertDim })}

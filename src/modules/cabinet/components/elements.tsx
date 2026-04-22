@@ -31,6 +31,11 @@ export interface RenderCtx {
   /** Hex-цвет фасадов и их название (для drawers/door). */
   facadeHex: string;
   facadeName: string;
+  /** id элемента, который сейчас "просвечиваем" (hover/long-tap) — дверь/панель становится полупрозрачной. */
+  peekId: string | null;
+  /** Обработчики для peek-mode (подсветка полупрозрачностью при hover/hold). */
+  onPeekIn: (id: string) => void;
+  onPeekOut: (id: string) => void;
   /** Обработчик начала drag. */
   onDown: (e: any, el: any) => void;
 }
@@ -284,13 +289,18 @@ export function renderDoor(el: any, ctx: RenderCtx): React.ReactNode {
   // На мобильном ручки для resize шире + сам handle "длиннее"
   const HANDLE = ctx.isMobile ? 14 : 6;
   const LEN = ctx.isMobile ? 48 : 24;
+  // Peek mode: дверь полупрозрачная когда hover/long-tap (видно что внутри)
+  const isPeek = ctx.peekId === el.id;
   return (
     <g
       key={el.id}
       data-element="1"
       onMouseDown={e => ctx.onDown(e, el)}
       onTouchStart={e => ctx.onDown(e, el)}
+      onMouseEnter={() => ctx.onPeekIn(el.id)}
+      onMouseLeave={() => ctx.onPeekOut(el.id)}
       style={{ cursor: "pointer" }}
+      opacity={isPeek ? 0.35 : 1}
     >
       <rect
         x={sx} y={sy} width={dw} height={dh}
@@ -347,13 +357,17 @@ export function renderPanel(el: any, ctx: RenderCtx): React.ReactNode {
   const hasCustomDepth = typeof el.depth === "number" && el.depth > 0;
   const HANDLE = ctx.isMobile ? 14 : 6;
   const LEN = ctx.isMobile ? 48 : 24;
+  const isPeek = ctx.peekId === el.id;
   return (
     <g
       key={el.id}
       data-element="1"
       onMouseDown={e => ctx.onDown(e, el)}
       onTouchStart={e => ctx.onDown(e, el)}
+      onMouseEnter={() => ctx.onPeekIn(el.id)}
+      onMouseLeave={() => ctx.onPeekOut(el.id)}
       style={{ cursor: "move" }}
+      opacity={isPeek ? 0.35 : 1}
     >
       <rect
         x={sx} y={sy} width={pw} height={ph}
