@@ -134,3 +134,38 @@ describe('computeDoorSnapTargets edge-cases', () => {
     expect(atZero[0].innerEdgeFromHighSide).toBe(t);
   });
 });
+
+// ───────────────────────────────────────────────────────────────
+// Регрессия: стойки/полки за пределами внутреннего пространства [0, iW] × [0, iH]
+// должны игнорироваться. Такие данные могут попадать из легаси-сохранений.
+// ───────────────────────────────────────────────────────────────
+describe('out-of-bounds elements', () => {
+  it('стойка за пределами iW игнорируется в findDoorBounds', () => {
+    // iW=1200, стойка x=1216 (16мм за стенкой) — должна быть проигнорирована
+    const stud = { id: 'oob', type: 'stud', x: 1216, anchorY: iH / 2 };
+    const center = { id: 's', type: 'stud', x: 600, anchorY: iH / 2 };
+    // Клик в правой колонке — должен видеть только центральную стойку слева и стену корпуса справа
+    const b = findDoorBounds([stud, center], 800, 1000, iW, iH, t);
+    expect(b.right.x).toBe(iW); // не 1216 — внешняя стенка
+    expect(b.right.isWall).toBe(true);
+  });
+
+  it('стойка за пределами iW игнорируется в snapTargets', () => {
+    const stud = { id: 'oob', type: 'stud', x: 1216, anchorY: iH / 2 };
+    const center = { id: 's', type: 'stud', x: 600, anchorY: iH / 2 };
+    const { vTargets } = computeDoorSnapTargets([stud, center], iW, iH, t);
+    // 1216 не должно быть среди таргетов
+    expect(vTargets.find((v: any) => v.pos === 1216)).toBeUndefined();
+    // А стена pos=iW должна быть, т.к. краевой стойки справа в [0, iW] нет
+    expect(vTargets.find((v: any) => v.pos === iW && v.isWall)).toBeDefined();
+  });
+
+  it('полка за пределами iH игнорируется', () => {
+    // iH=2100, полка y=2200 — за пределами
+    const shelf = { id: 'oob', type: 'shelf', x: 0, y: 2200, w: iW };
+    const stud = { id: 's', type: 'stud', x: 600, anchorY: iH / 2 };
+    const b = findDoorBounds([shelf, stud], 280, 1000, iW, iH, t);
+    expect(b.bottom.y).toBe(iH);
+    expect(b.bottom.isWall).toBe(true);
+  });
+});

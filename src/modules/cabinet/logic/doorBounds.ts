@@ -67,8 +67,18 @@ export function findDoorBounds(
   iH: number,
   t: number,
 ): DoorBoundsResult {
-  const allShelves = elements.filter(e => e.type === "shelf");
-  const allStuds = elements.filter(e => e.type === "stud");
+  // Игнорируем элементы, которые полностью находятся за пределами внутреннего пространства
+  // [0, iW] × [0, iH]. Такие элементы могут попадать в данные из легаси-сохранений
+  // (когда корпус был с другой толщиной/размером) или из импорта. Они не должны
+  // участвовать в расчёте границ ниши, иначе дверь будет "налезать" на стенку корпуса.
+  // Стойка считается за пределами если её ЛЕВАЯ кромка >= iW или ПРАВАЯ кромка <= 0.
+  // Полка — если её y > iH или y < 0.
+  const allShelves = elements.filter(e => e.type === "shelf" && (e.y || 0) >= 0 && (e.y || 0) <= iH);
+  const allStuds = elements.filter(e =>
+    e.type === "stud"
+    && (e.x || 0) + t > 0       // правая кромка > 0
+    && (e.x || 0) < iW          // левая кромка < iW
+  );
 
   /**
    * Реальный Y-диапазон стойки с учётом полок которые её пересекают.
@@ -289,21 +299,33 @@ export function computeDoorSnapTargets(
     });
   });
 
+  // Игнорируем элементы за пределами внутреннего пространства (см. комментарий в findDoorBounds).
+  const validStuds = elements.filter(e =>
+    e.type === "stud"
+    && (e.x || 0) + t > 0
+    && (e.x || 0) < iW
+  );
+  const validShelves = elements.filter(e =>
+    e.type === "shelf"
+    && (e.y || 0) >= 0
+    && (e.y || 0) <= iH
+  );
+
   // Проверка наличия краевой стойки/полки, которая физически замещает внешнюю стену корпуса.
   // Если такая есть — мы НЕ добавляем стену как отдельный snap-таргет, т.к. она физически
   // не существует: её место занимает стойка/полка. Иначе получим два таргета на одной pos,
   // и snap может привязаться к стене вместо стойки, игнорируя её физическую толщину t.
-  const hasEdgeStudLeft = elements.some(e => e.type === "stud" && (e.x || 0) < t + 2);
-  const hasEdgeStudRight = elements.some(e => e.type === "stud" && (e.x || 0) > iW - 2 * t - 2);
-  const hasEdgeShelfTop = elements.some(e => e.type === "shelf" && (e.y || 0) < t + 2);
-  const hasEdgeShelfBot = elements.some(e => e.type === "shelf" && (e.y || 0) > iH - t - 2);
+  const hasEdgeStudLeft = validStuds.some(e => (e.x || 0) < t + 2);
+  const hasEdgeStudRight = validStuds.some(e => (e.x || 0) > iW - 2 * t - 2);
+  const hasEdgeShelfTop = validShelves.some(e => (e.y || 0) < t + 2);
+  const hasEdgeShelfBot = validShelves.some(e => (e.y || 0) > iH - t - 2);
 
   const vTargets: SnapTarget[] = [
     ...(hasEdgeStudLeft ? [] : [{
       pos: 0, isWall: true,
       innerEdgeFromLowSide: 0, innerEdgeFromHighSide: 0,
     }]),
-    ...elements.filter(e => e.type === "stud").map(st => ({
+    ...validStuds.map(st => ({
       pos: st.x, isWall: false,
       // Стойка рисуется [x, x+t]. Для дверей/панелей:
       // ниша в сторону меньших X (слева от стойки) → правая граница ниши = левая кромка стойки = x
@@ -323,7 +345,7 @@ export function computeDoorSnapTargets(
       pos: 0, isWall: true,
       innerEdgeFromLowSide: 0, innerEdgeFromHighSide: 0,
     }]),
-    ...elements.filter(e => e.type === "shelf").map(sh => {
+    ...validShelves.map(sh => {
       const range = shelfRenderRange(sh, t, iH);
       return {
         pos: sh.y,
