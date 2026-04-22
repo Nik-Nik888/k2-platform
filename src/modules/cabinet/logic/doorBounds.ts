@@ -54,23 +54,20 @@ export function findDoorBounds(
 
   // Краевые стойки/полки: если стойка/полка стоит у самого края корпуса
   // (в пределах t+2), она физически заменяет стенку корпуса. Для логики дверей
-  // она должна трактоваться как СТЕНА (isWall: true) — иначе insert дверь
-  // будет пытаться обойти её изнутри, а накладная — даст неправильный напуск.
+  // она должна трактоваться как СТЕНА (isWall: true).
   //
-  // ВАЖНО: проверка учитывает Y клика (для стоек) и X клика (для полок) —
+  // ВАЖНО: проверка учитывает X клика (для полок) и Y клика (для стоек) —
   // полка слева не отменяет стену сверху для клика справа, если полка туда не доходит.
-  const studNearLeft = allStuds.some(st =>
-    st.x < t + 2 && (() => {
-      const { sTop, sBot } = getStudRealRange(st);
-      return clickY >= sTop - 5 && clickY <= sBot + 5;
-    })(),
-  );
-  const studNearRight = allStuds.some(st =>
-    st.x > iW - 2 * t - 2 && (() => {
-      const { sTop, sBot } = getStudRealRange(st);
-      return clickY >= sTop - 5 && clickY <= sBot + 5;
-    })(),
-  );
+  const studNearLeft = allStuds.some(st => {
+    if (st.x >= t + 2) return false;
+    const { sTop, sBot } = getStudRealRange(st);
+    return clickY >= sTop - 5 && clickY <= sBot + 5;
+  });
+  const studNearRight = allStuds.some(st => {
+    if (st.x <= iW - 2 * t - 2) return false;
+    const { sTop, sBot } = getStudRealRange(st);
+    return clickY >= sTop - 5 && clickY <= sBot + 5;
+  });
   const shelfNearTop = allShelves.some(sh => {
     if (sh.y >= t + 2) return false;
     const shLeft = sh.x || 0, shRight = shLeft + (sh.w || iW);
