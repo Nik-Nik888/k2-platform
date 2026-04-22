@@ -312,7 +312,7 @@ export function MobilePropsSheet(props: MobilePropsSheetProps) {
             </div>
           </div>
           <div style={{ fontSize: 11, color: "#666", marginBottom: 10, lineHeight: 1.5 }}>
-            {(selEl.hingeType || "overlay") === "overlay" ? "Накладная: +14мм корпус / +7мм стойка" : "Вкладная: зазор 2мм"}
+            {(selEl.hingeType || "overlay") === "overlay" ? "Накладная: +14мм корпус / +7мм стойка" : "Вкладная: зазор 3мм"}
             {selEl.doorLeft !== undefined && <><br />Границы: {Math.round(selEl.doorLeft)}–{Math.round(selEl.doorRight)} × {Math.round(selEl.doorTop)}–{Math.round(selEl.doorBottom)}</>}
           </div>
         </>
@@ -397,7 +397,7 @@ export function MobilePropsSheet(props: MobilePropsSheetProps) {
           <div style={{ fontSize: 11, color: "#666", marginBottom: 10, lineHeight: 1.5 }}>
             {(selEl.panelType || "overlay") === "overlay"
               ? "Накладная: закрывает торцы (+14мм корпус / +7мм стойка)"
-              : "Вкладная: утоплена в проём, зазор 2мм"}
+              : "Вкладная: утоплена в проём, зазор 3мм"}
           </div>
         </>
       )}

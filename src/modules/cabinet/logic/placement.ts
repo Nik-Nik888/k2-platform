@@ -39,8 +39,13 @@ import type { DoorBoundsResult } from "./doorBounds";
 
 export type PlaceMode = "shelf" | "stud" | "drawers" | "rod" | "door" | "panel";
 
-/** Зазор между вкладной дверью/панелью и кромкой ниши (мм). */
-const INSERT_GAP = 2;
+/**
+ * Зазор между вкладной дверью/панелью и кромкой ниши (мм).
+ * 3мм — минимум для производства insert-дверей (чтобы фасад не тёр о соседей
+ * при лёгком перекосе корпуса). Визуально на типичном SC=0.28 даёт ~0.84px
+ * зазора — это минимум, при котором зазор различим глазом на однотонном фоне.
+ */
+const INSERT_GAP = 3;
 
 export interface PlacementCtx {
   placeMode: PlaceMode;

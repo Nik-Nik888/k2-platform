@@ -282,6 +282,7 @@ export function renderDoor(el: any, ctx: RenderCtx): React.ReactNode {
   const dw = (el.w || 100) * SC;
   const dh = (el.h || ctx.iH) * SC;
   const isL = el.hingeSide === "left";
+  const isInsert = el.hingeType === "insert";
   const hn = (el.h || 600) > 1800 ? 4 : (el.h || 600) > 1200 ? 3 : 2;
   const hps = Array.from({ length: hn }, (_, i) => i === 0 ? 0.08 : i === hn - 1 ? 0.92 : i / (hn - 1));
   const fHex = ctx.facadeHex;
@@ -305,8 +306,9 @@ export function renderDoor(el: any, ctx: RenderCtx): React.ReactNode {
       <rect
         x={sx} y={sy} width={dw} height={dh}
         fill={fHex} fillOpacity={0.85}
-        stroke={sel ? "#fbbf24" : isDark ? "#5a4a3a" : "#bbb"}
-        strokeWidth={sel ? 1.5 : 0.7}
+        stroke={sel ? "#fbbf24" : isInsert ? "#3a3530" : isDark ? "#5a4a3a" : "#bbb"}
+        strokeWidth={sel ? 1.5 : isInsert ? 1.0 : 0.7}
+        strokeDasharray={isInsert && !sel ? "3 1.5" : undefined}
         rx={1}
       />
       <circle cx={isL ? sx + dw - 8 : sx + 8} cy={sy + dh / 2} r={2.5} fill={isDark ? "#aaa" : "#555"} />

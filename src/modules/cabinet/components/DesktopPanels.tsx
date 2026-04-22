@@ -249,7 +249,7 @@ export function DesktopLeftPanel(props: DesktopLeftPanelProps) {
                     </div>
                   </div>
                   <div style={{ fontSize: 9, color: "#555", marginTop: 4 }}>
-                    {(selEl.hingeType || "overlay") === "overlay" ? "Накл: +14мм корпус / +7мм стойка" : "Вкладная: зазор 2мм"}
+                    {(selEl.hingeType || "overlay") === "overlay" ? "Накл: +14мм корпус / +7мм стойка" : "Вкладная: зазор 3мм"}
                     {selEl.doorLeft !== undefined && (
                       <><br />Границы: {Math.round(selEl.doorLeft)}–{Math.round(selEl.doorRight)} × {Math.round(selEl.doorTop)}–{Math.round(selEl.doorBottom)}</>
                     )}

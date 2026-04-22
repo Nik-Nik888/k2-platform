@@ -316,21 +316,21 @@ describe('placeInZone', () => {
   // физический рендер: стойка [x, x+t], полка Smart-Y [y, y+t]/[y-t, y]/[y-t/2, y+t/2].
   // ───────────────────────────────────────────────────────────────
   describe('insert mode geometry (regression)', () => {
-    it('вкладная панель в пустом шкафу: зазор 2мм от всех 4 стен', () => {
+    it('вкладная панель в пустом шкафу: зазор 3мм от всех 4 стен', () => {
       const result = placeInZone({
         ...makeCtx(),
         placeMode: 'panel',
         clickX: 600, clickY: 1000,
       });
       expect(result!.element.panelType).toBe('insert');
-      // От стены: niL=0, dX = 0+2 = 2; dW = (iW-0) - 4 = iW-4
-      expect(result!.element.x).toBe(2);
-      expect(result!.element.w).toBe(iW - 4);
-      expect(result!.element.y).toBe(2);
-      expect(result!.element.h).toBe(iH - 4);
+      // От стены: niL=0, dX = 0+3 = 3; dW = (iW-0) - 6 = iW-6
+      expect(result!.element.x).toBe(3);
+      expect(result!.element.w).toBe(iW - 6);
+      expect(result!.element.y).toBe(3);
+      expect(result!.element.h).toBe(iH - 6);
     });
 
-    it('вкладная панель со стойкой в середине: зазор 2мм от правой кромки стойки', () => {
+    it('вкладная панель со стойкой в середине: зазор 3мм от правой кромки стойки', () => {
       // Стойка в середине шкафа, рисуется [600, 616]. Клик справа.
       const elements = [{ id: 's', type: 'stud', x: 600, anchorY: iH / 2 }];
       const result = placeInZone({
@@ -340,11 +340,11 @@ describe('placeInZone', () => {
       });
       // Левая граница ниши = правая кромка стойки = 600 + 16 = 616
       // dX = 616 + 2 = 618; правая стена iW=1200 → niR=1200; dW = (1200-616) - 4 = 580
-      expect(result!.element.x).toBe(618);
-      expect(result!.element.w).toBe(iW - 616 - 4);
+      expect(result!.element.x).toBe(619);
+      expect(result!.element.w).toBe(iW - 616 - 6);
     });
 
-    it('вкладная панель со стойкой в середине: зазор 2мм от левой кромки стойки (клик слева)', () => {
+    it('вкладная панель со стойкой в середине: зазор 3мм от левой кромки стойки (клик слева)', () => {
       const elements = [{ id: 's', type: 'stud', x: 600, anchorY: iH / 2 }];
       const result = placeInZone({
         ...makeCtx({ elements }),
@@ -353,11 +353,11 @@ describe('placeInZone', () => {
       });
       // Стойка справа от клика. Правая граница ниши = левая кромка стойки = 600.
       // dX = 0+2 = 2; dW = (600-0) - 4 = 596
-      expect(result!.element.x).toBe(2);
-      expect(result!.element.w).toBe(600 - 4);
+      expect(result!.element.x).toBe(3);
+      expect(result!.element.w).toBe(600 - 6);
     });
 
-    it('вкладная панель с полкой СВЕРХУ (Smart-Y в середине): зазор 2мм от нижней кромки полки', () => {
+    it('вкладная панель с полкой СВЕРХУ (Smart-Y в середине): зазор 3мм от нижней кромки полки', () => {
       // Полка на y=500 в середине → рисуется [500-8, 500+8] = [492, 508].
       // Нижняя кромка = 508. Клик ниже полки.
       const elements = [{ id: 'sh', type: 'shelf', x: 0, y: 500, w: iW }];
@@ -367,14 +367,14 @@ describe('placeInZone', () => {
         clickX: 600, clickY: 1000,
       });
       // niT = 508; dY = 508 + 2 = 510; niB = iH; dH = (iH-508) - 4
-      expect(result!.element.y).toBe(510);
-      expect(result!.element.h).toBe(iH - 508 - 4);
+      expect(result!.element.y).toBe(511);
+      expect(result!.element.h).toBe(iH - 508 - 6);
     });
 
-    it('вкладная панель с краевой полкой сверху (Smart-Y y<5): зазор 2мм от её физической нижней кромки', () => {
+    it('вкладная панель с краевой полкой сверху (Smart-Y y<5): зазор 3мм от её физической нижней кромки', () => {
       // Полка на y=0 (краевая, рендерится [0, t=16]) — для дверной логики isWall=true,
       // но физически занимает 0..16. Раньше innerEdge=0, панель висела с зазором 2мм от края,
-      // т.е. НА полке. Теперь innerEdge=16 → зазор 2мм от ФИЗИЧЕСКОЙ кромки полки.
+      // т.е. НА полке. Теперь innerEdge=16 → зазор 3мм от ФИЗИЧЕСКОЙ кромки полки.
       const elements = [{ id: 'sh', type: 'shelf', x: 0, y: 0, w: iW }];
       const result = placeInZone({
         ...makeCtx({ elements }),
@@ -382,10 +382,10 @@ describe('placeInZone', () => {
         clickX: 600, clickY: 1000,
       });
       // niT = 16 (низ полки); dY = 16 + 2 = 18
-      expect(result!.element.y).toBe(18);
+      expect(result!.element.y).toBe(19);
     });
 
-    it('вкладная панель с краевой стойкой слева (x=5): зазор 2мм от её правой кромки', () => {
+    it('вкладная панель с краевой стойкой слева (x=5): зазор 3мм от её правой кромки', () => {
       // Краевая стойка на x=5, рисуется [5, 21]. Клик справа от неё.
       const elements = [{ id: 's', type: 'stud', x: 5, anchorY: iH / 2 }];
       const result = placeInZone({
@@ -394,7 +394,7 @@ describe('placeInZone', () => {
         clickX: 600, clickY: 1000,
       });
       // niL = 5 + 16 = 21; dX = 21 + 2 = 23
-      expect(result!.element.x).toBe(23);
+      expect(result!.element.x).toBe(24);
     });
 
     it('вкладная дверь в insert режиме: тест через computeDoorDimensions', () => {
@@ -407,10 +407,10 @@ describe('placeInZone', () => {
       );
       // niL = 600+16=616 (стойка слева), niR=iW, niT=0, niB=iH
       // dX = 616+2 = 618, dW = (iW-616)-4 = 580
-      expect(dims.x).toBe(618);
-      expect(dims.w).toBe(iW - 616 - 4);
-      expect(dims.y).toBe(2);
-      expect(dims.h).toBe(iH - 4);
+      expect(dims.x).toBe(619);
+      expect(dims.w).toBe(iW - 616 - 6);
+      expect(dims.y).toBe(3);
+      expect(dims.h).toBe(iH - 6);
     });
   });
 
@@ -429,8 +429,8 @@ describe('placeInZone', () => {
       });
       expect(result!.element.hingeType).toBe('insert');
       // Пустой шкаф: niL=0, niR=iW, dX=2, dW=iW-4
-      expect(result!.element.x).toBe(2);
-      expect(result!.element.w).toBe(iW - 4);
+      expect(result!.element.x).toBe(3);
+      expect(result!.element.w).toBe(iW - 6);
     });
 
     it('door с doorHingeSide="left" — петли слева независимо от позиции', () => {

@@ -16,8 +16,8 @@
 import { SnapTarget } from "./doorBounds";
 import { DOOR_OVERLAY_CORPUS as OC, DOOR_OVERLAY_STUD as OS } from "../constants";
 
-/** Зазор между вкладной дверью/панелью и кромкой ниши (мм). */
-const INSERT_GAP = 2;
+/** Зазор между вкладной дверью/панелью и кромкой ниши (мм). См. placement.ts. */
+const INSERT_GAP = 3;
 
 export interface DoorResizeBounds {
   left: number;
