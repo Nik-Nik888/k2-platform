@@ -8,7 +8,6 @@ import { DepthControl } from "./inputs/DepthControl";
 import { TexturePicker } from "./TexturePicker";
 import { TOOLS, GUIDES, HINGES } from "../constants";
 import { computePanelDimensions, computeDoorDimensions } from "../logic/placement";
-import { findDoorBounds } from "../logic/doorBounds";
 
 // ───────────────────────────────────────────────────────────────
 // MobileToolsSheet — размеры корпуса, выбор инструмента, TexturePicker
@@ -250,30 +249,33 @@ export function MobilePropsSheet(props: MobilePropsSheetProps) {
             <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Тип петли</div>
             {HINGES.map(ht => (
               <button key={ht.id} onClick={() => {
-                // При смене типа (overlay ↔ insert) пересчитываем размеры двери.
-                // Находим актуальные границы проёма через findDoorBounds по центру двери
-                // — это даёт свежую картину с учётом изменившихся полок/стоек.
-                const cx = (selEl.x || 0) + (selEl.w || 400) / 2;
-                const cy = (selEl.y || 0) + (selEl.h || 600) / 2;
-                const bounds = findDoorBounds(elements, cx, cy, iW, iH, t);
-                const dims = computeDoorDimensions(
-                  bounds.left.x ?? 0, bounds.right.x ?? iW,
-                  bounds.top.y ?? 0, bounds.bottom.y ?? iH,
-                  bounds.left.isWall, bounds.right.isWall,
-                  bounds.top.isWall, bounds.bottom.isWall,
-                  ht.id as "overlay" | "insert",
-                  iW, iH, t,
-                );
-                // Обновляем также поля границ (doorLeft/Right/Top/Bottom) — они могли
-                // быть устаревшими после добавления полок/стоек.
-                updateEl(selEl.id, {
-                  hingeType: ht.id,
-                  ...dims,
-                  doorLeft: bounds.left.x ?? 0, doorRight: bounds.right.x ?? iW,
-                  doorTop: bounds.top.y ?? 0, doorBottom: bounds.bottom.y ?? iH,
-                  doorLeftIsWall: bounds.left.isWall, doorRightIsWall: bounds.right.isWall,
-                  doorTopIsWall: bounds.top.isWall, doorBottomIsWall: bounds.bottom.isWall,
-                });
+                // При смене типа (overlay ↔ insert) пересчитываем размеры двери
+                // используя СОХРАНЁННЫЕ границы проёма (doorLeft/Right/Top/Bottom).
+                if (selEl.doorLeft !== undefined) {
+                  // DEBUG: временно логируем что именно передаётся
+                  console.log("[k2-debug] switching door type →", ht.id, {
+                    doorLeft: selEl.doorLeft, doorRight: selEl.doorRight,
+                    doorTop: selEl.doorTop, doorBottom: selEl.doorBottom,
+                    doorLeftIsWall: selEl.doorLeftIsWall,
+                    doorRightIsWall: selEl.doorRightIsWall,
+                    doorTopIsWall: selEl.doorTopIsWall,
+                    doorBottomIsWall: selEl.doorBottomIsWall,
+                    current: { x: selEl.x, y: selEl.y, w: selEl.w, h: selEl.h },
+                  });
+                  const dims = computeDoorDimensions(
+                    selEl.doorLeft, selEl.doorRight,
+                    selEl.doorTop, selEl.doorBottom,
+                    selEl.doorLeftIsWall ?? true, selEl.doorRightIsWall ?? true,
+                    selEl.doorTopIsWall ?? true, selEl.doorBottomIsWall ?? true,
+                    ht.id as "overlay" | "insert",
+                    iW, iH, t,
+                  );
+                  console.log("[k2-debug] → computed dims:", dims);
+                  updateEl(selEl.id, { hingeType: ht.id, ...dims });
+                } else {
+                  console.log("[k2-debug] door has NO doorLeft — only flag change");
+                  updateEl(selEl.id, { hingeType: ht.id });
+                }
               }} style={{
                 display: "block", width: "100%", textAlign: "left",
                 padding: "12px 14px", borderRadius: 6, fontSize: 13, marginBottom: 6,
@@ -356,26 +358,20 @@ export function MobilePropsSheet(props: MobilePropsSheetProps) {
             <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Тип установки</div>
             {HINGES.map(pt => (
               <button key={pt.id} onClick={() => {
-                // При переключении типа берём свежие границы проёма через findDoorBounds.
-                const cx = (selEl.x || 0) + (selEl.w || 400) / 2;
-                const cy = (selEl.y || 0) + (selEl.h || 100) / 2;
-                const bounds = findDoorBounds(elements, cx, cy, iW, iH, t);
-                const dims = computePanelDimensions(
-                  bounds.left.x ?? 0, bounds.right.x ?? iW,
-                  bounds.top.y ?? 0, bounds.bottom.y ?? iH,
-                  bounds.left.isWall, bounds.right.isWall,
-                  bounds.top.isWall, bounds.bottom.isWall,
-                  pt.id as "overlay" | "insert",
-                  iW, iH, t,
-                );
-                updateEl(selEl.id, {
-                  panelType: pt.id,
-                  ...dims,
-                  panelLeft: bounds.left.x ?? 0, panelRight: bounds.right.x ?? iW,
-                  panelTop: bounds.top.y ?? 0, panelBottom: bounds.bottom.y ?? iH,
-                  panelLeftIsWall: bounds.left.isWall, panelRightIsWall: bounds.right.isWall,
-                  panelTopIsWall: bounds.top.isWall, panelBottomIsWall: bounds.bottom.isWall,
-                });
+                // Используем СОХРАНЁННЫЕ границы панели — они учитывают соседей (другие панели/двери).
+                if (selEl.panelLeft !== undefined) {
+                  const dims = computePanelDimensions(
+                    selEl.panelLeft, selEl.panelRight,
+                    selEl.panelTop, selEl.panelBottom,
+                    selEl.panelLeftIsWall ?? true, selEl.panelRightIsWall ?? true,
+                    selEl.panelTopIsWall ?? true, selEl.panelBottomIsWall ?? true,
+                    pt.id as "overlay" | "insert",
+                    iW, iH, t,
+                  );
+                  updateEl(selEl.id, { panelType: pt.id, ...dims });
+                } else {
+                  updateEl(selEl.id, { panelType: pt.id });
+                }
               }} style={{
                 display: "block", width: "100%", textAlign: "left",
                 padding: "12px 14px", borderRadius: 6, fontSize: 13, marginBottom: 6,
