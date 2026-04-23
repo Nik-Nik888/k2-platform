@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, useState } from "react";
 import * as THREE from "three";
 
 /* ═══════════════════════════════════════════════════════════════
@@ -117,16 +117,133 @@ export default function Wardrobe3D({
 }) {
   const mountRef = useRef(null);
   const stateRef = useRef({});
+  // Overlay div для HTML-подписей размеров
+  const dimsOverlayRef = useRef(null);
+  // Подписи: ref на каждый div, чтобы обновлять позицию в animate-tick
+  const dimLabelsRef = useRef({});
+  // Ghost-dim labels (2 цифры рядом с жёлтым фантомом при placeMode)
+  const ghostDimARef = useRef(null);
+  const ghostDimBRef = useRef(null);
+  // Показывать ли общие размеры (габариты, между-стоечные/полочные)
+  const [showDims, setShowDims] = useState(true);
 
   // Ref для актуальных props placement — handlers внутри Three.js не пересоздаются
   // при изменении props (build пересоздавать дорого), поэтому читаем свежие значения через ref.
   const propsRef = useRef({
     placeMode, setPlaceMode, findDoorBounds, placeInZone,
     iW, iH, t,
+    showDims,
+    elements,
   });
   useEffect(() => {
-    propsRef.current = { placeMode, setPlaceMode, findDoorBounds, placeInZone, iW, iH, t };
+    propsRef.current = { placeMode, setPlaceMode, findDoorBounds, placeInZone, iW, iH, t, showDims, elements };
   });
+
+  // ═══ Расчёт подписей размеров ═══
+  // Итог: массив { key, text, x3d, y3d, z3d, anchor } — позиции в 3D-пространстве (метры).
+  // Реальные экранные координаты (left/top) будут пересчитываться в animate-tick.
+  // anchor: "below" = центрируем под точкой, "left" = справа от точки, "right" = слева.
+  const dimsData = (() => {
+    if (!showDims) return [];
+    const S = 1 / 1000;
+    const { width: W, height: H, depth: D } = corpus;
+    // Внутренние размеры (от стенки до стенки / от пола до потолка)
+    const iWmm = iW; // берём из props — уже учтено корпус/без
+    const iHmm = iH;
+    // Для 3D-координат: шкаф центрирован в (0,0,0), передняя грань z = d/2
+    const halfW = (showCorpus ? W - 2 * t : W) * S / 2;
+    const halfH = (showCorpus ? H - 2 * t : H) * S / 2;
+    const halfD = D * S / 2;
+
+    const labels = [];
+
+    // ── Габариты шкафа ──
+    // Ширина — подпись по центру снизу, чуть ниже шкафа
+    labels.push({
+      key: "total-w", text: `${W}`,
+      x3d: 0, y3d: -halfH - 0.08, z3d: halfD,
+      anchor: "center",
+    });
+    // Высота — слева от шкафа, по центру высоты
+    labels.push({
+      key: "total-h", text: `${H}`,
+      x3d: -halfW - 0.08, y3d: 0, z3d: halfD,
+      anchor: "right",
+    });
+    // Глубина — справа-снизу
+    labels.push({
+      key: "total-d", text: `${D}`,
+      x3d: halfW + 0.08, y3d: -halfH, z3d: 0,
+      anchor: "left",
+    });
+
+    // ── Ширины колонок между стойками ──
+    // Собираем все стойки (включая виртуальные стенки слева/справа)
+    const studs = elements
+      .filter(e => e.kind === "stud")
+      .map(e => ({ x: e.x, w: e.w ?? t }))
+      .sort((a, b) => a.x - b.x);
+    // «Границы колонок» — левая стенка (x=0), все стойки, правая стенка (x=iWmm)
+    const vBoundaries = [0, ...studs.flatMap(s => [s.x, s.x + s.w]), iWmm];
+    // Убираем дубликаты
+    const vBoundsUniq = Array.from(new Set(vBoundaries)).sort((a, b) => a - b);
+    for (let i = 0; i < vBoundsUniq.length - 1; i++) {
+      const x1 = vBoundsUniq[i], x2 = vBoundsUniq[i + 1];
+      const colW = x2 - x1;
+      if (colW < 20) continue; // пропускаем узкие «колонки» (сама стойка)
+      // Центр колонки (3D-координата)
+      const cxMm = (x1 + x2) / 2;
+      const cx = (cxMm - iWmm / 2) * S;
+      labels.push({
+        key: `col-${i}`, text: `${colW}`,
+        x3d: cx, y3d: -halfH - 0.03, z3d: halfD,
+        anchor: "center",
+      });
+    }
+
+    // ── Высоты проёмов между полками ──
+    const shelves = elements
+      .filter(e => e.kind === "shelf")
+      .map(e => ({ y: e.y, h: e.h ?? t }))
+      .sort((a, b) => a.y - b.y);
+    const hBoundaries = [0, ...shelves.flatMap(s => [s.y, s.y + s.h]), iHmm];
+    const hBoundsUniq = Array.from(new Set(hBoundaries)).sort((a, b) => a - b);
+    for (let i = 0; i < hBoundsUniq.length - 1; i++) {
+      const y1 = hBoundsUniq[i], y2 = hBoundsUniq[i + 1];
+      const rowH = y2 - y1;
+      if (rowH < 20) continue;
+      const cyMm = (y1 + y2) / 2;
+      const cy = (iHmm / 2 - cyMm) * S;
+      labels.push({
+        key: `row-${i}`, text: `${rowH}`,
+        x3d: -halfW - 0.03, y3d: cy, z3d: halfD,
+        anchor: "right",
+      });
+    }
+
+    return labels;
+  })();
+
+  // После рендера (когда divs уже в DOM) — синхронизируем dimLabelsRef.
+  // dimLabelsRef хранит Map: key → { el: HTMLDivElement, x3d, y3d, z3d } — для быстрого обновления в animate-tick.
+  useEffect(() => {
+    if (!dimsOverlayRef.current) {
+      dimLabelsRef.current.labels = null;
+      return;
+    }
+    const map = new Map();
+    dimsData.forEach(d => {
+      const el = dimsOverlayRef.current.querySelector(`[data-dim-key="${d.key}"]`);
+      if (el) {
+        map.set(d.key, { el, x3d: d.x3d, y3d: d.y3d, z3d: d.z3d });
+      }
+    });
+    dimLabelsRef.current.labels = map;
+    // Сразу обновим позиции (не ждём animate-tick)
+    if (stateRef.current.updateDimLabels) {
+      stateRef.current.updateDimLabels();
+    }
+  }, [dimsData]);
 
   const build = useCallback(async () => {
     const { width: W, height: H, depth: D, thickness: T } = corpus;
@@ -890,20 +1007,25 @@ export default function Wardrobe3D({
       // ── Helper: обновить подсветку силуэта элемента под курсором ──
       // Для placeMode рассчитываем где именно встанет элемент (а не всю нишу),
       // и рисуем жёлтый прямоугольник его реального размера.
+      const hideZone = () => {
+        zoneHighlight.visible = false;
+        if (ghostDimARef.current) ghostDimARef.current.style.display = "none";
+        if (ghostDimBRef.current) ghostDimBRef.current.style.display = "none";
+      };
       const updateZoneHighlight = (clientX, clientY) => {
         const { placeMode: pm, findDoorBounds: fdb, iW: cW, iH: cH, t: ct } = propsRef.current;
         if (!pm || !fdb) {
-          zoneHighlight.visible = false;
+          hideZone();
           return;
         }
         const proj = screenToCabinetMm(clientX, clientY);
         if (!proj) {
-          zoneHighlight.visible = false;
+          hideZone();
           return;
         }
         const bounds = fdb(proj.clickX, proj.clickY);
         if (!bounds) {
-          zoneHighlight.visible = false;
+          hideZone();
           return;
         }
         // Границы ниши (innerEdge с учётом стенок/стоек)
@@ -954,7 +1076,7 @@ export default function Wardrobe3D({
         const w = x2 - x1;
         const h = y2 - y1;
         if (w <= 0 || h <= 0) {
-          zoneHighlight.visible = false;
+          hideZone();
           return;
         }
 
@@ -994,6 +1116,78 @@ export default function Wardrobe3D({
         edges.scale.set(wM * 1.01, hM * 1.01, depthM * 1.01);
 
         zoneHighlight.visible = true;
+
+        // ─── Ghost-dim labels — 2 цифры рядом с фантомом ───
+        // Для стойки: «левая_колонка / правая_колонка» (мм, что получится после постановки)
+        // Для полки: «верхний_проём / нижний_проём»
+        // Для двери/панели/ящиков: размеры самого элемента «W × H»
+        const ghostA = ghostDimARef.current;
+        const ghostB = ghostDimBRef.current;
+        const proj = stateRef.current.projectToScreen;
+        if (ghostA && ghostB && proj) {
+          let textA = "", textB = "";
+          let posA3D = null, posB3D = null;
+          if (pm === "stud") {
+            // Левая и правая будущие колонки
+            const leftCol = x1 - niL;
+            const rightCol = niR - x2;
+            textA = `${leftCol}`;
+            textB = `${rightCol}`;
+            // Позиции: слева и справа от стойки на той же высоте
+            const leftCx = ((niL + x1) / 2 - cW / 2) * S;
+            const rightCx = ((x2 + niR) / 2 - cW / 2) * S;
+            posA3D = { x: leftCx, y: cy, z: d / 2 + 0.06 };
+            posB3D = { x: rightCx, y: cy, z: d / 2 + 0.06 };
+          } else if (pm === "shelf") {
+            // Верхний и нижний проёмы
+            const topRow = y1 - niT;
+            const botRow = niB - y2;
+            textA = `${topRow}`;
+            textB = `${botRow}`;
+            const topCy = (cH / 2 - (niT + y1) / 2) * S;
+            const botCy = (cH / 2 - (y2 + niB) / 2) * S;
+            posA3D = { x: cx, y: topCy, z: d / 2 + 0.06 };
+            posB3D = { x: cx, y: botCy, z: d / 2 + 0.06 };
+          } else if (pm === "door" || pm === "panel" || pm === "drawers") {
+            // Размер самого элемента W × H
+            textA = `${w}`;
+            textB = `${h}`;
+            // Позиции: ширина снизу от элемента, высота — слева от элемента
+            posA3D = { x: cx, y: cy - hM / 2 - 0.04, z: d / 2 + 0.06 };
+            posB3D = { x: cx - wM / 2 - 0.04, y: cy, z: d / 2 + 0.06 };
+          } else if (pm === "rod") {
+            // Длина штанги
+            textA = `${w}`;
+            posA3D = { x: cx, y: cy - 0.04, z: d / 2 + 0.06 };
+          }
+
+          if (posA3D) {
+            const pA = proj(posA3D.x, posA3D.y, posA3D.z);
+            if (pA.visible) {
+              ghostA.style.display = "";
+              ghostA.style.left = `${pA.px}px`;
+              ghostA.style.top = `${pA.py}px`;
+              ghostA.textContent = textA;
+            } else {
+              ghostA.style.display = "none";
+            }
+          } else {
+            ghostA.style.display = "none";
+          }
+          if (posB3D) {
+            const pB = proj(posB3D.x, posB3D.y, posB3D.z);
+            if (pB.visible) {
+              ghostB.style.display = "";
+              ghostB.style.left = `${pB.px}px`;
+              ghostB.style.top = `${pB.py}px`;
+              ghostB.textContent = textB;
+            } else {
+              ghostB.style.display = "none";
+            }
+          } else {
+            ghostB.style.display = "none";
+          }
+        }
       };
 
       const onPointerDown = e => {
@@ -1027,7 +1221,7 @@ export default function Wardrobe3D({
             prevX = e.clientX;
             prevY = e.clientY;
             // В placeMode при настоящем drag скрываем подсветку (мы крутим, не выбираем)
-            if (pm) zoneHighlight.visible = false;
+            if (pm) hideZone();
           }
           return;
         }
@@ -1060,7 +1254,7 @@ export default function Wardrobe3D({
         if (hit && onElementClick) {
           // Клик попал на существующий элемент → выделяем
           if (pm && spm) spm(null);   // выходим из placeMode
-          zoneHighlight.visible = false;
+          hideZone();
           onElementClick(hit.object.userData.elementId);
           return;
         }
@@ -1071,7 +1265,7 @@ export default function Wardrobe3D({
           const proj = screenToCabinetMm(e.clientX, e.clientY);
           if (proj) {
             piz(null, proj.clickX, proj.clickY);
-            zoneHighlight.visible = false;
+            hideZone();
           }
           return;
         }
@@ -1117,6 +1311,43 @@ export default function Wardrobe3D({
       // Предотвращаем скролл браузера на канвасе
       renderer.domElement.style.touchAction = "none";
 
+      // Throttle для updateDimLabels — не каждый кадр, а раз в 2 кадра (30fps достаточно)
+      let dimFrameSkip = 0;
+      // Вспомогательная: проецирует 3D-точку → pixel coords относительно canvas
+      const _proj = new THREE.Vector3();
+      const projectToScreen = (x, y, z) => {
+        _proj.set(x, y, z);
+        _proj.project(camera);
+        // NDC (-1..1) → pixels
+        const rect = renderer.domElement.getBoundingClientRect();
+        const px = (_proj.x * 0.5 + 0.5) * rect.width;
+        const py = (1 - (_proj.y * 0.5 + 0.5)) * rect.height;
+        const visible = _proj.z < 1; // точка перед камерой
+        return { px, py, visible };
+      };
+
+      // Обновляет позиции HTML-подписей размеров.
+      // Подписи хранятся в dimLabelsRef.current.labels: Map<key, { el, x3d, y3d, z3d }>.
+      const updateDimLabels = () => {
+        const labels = dimLabelsRef.current.labels;
+        if (!labels) return;
+        const rect = renderer.domElement.getBoundingClientRect();
+        labels.forEach(({ el, x3d, y3d, z3d }) => {
+          const p = projectToScreen(x3d, y3d, z3d);
+          if (!p.visible) {
+            el.style.display = "none";
+            return;
+          }
+          el.style.display = "";
+          el.style.left = `${p.px}px`;
+          el.style.top = `${p.py}px`;
+        });
+      };
+
+      // Сохраняем projectToScreen в stateRef — пригодится для фантома при placeMode
+      stateRef.current.projectToScreen = projectToScreen;
+      stateRef.current.updateDimLabels = updateDimLabels;
+
       const animate = () => {
         stateRef.current.animId = requestAnimationFrame(animate);
         if (!isDragging) {} // no auto-rotation — manual only
@@ -1128,6 +1359,9 @@ export default function Wardrobe3D({
         );
         camera.lookAt(0, 0, 0);
         renderer.render(scene, camera);
+        // Обновляем подписи (throttle через frame skip)
+        dimFrameSkip = (dimFrameSkip + 1) % 2;
+        if (dimFrameSkip === 0) updateDimLabels();
       };
       animate();
 
@@ -1268,6 +1502,105 @@ export default function Wardrobe3D({
             width: "100%", height: "100%",
             cursor: placeMode ? "crosshair" : "grab",
           }} />
+
+          {/* Overlay с подписями размеров — абсолютное позиционирование поверх canvas */}
+          <div
+            ref={dimsOverlayRef}
+            style={{
+              position: "absolute", inset: 0,
+              pointerEvents: "none", // не перехватывает клики/drag
+              overflow: "hidden",
+              zIndex: 5,
+            }}
+          >
+            {dimsData.map(d => {
+              // translate для anchor: "center" = -50% / -50%, "right" = -100% / -50%, "left" = 0 / -50%
+              const translateX = d.anchor === "right" ? "-100%" : d.anchor === "left" ? "0%" : "-50%";
+              return (
+                <div
+                  key={d.key}
+                  data-dim-key={d.key}
+                  style={{
+                    position: "absolute",
+                    left: 0, top: 0,
+                    transform: `translate(${translateX}, -50%)`,
+                    padding: "2px 6px",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    color: "#60a5fa",
+                    background: "rgba(8,10,16,0.75)",
+                    border: "1px solid rgba(96,165,250,0.35)",
+                    borderRadius: 3,
+                    whiteSpace: "nowrap",
+                    userSelect: "none",
+                  }}
+                >{d.text}</div>
+              );
+            })}
+
+            {/* Ghost-dim labels (2 цифры) — обновляются напрямую в updateZoneHighlight.
+                При placeMode: для стойки показывают левую/правую будущие колонки,
+                для полки — верхний/нижний проёмы, для двери/панели/ящиков — собственные размеры.
+                Цвет жёлтый (соответствует фантому), display:none по умолчанию. */}
+            <div
+              ref={ghostDimARef}
+              style={{
+                position: "absolute",
+                left: 0, top: 0,
+                transform: "translate(-50%, -50%)",
+                padding: "3px 8px",
+                fontSize: 13,
+                fontWeight: 700,
+                fontFamily: "'IBM Plex Mono', monospace",
+                color: "#000",
+                background: "rgba(251,191,36,0.95)",
+                border: "1px solid rgba(217,119,6,0.6)",
+                borderRadius: 3,
+                whiteSpace: "nowrap",
+                userSelect: "none",
+                display: "none",
+                boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
+              }}
+            />
+            <div
+              ref={ghostDimBRef}
+              style={{
+                position: "absolute",
+                left: 0, top: 0,
+                transform: "translate(-50%, -50%)",
+                padding: "3px 8px",
+                fontSize: 13,
+                fontWeight: 700,
+                fontFamily: "'IBM Plex Mono', monospace",
+                color: "#000",
+                background: "rgba(251,191,36,0.95)",
+                border: "1px solid rgba(217,119,6,0.6)",
+                borderRadius: 3,
+                whiteSpace: "nowrap",
+                userSelect: "none",
+                display: "none",
+                boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
+              }}
+            />
+          </div>
+
+          {/* Кнопка toggle размеров — справа внизу canvas */}
+          <button
+            onClick={() => setShowDims(v => !v)}
+            title={showDims ? "Скрыть размеры" : "Показать размеры"}
+            style={{
+              position: "absolute", bottom: 12, right: 12,
+              padding: "6px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600,
+              cursor: "pointer",
+              border: "1px solid " + (showDims ? "rgba(96,165,250,0.4)" : "rgba(100,100,110,0.3)"),
+              background: showDims ? "rgba(96,165,250,0.15)" : "rgba(30,30,40,0.8)",
+              color: showDims ? "#60a5fa" : "#888",
+              fontFamily: "'IBM Plex Mono', monospace",
+              zIndex: 9,
+              pointerEvents: "auto",
+            }}
+          >📏 {showDims ? "Размеры" : "Размеры off"}</button>
 
           {/* Индикатор активного placeMode — поверх 3D, сверху */}
           {placeMode && (
