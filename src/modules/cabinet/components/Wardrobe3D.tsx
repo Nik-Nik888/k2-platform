@@ -127,6 +127,16 @@ export default function Wardrobe3D({
   // Показывать ли общие размеры (габариты, между-стоечные/полочные)
   const [showDims, setShowDims] = useState(true);
 
+  // ═══ Ghost-dim input state (Этап 1: стойка) ═══
+  // Когда пользователь кликает на жёлтую цифру — она превращается в input.
+  // lockedDim: "A" | "B" | null — какая цифра сейчас в режиме ввода
+  // lockedValue: число в мм — что введено в input (может быть "" пока пользователь печатает)
+  // niche: {niL, niR, niT, niB, axis} — границы ниши, в которой идёт ввод (нужно чтобы пересчитать фантом)
+  const [lockedDim, setLockedDim] = useState(null);
+  const [lockedValue, setLockedValue] = useState("");
+  const [lockedNiche, setLockedNiche] = useState(null);
+  const lockedInputRef = useRef(null);
+
   // Ref для актуальных props placement — handlers внутри Three.js не пересоздаются
   // при изменении props (build пересоздавать дорого), поэтому читаем свежие значения через ref.
   const propsRef = useRef({
@@ -134,10 +144,84 @@ export default function Wardrobe3D({
     iW, iH, t,
     showDims,
     elements,
+    lockedDim, lockedValue, lockedNiche,
   });
   useEffect(() => {
-    propsRef.current = { placeMode, setPlaceMode, findDoorBounds, placeInZone, iW, iH, t, showDims, elements };
+    propsRef.current = {
+      placeMode, setPlaceMode, findDoorBounds, placeInZone, iW, iH, t, showDims, elements,
+      lockedDim, lockedValue, lockedNiche,
+    };
   });
+
+  // Когда вошли в lock-режим — ставим фокус и выделяем текст
+  useEffect(() => {
+    if (lockedDim && lockedInputRef.current) {
+      lockedInputRef.current.focus();
+      lockedInputRef.current.select();
+    }
+  }, [lockedDim]);
+
+  // Сброс lock-режима когда placeMode изменился (пользователь выбрал другой элемент или отменил)
+  useEffect(() => {
+    setLockedDim(null);
+    setLockedValue("");
+    setLockedNiche(null);
+  }, [placeMode]);
+
+  // При изменении введённого значения в input — пересчитать фантом в реальном времени.
+  // Используем координаты последней позиции курсора (или центр canvas если мышь не двигалась).
+  useEffect(() => {
+    if (lockedDim === null) return;
+    const fn = stateRef.current.updateZoneHighlight;
+    if (!fn) return;
+    let mx = stateRef.current.lastMouseX;
+    let my = stateRef.current.lastMouseY;
+    if (mx == null || my == null) {
+      // Fallback — центр canvas
+      const rect = mountRef.current?.getBoundingClientRect();
+      if (rect) {
+        mx = rect.left + rect.width / 2;
+        my = rect.top + rect.height / 2;
+      } else {
+        return;
+      }
+    }
+    fn(mx, my);
+  }, [lockedValue, lockedDim]);
+
+  // Callback: применить зафиксированное значение — ставит элемент точно.
+  // Вызывается при Enter в input.
+  const commitLockedPlacement = () => {
+    const parsed = parseFloat(lockedValue);
+    if (!Number.isFinite(parsed) || parsed < 0 || !lockedNiche || !placeInZone) {
+      // Невалидное значение — отменяем ввод, не ставим элемент
+      setLockedDim(null);
+      setLockedValue("");
+      setLockedNiche(null);
+      return;
+    }
+    const { niL, niR, niT, niB } = lockedNiche;
+    // Среднее Y ниши (для stud не критично, важен только X)
+    const midY = (niT + niB) / 2;
+    let clickX;
+    if (placeMode === "stud") {
+      // Пересчёт: где надо кликнуть чтобы stud встал по нужной цифре.
+      // A (левая колонка = lockedValue): studX = niL + lockedValue → clickX = niL + lockedValue + t/2
+      // B (правая колонка = lockedValue): studX = niR - lockedValue - t → clickX = niR - lockedValue - t/2
+      if (lockedDim === "A") {
+        clickX = niL + parsed + t / 2;
+      } else {
+        clickX = niR - parsed - t / 2;
+      }
+      // Кламп чтобы не вылезло за пределы ниши
+      clickX = Math.max(niL + t / 2, Math.min(niR - t / 2, clickX));
+      placeInZone(null, clickX, midY);
+    }
+    // Сбрасываем lock после постановки
+    setLockedDim(null);
+    setLockedValue("");
+    setLockedNiche(null);
+  };
 
   // ═══ Расчёт размеров для чертёжного стиля ═══
   // Каждая запись: { key, text, p1, p2, axis, offset3d } — две 3D-точки (метры)
@@ -1039,16 +1123,42 @@ export default function Wardrobe3D({
         const niT = bounds.top.innerEdge ?? bounds.top.y ?? 0;
         const niB = bounds.bottom.innerEdge ?? bounds.bottom.y ?? cH;
 
+        // Сохраняем текущую нишу — нужно при клике на ghost-dim для locked placement
+        stateRef.current.lastNiche = { niL, niR, niT, niB };
+
+        // Если есть заблокированное измерение — пересчитываем границы ниши так
+        // как будто мы находимся в ЗАБЛОКИРОВАННОЙ нише (а не в той где курсор).
+        // Это нужно чтобы при наборе в input фантом не "улетал" за другие стойки.
+        const { lockedDim: lD, lockedValue: lV, lockedNiche: lN } = propsRef.current;
+        let effNiL = niL, effNiR = niR, effNiT = niT, effNiB = niB;
+        if (lD !== null && lN) {
+          effNiL = lN.niL; effNiR = lN.niR; effNiT = lN.niT; effNiB = lN.niB;
+        }
+
         // Рассчитываем ПРЯМОУГОЛЬНИК СИЛУЭТА элемента (мм координаты в шкафу).
         // {x1, y1} — верхний левый угол, {x2, y2} — нижний правый.
         let x1, y1, x2, y2;
 
         if (pm === "stud") {
           // Стойка — узкая вертикальная полоска шириной t на полную высоту ниши.
-          // Центрируется на X клика, кламп в [niL, niR-t].
-          const studX = Math.max(niL, Math.min(niR - ct, Math.round(proj.clickX - ct / 2)));
+          // Если зафиксирована цифра — ставим стойку точно так, чтобы зафиксированная
+          // цифра была = введённому значению в мм.
+          let studX;
+          const parsedLV = typeof lV === "string" ? parseFloat(lV) : lV;
+          if (lD === "A" && Number.isFinite(parsedLV) && parsedLV >= 0) {
+            // A — левая колонка фиксирована = parsedLV мм → studX = effNiL + parsedLV
+            studX = effNiL + parsedLV;
+          } else if (lD === "B" && Number.isFinite(parsedLV) && parsedLV >= 0) {
+            // B — правая колонка = parsedLV → studX + ct = effNiR - parsedLV → studX = effNiR - parsedLV - ct
+            studX = effNiR - parsedLV - ct;
+          } else {
+            // Обычный режим (по курсору) — центрируется на X клика, кламп в [niL, niR-t].
+            studX = Math.round(proj.clickX - ct / 2);
+          }
+          // Кламп
+          studX = Math.max(effNiL, Math.min(effNiR - ct, studX));
           x1 = studX; x2 = studX + ct;
-          y1 = niT;   y2 = niB;
+          y1 = effNiT;   y2 = effNiB;
         } else if (pm === "shelf") {
           // Полка — горизонтальная полоска высотой t на полную ширину ниши.
           // Smart-Y: близко к верху → толщина вниз, близко к низу → вверх, иначе по центру.
@@ -1172,7 +1282,10 @@ export default function Wardrobe3D({
               ghostA.style.display = "";
               ghostA.style.left = `${pA.px}px`;
               ghostA.style.top = `${pA.py}px`;
-              ghostA.textContent = textA;
+              // Не перезаписываем содержимое, если badge в lock-режиме (внутри input)
+              if (!ghostA.querySelector("input")) {
+                ghostA.textContent = textA;
+              }
             } else {
               ghostA.style.display = "none";
             }
@@ -1185,7 +1298,9 @@ export default function Wardrobe3D({
               ghostB.style.display = "";
               ghostB.style.left = `${pB.px}px`;
               ghostB.style.top = `${pB.py}px`;
-              ghostB.textContent = textB;
+              if (!ghostB.querySelector("input")) {
+                ghostB.textContent = textB;
+              }
             } else {
               ghostB.style.display = "none";
             }
@@ -1232,6 +1347,14 @@ export default function Wardrobe3D({
         }
         // Hover без зажатой кнопки — только в placeMode обновляем подсветку
         if (pm) {
+          // Запомним координаты курсора — нужно чтобы при наборе в input пересчитать
+          // фантом из той же точки что выбрал пользователь.
+          stateRef.current.lastMouseX = e.clientX;
+          stateRef.current.lastMouseY = e.clientY;
+          // Если зафиксирована цифра (пользователь набирает в input) — мышь НЕ двигает фантом.
+          // Фантом пересчитывается только при изменении lockedValue (через updateHighlightFromLock).
+          const { lockedDim: lD } = propsRef.current;
+          if (lD !== null) return;
           updateZoneHighlight(e.clientX, e.clientY);
         }
       };
@@ -1382,6 +1505,7 @@ export default function Wardrobe3D({
       // Сохраняем projectToScreen в stateRef — пригодится для фантома при placeMode
       stateRef.current.projectToScreen = projectToScreen;
       stateRef.current.updateDimLabels = updateDimLabels;
+      stateRef.current.updateZoneHighlight = updateZoneHighlight;
 
       const animate = () => {
         stateRef.current.animId = requestAnimationFrame(animate);
@@ -1571,50 +1695,51 @@ export default function Wardrobe3D({
           {/* Ghost-dim labels (2 цифры) — обновляются напрямую в updateZoneHighlight.
               При placeMode: для стойки показывают левую/правую будущие колонки,
               для полки — верхний/нижний проёмы, для двери/панели/ящиков — собственные размеры.
-              Цвет жёлтый (соответствует фантому), display:none по умолчанию. */}
-          <div
-            ref={ghostDimARef}
-            style={{
-              position: "absolute",
-              left: 0, top: 0,
-              transform: "translate(-50%, -50%)",
-              padding: "3px 8px",
-              fontSize: 13,
-              fontWeight: 700,
-              fontFamily: "'IBM Plex Mono', monospace",
-              color: "#000",
-              background: "rgba(251,191,36,0.95)",
-              border: "1px solid rgba(217,119,6,0.6)",
-              borderRadius: 3,
-              whiteSpace: "nowrap",
-              userSelect: "none",
-              display: "none",
-              boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
-              zIndex: 6,
-              pointerEvents: "none",
+              Цвет жёлтый (соответствует фантому), display:none по умолчанию.
+              Стойка (Этап 1): КЛИКАБЕЛЬНЫ — клик → input → Enter → точная установка. */}
+          <GhostDimBadge
+            refEl={ghostDimARef}
+            isLocked={lockedDim === "A"}
+            lockedValue={lockedValue}
+            setLockedValue={setLockedValue}
+            clickable={placeMode === "stud"}
+            onClick={() => {
+              // Снимаем текст из div (который обновляет updateZoneHighlight) как стартовое значение
+              const txt = ghostDimARef.current?.textContent ?? "";
+              // Сохраним текущую нишу (чтобы при наборе пересчитывать фантом в той же нише)
+              const niche = stateRef.current.lastNiche;
+              if (niche) setLockedNiche(niche);
+              setLockedDim("A");
+              setLockedValue(txt.trim());
             }}
+            onCommit={() => commitLockedPlacement()}
+            onCancel={() => {
+              setLockedDim(null);
+              setLockedValue("");
+              setLockedNiche(null);
+            }}
+            inputRef={lockedDim === "A" ? lockedInputRef : undefined}
           />
-          <div
-            ref={ghostDimBRef}
-            style={{
-              position: "absolute",
-              left: 0, top: 0,
-              transform: "translate(-50%, -50%)",
-              padding: "3px 8px",
-              fontSize: 13,
-              fontWeight: 700,
-              fontFamily: "'IBM Plex Mono', monospace",
-              color: "#000",
-              background: "rgba(251,191,36,0.95)",
-              border: "1px solid rgba(217,119,6,0.6)",
-              borderRadius: 3,
-              whiteSpace: "nowrap",
-              userSelect: "none",
-              display: "none",
-              boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
-              zIndex: 6,
-              pointerEvents: "none",
+          <GhostDimBadge
+            refEl={ghostDimBRef}
+            isLocked={lockedDim === "B"}
+            lockedValue={lockedValue}
+            setLockedValue={setLockedValue}
+            clickable={placeMode === "stud"}
+            onClick={() => {
+              const txt = ghostDimBRef.current?.textContent ?? "";
+              const niche = stateRef.current.lastNiche;
+              if (niche) setLockedNiche(niche);
+              setLockedDim("B");
+              setLockedValue(txt.trim());
             }}
+            onCommit={() => commitLockedPlacement()}
+            onCancel={() => {
+              setLockedDim(null);
+              setLockedValue("");
+              setLockedNiche(null);
+            }}
+            inputRef={lockedDim === "B" ? lockedInputRef : undefined}
           />
 
           {/* Кнопка toggle размеров — справа внизу canvas */}
@@ -1681,6 +1806,105 @@ export default function Wardrobe3D({
         )}
       </div>
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GhostDimBadge — жёлтая цифра рядом с фантомом при placeMode.
+// ═══════════════════════════════════════════════════════════════
+// Позиция обновляется императивно из updateZoneHighlight через refEl (ref на контейнер).
+// refEl вешается на корневой div (контейнер позиционирования).
+// Внутри — либо текст (отображаемый режим), либо <input> (режим ввода).
+//
+// Показ/скрытие: updateZoneHighlight ставит style.display = "" / "none" на refEl.
+// Текст: обновляется через refEl.textContent → но если isLocked, текст не трогаем
+// (чтобы не перебить input). Решение — в updateZoneHighlight смотреть lockedDim
+// и не обновлять text в заблокированном badge. См. код updateZoneHighlight.
+function GhostDimBadge({
+  refEl,
+  isLocked,
+  lockedValue,
+  setLockedValue,
+  clickable,
+  onClick,
+  onCommit,
+  onCancel,
+  inputRef,
+}) {
+  // Когда badge в lock-режиме — показываем input вместо текста
+  const baseStyle = {
+    position: "absolute",
+    left: 0, top: 0,
+    transform: "translate(-50%, -50%)",
+    padding: "3px 8px",
+    fontSize: 13,
+    fontWeight: 700,
+    fontFamily: "'IBM Plex Mono', monospace",
+    color: "#000",
+    background: isLocked ? "rgba(252,211,77,1)" : "rgba(251,191,36,0.95)",
+    border: isLocked ? "2px solid #d97706" : "1px solid rgba(217,119,6,0.6)",
+    borderRadius: 3,
+    whiteSpace: "nowrap",
+    userSelect: "none",
+    display: "none",
+    boxShadow: isLocked ? "0 0 0 3px rgba(251,191,36,0.35), 0 2px 6px rgba(0,0,0,0.4)" : "0 2px 6px rgba(0,0,0,0.4)",
+    zIndex: isLocked ? 8 : 6,
+    pointerEvents: clickable ? "auto" : "none",
+    cursor: clickable && !isLocked ? "pointer" : "text",
+    minWidth: isLocked ? 55 : "auto",
+    textAlign: "center",
+  };
+
+  if (isLocked) {
+    return (
+      <div ref={refEl} style={baseStyle}>
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode="numeric"
+          value={lockedValue}
+          onChange={e => {
+            // Разрешаем только цифры (без минусов и точек — стойка в мм, целое)
+            const v = e.target.value.replace(/[^\d]/g, "");
+            setLockedValue(v);
+          }}
+          onKeyDown={e => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onCommit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              onCancel();
+            }
+          }}
+          onBlur={() => {
+            // Клик мимо — отмена ввода
+            onCancel();
+          }}
+          style={{
+            width: "100%",
+            background: "transparent",
+            border: "none",
+            outline: "none",
+            fontSize: 13,
+            fontWeight: 700,
+            fontFamily: "'IBM Plex Mono', monospace",
+            color: "#000",
+            textAlign: "center",
+            padding: 0,
+            minWidth: 40,
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={refEl}
+      style={baseStyle}
+      onClick={clickable ? onClick : undefined}
+    />
   );
 }
 
