@@ -1123,8 +1123,8 @@ export default function Wardrobe3D({
         // Для двери/панели/ящиков: размеры самого элемента «W × H»
         const ghostA = ghostDimARef.current;
         const ghostB = ghostDimBRef.current;
-        const proj = stateRef.current.projectToScreen;
-        if (ghostA && ghostB && proj) {
+        const projFn = stateRef.current.projectToScreen;
+        if (ghostA && ghostB && projFn) {
           let textA = "", textB = "";
           let posA3D = null, posB3D = null;
           if (pm === "stud") {
@@ -1162,7 +1162,7 @@ export default function Wardrobe3D({
           }
 
           if (posA3D) {
-            const pA = proj(posA3D.x, posA3D.y, posA3D.z);
+            const pA = projFn(posA3D.x, posA3D.y, posA3D.z);
             if (pA.visible) {
               ghostA.style.display = "";
               ghostA.style.left = `${pA.px}px`;
@@ -1175,7 +1175,7 @@ export default function Wardrobe3D({
             ghostA.style.display = "none";
           }
           if (posB3D) {
-            const pB = proj(posB3D.x, posB3D.y, posB3D.z);
+            const pB = projFn(posB3D.x, posB3D.y, posB3D.z);
             if (pB.visible) {
               ghostB.style.display = "";
               ghostB.style.left = `${pB.px}px`;
