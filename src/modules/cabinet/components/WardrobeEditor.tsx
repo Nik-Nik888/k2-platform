@@ -141,11 +141,16 @@ export default function WardrobeEditor() {
       const withNew = [...prev, result.element];
       return adjust(withNew);
     });
-    if (!result.keepPlaceMode) {
+    // Автовозврат в 3D после постановки элемента (если галочка включена).
+    // Работает для ЛЮБОГО типа элемента, включая полки/стойки где placeMode остаётся
+    // активным для повторных вставок — галочка важнее сохранения режима.
+    if (autoReturnTo3d) {
+      setSelId(result.element.id);
+      setPlaceMode(null); // сбрасываем, иначе в 3D кликом нельзя будет выделить
+      setShow3d(true);
+    } else if (!result.keepPlaceMode) {
       setPlaceMode(null);
       setSelId(result.element.id);
-      // Автовозврат в 3D после постановки элемента (если галочка включена)
-      if (autoReturnTo3d) setShow3d(true);
     }
   }, [placeMode, elements, adjust, iW, iH, t, findDoorBounds, doorPrefs, panelPrefs, autoReturnTo3d]);
 
