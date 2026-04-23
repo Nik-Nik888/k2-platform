@@ -91,10 +91,16 @@ export default function Wardrobe3D({
   corpus, elements, corpusTexture, facadeTexture,
   showDoors = true, showCorpus = true,
   onClose,
-  // Новое в v1 3D-first: интерактивный режим
+  // Интерактивный режим
   selId = null,             // id выделенного элемента (для outline)
   onElementClick = null,    // callback: (elementId: string | null) => void
   showRoom = true,          // показывать ли комнату (стены+пол)
+  // Правая панель свойств (рендерится внутри 3D-overlay)
+  selEl = null,             // выделенный элемент (объект из elements)
+  updateEl = null,          // (id, upd) => void
+  delSel = null,            // () => void
+  iW = 0, iH = 0, t = 16,
+  isMobile = false,
 }) {
   const mountRef = useRef(null);
   const stateRef = useRef({});
@@ -274,6 +280,43 @@ export default function Wardrobe3D({
       floorT.position.y = -h / 2;
       floorT.receiveShadow = true;
       scene.add(floorT);
+    }
+
+    // ═══ WIREFRAME-РАМКА — тонкий контур рабочей зоны шкафа ═══
+    // Показывает внутренние границы шкафа (iW × iH × D), чтобы даже при showCorpus=false
+    // было видно «где шкаф». При showCorpus=true дублирует корпус, но не мешает — тонкая линия.
+    {
+      const iWm = (showCorpus ? W - 2 * T : W) * S;
+      const iHm = (showCorpus ? H - 2 * T : H) * S;
+      const dM = d;
+      // Центр рамки совпадает с центром сцены (0, 0, 0)
+      const wireMat = new THREE.LineBasicMaterial({
+        color: 0xd97706,  // оранжевый, как primary цвет проекта
+        transparent: true,
+        opacity: 0.45,
+      });
+      const halfW = iWm / 2, halfH = iHm / 2, halfD = dM / 2;
+      // 8 вершин прямоугольного параллелепипеда
+      const v = [
+        [-halfW, -halfH, -halfD], [ halfW, -halfH, -halfD],
+        [ halfW,  halfH, -halfD], [-halfW,  halfH, -halfD],
+        [-halfW, -halfH,  halfD], [ halfW, -halfH,  halfD],
+        [ halfW,  halfH,  halfD], [-halfW,  halfH,  halfD],
+      ];
+      // 12 рёбер куба (по парам индексов вершин)
+      const edges = [
+        [0,1],[1,2],[2,3],[3,0],  // задняя грань
+        [4,5],[5,6],[6,7],[7,4],  // передняя грань
+        [0,4],[1,5],[2,6],[3,7],  // соединяющие рёбра
+      ];
+      const positions = [];
+      edges.forEach(([a, b]) => {
+        positions.push(...v[a], ...v[b]);
+      });
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      const wireframe = new THREE.LineSegments(geo, wireMat);
+      scene.add(wireframe);
     }
 
     /* ─── Coordinate helpers ─── */
@@ -885,30 +928,299 @@ export default function Wardrobe3D({
             <div style={{
               fontSize: 13, fontWeight: 700, color: "#d1d5db",
               fontFamily: "'IBM Plex Mono',monospace",
-            }}>3D Просмотр · ЛДСП</div>
+            }}>3D Редактор · ЛДСП</div>
             <div style={{
               fontSize: 10, color: "#444",
               fontFamily: "'IBM Plex Mono',monospace",
             }}>
               {corpus.width}×{corpus.height}×{corpus.depth} мм · Кромка · Петли · ДВП
-              <span style={{ marginLeft: 8, color: "#555" }}>Палец = вращение · 2 пальца = зум</span>
+              <span style={{ marginLeft: 8, color: "#555" }}>Палец = вращение · 2 пальца = зум · клик = выделить</span>
             </div>
           </div>
         </div>
         <button onClick={onClose} style={{
           padding: "6px 16px", borderRadius: 6, fontSize: 12, fontWeight: 700,
           cursor: "pointer",
-          border: "1px solid rgba(217,119,6,0.3)",
-          background: "rgba(217,119,6,0.08)",
-          color: "#d97706",
+          border: "1px solid rgba(96,165,250,0.3)",
+          background: "rgba(96,165,250,0.08)",
+          color: "#60a5fa",
           fontFamily: "'IBM Plex Mono',monospace",
           transition: "all 0.15s",
         }}
-          onMouseEnter={e => { e.target.style.background = "rgba(217,119,6,0.2)"; }}
-          onMouseLeave={e => { e.target.style.background = "rgba(217,119,6,0.08)"; }}
-        >✕ Закрыть</button>
+          onMouseEnter={e => { e.target.style.background = "rgba(96,165,250,0.2)"; }}
+          onMouseLeave={e => { e.target.style.background = "rgba(96,165,250,0.08)"; }}
+          title="Переключиться на классический 2D-редактор"
+        >📐 2D</button>
       </div>
-      <div ref={mountRef} style={{ flex: 1, cursor: "grab" }} />
+
+      {/* BODY: 3D canvas + right panel (desktop) или bottom sheet (mobile) */}
+      <div style={{
+        flex: 1, display: "flex",
+        flexDirection: isMobile ? "column" : "row",
+        minHeight: 0,
+      }}>
+        <div ref={mountRef} style={{ flex: 1, cursor: "grab", minHeight: 0 }} />
+
+        {/* Панель свойств — появляется при выделении элемента */}
+        {selEl && (
+          <PropsPanel3D
+            selEl={selEl}
+            updateEl={updateEl}
+            delSel={delSel}
+            onClose={() => onElementClick?.(null)}
+            iW={iW}
+            iH={iH}
+            t={t}
+            isMobile={isMobile}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PropsPanel3D — панель свойств выделенного элемента, поверх 3D
+// ═══════════════════════════════════════════════════════════════
+// Десктоп: sidebar справа (320px), 3D сжимается по ширине.
+// Мобильный: bottom sheet снизу (max 50% высоты), 3D сжимается по высоте.
+// Содержит минимальный набор полей для редактирования: координаты,
+// размеры, тип (для двери/панели), кнопку удаления.
+// В Сессии 2 будет расширен: добавление новых элементов через click-to-place.
+function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, isMobile }) {
+  if (!selEl) return null;
+
+  const TYPE_LABELS = {
+    shelf: "Полка", stud: "Стойка", drawers: "Ящики",
+    rod: "Штанга", door: "Дверь", panel: "Панель",
+  };
+
+  const baseStyle = isMobile ? {
+    position: "absolute", bottom: 0, left: 0, right: 0,
+    maxHeight: "50%", overflowY: "auto",
+    background: "rgba(11,12,16,0.98)",
+    borderTop: "1px solid rgba(96,165,250,0.3)",
+    padding: "16px 20px 20px",
+    boxShadow: "0 -4px 20px rgba(0,0,0,0.5)",
+  } : {
+    width: 320, minWidth: 320, flexShrink: 0,
+    background: "rgba(11,12,16,0.98)",
+    borderLeft: "1px solid rgba(50,50,60,0.4)",
+    padding: "16px 18px",
+    overflowY: "auto",
+  };
+
+  // Компактное числовое поле
+  const NumField = ({ label, value, onChange, min, max, step = 1, color = "#60a5fa" }) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <div style={{ fontSize: 9, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
+      <input
+        type="number"
+        value={Math.round(value ?? 0)}
+        onChange={e => {
+          const v = Number(e.target.value);
+          if (!Number.isFinite(v)) return;
+          const clamped = Math.max(min ?? -Infinity, Math.min(max ?? Infinity, v));
+          onChange(clamped);
+        }}
+        step={step}
+        style={{
+          width: "100%", padding: "6px 8px", borderRadius: 4,
+          background: "rgba(30,30,40,0.7)",
+          border: "1px solid rgba(60,60,70,0.6)",
+          color, fontSize: 12, fontWeight: 700,
+          fontFamily: "'IBM Plex Mono',monospace",
+          textAlign: "center",
+        }}
+      />
+    </div>
+  );
+
+  return (
+    <div style={baseStyle}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <div style={{
+          fontSize: 13, fontWeight: 700, color: "#d97706",
+          fontFamily: "'IBM Plex Mono',monospace",
+        }}>
+          {TYPE_LABELS[selEl.type] || selEl.type}
+        </div>
+        <button onClick={onClose} style={{
+          background: "none", border: "none", color: "#666",
+          fontSize: 16, cursor: "pointer", padding: "2px 8px",
+        }} title="Снять выделение">✕</button>
+      </div>
+
+      {/* SHELF */}
+      {selEl.type === "shelf" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <NumField label="Y, мм" value={selEl.y} min={0} max={iH}
+            onChange={v => updateEl(selEl.id, { y: v, manualY: v })}
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <NumField label="X, мм" value={selEl.x ?? 0} min={0} max={iW}
+                onChange={v => updateEl(selEl.id, { x: v, manualX: v })}
+                color="#d97706"
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <NumField label="Ш, мм" value={selEl.w ?? iW} min={20} max={iW}
+                onChange={v => updateEl(selEl.id, { w: v, manualW: v })}
+                color="#d97706"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STUD */}
+      {selEl.type === "stud" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <NumField label="X, мм" value={selEl.x} min={0} max={iW - t}
+            onChange={v => updateEl(selEl.id, { x: v })}
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <NumField label="Верх, мм" value={selEl.pTop ?? 0} min={0} max={iH}
+                onChange={v => updateEl(selEl.id, { pTop: v, manualPTop: v })}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <NumField label="Низ, мм" value={selEl.pBot ?? iH} min={0} max={iH}
+                onChange={v => updateEl(selEl.id, { pBot: v, manualPBot: v })}
+              />
+            </div>
+          </div>
+          <div style={{ fontSize: 10, color: "#666", marginTop: -4 }}>
+            Высота: {Math.round((selEl.pBot ?? iH) - (selEl.pTop ?? 0))} мм
+          </div>
+        </div>
+      )}
+
+      {/* DOOR */}
+      {selEl.type === "door" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 9, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Тип петли</div>
+            <div style={{ display: "flex", gap: 0 }}>
+              {["overlay", "insert"].map(ht => (
+                <button key={ht}
+                  onClick={() => updateEl(selEl.id, { hingeType: ht })}
+                  style={{
+                    flex: 1, padding: "7px 0",
+                    background: selEl.hingeType === ht ? "rgba(217,119,6,0.2)" : "rgba(30,30,40,0.5)",
+                    color: selEl.hingeType === ht ? "#d97706" : "#888",
+                    border: "1px solid " + (selEl.hingeType === ht ? "rgba(217,119,6,0.4)" : "rgba(60,60,70,0.5)"),
+                    fontSize: 11, fontWeight: 700, cursor: "pointer",
+                    fontFamily: "'IBM Plex Mono',monospace",
+                  }}>
+                  {ht === "overlay" ? "Накладная" : "Вкладная"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 9, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Петли</div>
+            <div style={{ display: "flex", gap: 0 }}>
+              {[
+                { v: "left", l: "← Лево" },
+                { v: "right", l: "Право →" },
+              ].map(s => (
+                <button key={s.v}
+                  onClick={() => updateEl(selEl.id, { hingeSide: s.v })}
+                  style={{
+                    flex: 1, padding: "7px 0",
+                    background: selEl.hingeSide === s.v ? "rgba(217,119,6,0.2)" : "rgba(30,30,40,0.5)",
+                    color: selEl.hingeSide === s.v ? "#d97706" : "#888",
+                    border: "1px solid " + (selEl.hingeSide === s.v ? "rgba(217,119,6,0.4)" : "rgba(60,60,70,0.5)"),
+                    fontSize: 11, fontWeight: 700, cursor: "pointer",
+                    fontFamily: "'IBM Plex Mono',monospace",
+                  }}>
+                  {s.l}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ fontSize: 10, color: "#666" }}>
+            Границы: {Math.round(selEl.doorLeft ?? 0)}–{Math.round(selEl.doorRight ?? iW)} × {Math.round(selEl.doorTop ?? 0)}–{Math.round(selEl.doorBottom ?? iH)}
+          </div>
+        </div>
+      )}
+
+      {/* PANEL */}
+      {selEl.type === "panel" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 9, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Тип</div>
+            <div style={{ display: "flex", gap: 0 }}>
+              {["overlay", "insert"].map(pt => (
+                <button key={pt}
+                  onClick={() => updateEl(selEl.id, { panelType: pt })}
+                  style={{
+                    flex: 1, padding: "7px 0",
+                    background: selEl.panelType === pt ? "rgba(217,119,6,0.2)" : "rgba(30,30,40,0.5)",
+                    color: selEl.panelType === pt ? "#d97706" : "#888",
+                    border: "1px solid " + (selEl.panelType === pt ? "rgba(217,119,6,0.4)" : "rgba(60,60,70,0.5)"),
+                    fontSize: 11, fontWeight: 700, cursor: "pointer",
+                    fontFamily: "'IBM Plex Mono',monospace",
+                  }}>
+                  {pt === "overlay" ? "Накладная" : "Вкладная"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ fontSize: 10, color: "#666" }}>
+            Границы: {Math.round(selEl.panelLeft ?? 0)}–{Math.round(selEl.panelRight ?? iW)} × {Math.round(selEl.panelTop ?? 0)}–{Math.round(selEl.panelBottom ?? iH)}
+          </div>
+        </div>
+      )}
+
+      {/* ROD */}
+      {selEl.type === "rod" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <NumField label="Y, мм" value={selEl.y} min={0} max={iH}
+            onChange={v => updateEl(selEl.id, { y: v })}
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <NumField label="X, мм" value={selEl.x ?? 0} min={0} max={iW}
+                onChange={v => updateEl(selEl.id, { x: v })}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <NumField label="Ш, мм" value={selEl.w ?? iW} min={50} max={iW}
+                onChange={v => updateEl(selEl.id, { w: v })}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DRAWERS */}
+      {selEl.type === "drawers" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <NumField label="Кол-во" value={selEl.count ?? 3} min={1} max={10}
+            onChange={v => updateEl(selEl.id, { count: v })}
+          />
+          <div style={{ fontSize: 10, color: "#666" }}>
+            Проём: {Math.round(selEl.x ?? 0)}..{Math.round((selEl.x ?? 0) + (selEl.w ?? iW))} × {Math.round(selEl.pTop ?? 0)}..{Math.round(selEl.pBot ?? iH)}
+          </div>
+        </div>
+      )}
+
+      {/* Delete button */}
+      <button
+        onClick={delSel}
+        style={{
+          marginTop: 20, width: "100%", padding: "10px 0",
+          background: "rgba(239,68,68,0.1)", color: "#ef4444",
+          border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4,
+          fontSize: 12, fontWeight: 700, cursor: "pointer",
+          fontFamily: "'IBM Plex Mono',monospace",
+        }}
+      >🗑 Удалить</button>
     </div>
   );
 }

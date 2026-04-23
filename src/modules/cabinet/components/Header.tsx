@@ -23,9 +23,6 @@ export interface HeaderProps {
   setShowDoors: (fn: (p: boolean) => boolean) => void;
   /** Открытие 3D-просмотра. */
   setShow3d: (v: boolean) => void;
-  /** Галочка «автоматически возвращаться в 3D после постановки элемента». */
-  autoReturnTo3d: boolean;
-  setAutoReturnTo3d: (fn: (p: boolean) => boolean) => void;
 }
 
 const PLACE_MODE_LABELS: Record<string, string> = {
@@ -43,7 +40,6 @@ export function Header(props: HeaderProps) {
     placeMode, setPlaceMode,
     showDoors, setShowDoors,
     setShow3d,
-    autoReturnTo3d, setAutoReturnTo3d,
   } = props;
 
   return (
@@ -123,29 +119,16 @@ export function Header(props: HeaderProps) {
           }}
         >🚪 Двери {showDoors ? "👁" : "👁‍🗨"}</button>
 
-        {/* Автовозврат в 3D — галочка */}
+        {/* Переключение на 2D-редактор (альтернативный режим) */}
         <button
-          onClick={() => setAutoReturnTo3d(p => !p)}
-          title="Автоматически вернуться в 3D-просмотр после постановки элемента"
-          style={{
-            padding: "4px 10px", borderRadius: 4, fontSize: 10, fontWeight: 700,
-            cursor: "pointer", border: "1px solid",
-            background: autoReturnTo3d ? "rgba(34,197,94,0.12)" : "rgba(60,60,60,0.12)",
-            color: autoReturnTo3d ? "#22c55e" : "#666",
-            borderColor: autoReturnTo3d ? "rgba(34,197,94,0.3)" : "#333",
-            display: isMobile ? "none" : "inline-flex", alignItems: "center", gap: 4,
-          }}
-        >{autoReturnTo3d ? "☑" : "☐"} авто-3D</button>
-
-        {/* К 3D просмотру */}
-        <button
-          onClick={() => setShow3d(true)}
+          onClick={() => setShow3d(false)}
           style={{
             padding: "4px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700,
             cursor: "pointer", border: "1px solid rgba(96,165,250,0.3)",
             background: "rgba(96,165,250,0.12)", color: "#60a5fa",
           }}
-        >🧊 К 3D</button>
+          title="Переключиться на классический 2D-редактор"
+        >📐 2D</button>
       </div>
     </div>
   );
