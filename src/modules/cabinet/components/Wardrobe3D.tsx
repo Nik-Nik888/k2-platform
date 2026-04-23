@@ -191,51 +191,52 @@ export default function Wardrobe3D({
 
   // ═══ Клавиатура для click-to-edit ═══
   // Space: активирует ввод активной цифры (A → B → A циклически).
-  // Enter: commit (только если уже есть lockedDim — обрабатывается в input onKeyDown).
+  // Enter: commit (обрабатывается в input onKeyDown).
   // Escape: cancel.
   // Работает только при placeMode === "stud" (на Этапе 1).
+  const toggleLockedSide = () => {
+    const { lockedDim: lD } = propsRef.current;
+    const niche = stateRef.current.lastNiche;
+    if (!niche) return; // курсор не над шкафом — ничего не делаем
+    if (lD === null) {
+      const txt = ghostDimARef.current?.textContent ?? "";
+      setLockedNiche(niche);
+      setLockedDim("A");
+      setLockedValue(txt.trim());
+    } else if (lD === "A") {
+      const txt = ghostDimBRef.current?.textContent ?? "";
+      setLockedDim("B");
+      setLockedValue(txt.trim());
+    } else if (lD === "B") {
+      const txt = ghostDimARef.current?.textContent ?? "";
+      setLockedDim("A");
+      setLockedValue(txt.trim());
+    }
+  };
+  const cancelLocked = () => {
+    setLockedDim(null);
+    setLockedValue("");
+    setLockedNiche(null);
+  };
+
   useEffect(() => {
     if (placeMode !== "stud") return;
     const onKey = (e) => {
+      // Если фокус в input — игнорируем window-keydown, чтобы не конфликтовать
+      // с его собственным onKeyDown (он вызовет toggleLockedSide напрямую).
+      const isInputFocused = document.activeElement?.tagName === "INPUT";
+      if (isInputFocused) return;
       const { lockedDim: lD } = propsRef.current;
-      if (e.key === " " || e.type === "k2-toggle-lock") {
-        // Space — переключить активную сторону
-        // НЕ активируем, если курсор не над шкафом (нет zoneHighlight).
-        // Проверяем через lastNiche — он сохраняется только когда курсор в нише.
-        const niche = stateRef.current.lastNiche;
-        if (!niche) return;
-        e.preventDefault?.();
-        if (lD === null) {
-          // Первый Space → активируем A
-          const txt = ghostDimARef.current?.textContent ?? "";
-          setLockedNiche(niche);
-          setLockedDim("A");
-          setLockedValue(txt.trim());
-        } else if (lD === "A") {
-          // Второй Space → переключаемся на B
-          const txt = ghostDimBRef.current?.textContent ?? "";
-          setLockedDim("B");
-          setLockedValue(txt.trim());
-        } else if (lD === "B") {
-          // Третий Space → обратно на A
-          const txt = ghostDimARef.current?.textContent ?? "";
-          setLockedDim("A");
-          setLockedValue(txt.trim());
-        }
+      if (e.key === " ") {
+        e.preventDefault();
+        toggleLockedSide();
       } else if (e.key === "Escape" && lD !== null) {
         e.preventDefault();
-        setLockedDim(null);
-        setLockedValue("");
-        setLockedNiche(null);
+        cancelLocked();
       }
-      // Enter обрабатывается в input onKeyDown напрямую.
     };
     window.addEventListener("keydown", onKey);
-    window.addEventListener("k2-toggle-lock", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("k2-toggle-lock", onKey);
-    };
+    return () => window.removeEventListener("keydown", onKey);
   }, [placeMode]);
 
   // Callback: применить зафиксированное значение — ставит элемент точно.
@@ -1753,11 +1754,8 @@ export default function Wardrobe3D({
             lockedValue={lockedValue}
             setLockedValue={setLockedValue}
             onCommit={() => commitLockedPlacement()}
-            onCancel={() => {
-              setLockedDim(null);
-              setLockedValue("");
-              setLockedNiche(null);
-            }}
+            onCancel={cancelLocked}
+            onToggle={toggleLockedSide}
             inputRef={lockedDim === "A" ? lockedInputRef : undefined}
           />
           <GhostDimBadge
@@ -1766,11 +1764,8 @@ export default function Wardrobe3D({
             lockedValue={lockedValue}
             setLockedValue={setLockedValue}
             onCommit={() => commitLockedPlacement()}
-            onCancel={() => {
-              setLockedDim(null);
-              setLockedValue("");
-              setLockedNiche(null);
-            }}
+            onCancel={cancelLocked}
+            onToggle={toggleLockedSide}
             inputRef={lockedDim === "B" ? lockedInputRef : undefined}
           />
 
@@ -1850,12 +1845,11 @@ export default function Wardrobe3D({
 // GhostDimBadge — жёлтая цифра рядом с фантомом при placeMode.
 // ═══════════════════════════════════════════════════════════════
 // Позиция обновляется императивно из updateZoneHighlight через refEl (ref на контейнер).
-// refEl вешается на корневой div (контейнер позиционирования).
 // Внутри — либо текст (отображаемый режим), либо <input> (режим ввода).
 //
-// Активация режима ввода — по клавише Space (не клик!), потому что фантом следует
-// за мышью и навестись на badge было бы невозможно. Keyboard handler в Wardrobe3D.
-// onBlur не обрабатывается — это управляется в Wardrobe3D через Escape/Enter.
+// Активация режима ввода — по клавише Space (глобальный listener в Wardrobe3D).
+// Когда input сфокусирован — window-handler игнорирует Space, а input сам вызывает
+// onToggle (переключить A ↔ B) / onCommit (Enter) / onCancel (Escape).
 function GhostDimBadge({
   refEl,
   isLocked,
@@ -1863,28 +1857,29 @@ function GhostDimBadge({
   setLockedValue,
   onCommit,
   onCancel,
+  onToggle,
   inputRef,
 }) {
   const baseStyle = {
     position: "absolute",
     left: 0, top: 0,
     transform: "translate(-50%, -50%)",
-    padding: "3px 8px",
-    fontSize: 13,
-    fontWeight: 700,
+    padding: isLocked ? "1px 4px" : "2px 6px",
+    fontSize: 11,
+    fontWeight: 600,
     fontFamily: "'IBM Plex Mono', monospace",
-    color: "#000",
-    background: isLocked ? "rgba(252,211,77,1)" : "rgba(251,191,36,0.95)",
-    border: isLocked ? "2px solid #d97706" : "1px solid rgba(217,119,6,0.6)",
-    borderRadius: 3,
+    color: "#1a1a1a",
+    background: isLocked ? "#fde68a" : "rgba(251,191,36,0.92)",
+    border: isLocked ? "1px solid #b45309" : "1px solid rgba(180,83,9,0.5)",
+    borderRadius: 2,
     whiteSpace: "nowrap",
     userSelect: "none",
     display: "none",
-    boxShadow: isLocked ? "0 0 0 3px rgba(251,191,36,0.35), 0 2px 6px rgba(0,0,0,0.4)" : "0 2px 6px rgba(0,0,0,0.4)",
+    boxShadow: isLocked ? "0 0 0 2px rgba(251,191,36,0.3)" : "0 1px 3px rgba(0,0,0,0.3)",
     zIndex: isLocked ? 8 : 6,
     pointerEvents: "none",
-    minWidth: isLocked ? 55 : "auto",
     textAlign: "center",
+    lineHeight: 1.2,
   };
 
   if (isLocked) {
@@ -1900,8 +1895,6 @@ function GhostDimBadge({
             setLockedValue(v);
           }}
           onKeyDown={e => {
-            // Enter / Escape обработаны глобальным keyboard handler в Wardrobe3D.
-            // Но т.к. input перехватывает клавиатуру, дублируем обработку:
             if (e.key === "Enter") {
               e.preventDefault();
               onCommit();
@@ -1909,26 +1902,24 @@ function GhostDimBadge({
               e.preventDefault();
               onCancel();
             } else if (e.key === " ") {
-              // Space внутри input — пропускаем к глобальному handler (переключить сторону)
-              // preventDefault чтобы пробел не вставился в число, но всплытие разрешаем.
+              // Space внутри input → переключаем сторону (не даём пробелу вставиться)
               e.preventDefault();
-              // Вызываем нашу глобальную логику через onCommit-like callback
-              // Используем отдельный callback через prop? Проще — dispatch синтетический keydown:
-              window.dispatchEvent(new KeyboardEvent("k2-toggle-lock", { key: " " }));
+              onToggle?.();
             }
           }}
           style={{
-            width: "100%",
+            width: 45,
             background: "transparent",
             border: "none",
             outline: "none",
-            fontSize: 13,
-            fontWeight: 700,
+            fontSize: 11,
+            fontWeight: 600,
             fontFamily: "'IBM Plex Mono', monospace",
-            color: "#000",
+            color: "#1a1a1a",
             textAlign: "center",
             padding: 0,
-            minWidth: 40,
+            margin: 0,
+            lineHeight: 1.2,
           }}
         />
       </div>
