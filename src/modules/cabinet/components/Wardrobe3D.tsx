@@ -894,9 +894,9 @@ export default function Wardrobe3D({
         return { clickX, clickY };
       };
 
-      // ── Helper: обновить подсветку зоны под курсором ──
-      // Если placeMode активен и курсор над шкафом — подсвечивает зону.
-      // Иначе скрывает подсветку.
+      // ── Helper: обновить подсветку силуэта элемента под курсором ──
+      // Для placeMode рассчитываем где именно встанет элемент (а не всю нишу),
+      // и рисуем жёлтый прямоугольник его реального размера.
       const updateZoneHighlight = (clientX, clientY) => {
         const { placeMode: pm, findDoorBounds: fdb, iW: cW, iH: cH, t: ct } = propsRef.current;
         if (!pm || !fdb) {
@@ -913,37 +913,75 @@ export default function Wardrobe3D({
           zoneHighlight.visible = false;
           return;
         }
-        // Зона = прямоугольник [innerEdge.left, innerEdge.right] × [innerEdge.top, innerEdge.bottom]
-        const xL = bounds.left.innerEdge ?? bounds.left.x ?? 0;
-        const xR = bounds.right.innerEdge ?? bounds.right.x ?? cW;
-        const yT = bounds.top.innerEdge ?? bounds.top.y ?? 0;
-        const yB = bounds.bottom.innerEdge ?? bounds.bottom.y ?? cH;
-        const zoneW = (xR - xL) * S;
-        const zoneH = (yB - yT) * S;
-        if (zoneW <= 0 || zoneH <= 0) {
+        // Границы ниши (innerEdge с учётом стенок/стоек)
+        const niL = bounds.left.innerEdge ?? bounds.left.x ?? 0;
+        const niR = bounds.right.innerEdge ?? bounds.right.x ?? cW;
+        const niT = bounds.top.innerEdge ?? bounds.top.y ?? 0;
+        const niB = bounds.bottom.innerEdge ?? bounds.bottom.y ?? cH;
+
+        // Рассчитываем ПРЯМОУГОЛЬНИК СИЛУЭТА элемента (мм координаты в шкафу).
+        // {x1, y1} — верхний левый угол, {x2, y2} — нижний правый.
+        let x1, y1, x2, y2;
+
+        if (pm === "stud") {
+          // Стойка — узкая вертикальная полоска шириной t на полную высоту ниши.
+          // Центрируется на X клика, кламп в [niL, niR-t].
+          const studX = Math.max(niL, Math.min(niR - ct, Math.round(proj.clickX - ct / 2)));
+          x1 = studX; x2 = studX + ct;
+          y1 = niT;   y2 = niB;
+        } else if (pm === "shelf") {
+          // Полка — горизонтальная полоска высотой t на полную ширину ниши.
+          // Smart-Y: близко к верху → толщина вниз, близко к низу → вверх, иначе по центру.
+          const shY = Math.round(proj.clickY);
+          if (shY < niT + 5) { y1 = niT; y2 = niT + ct; }
+          else if (shY > niB - 5) { y1 = niB - ct; y2 = niB; }
+          else { y1 = shY - ct / 2; y2 = shY + ct / 2; }
+          x1 = niL; x2 = niR;
+        } else if (pm === "rod") {
+          // Штанга — тонкая (~25мм) горизонтальная палка по середине высоты ниши.
+          const rodY = Math.round(proj.clickY);
+          y1 = rodY - 12; y2 = rodY + 12;
+          x1 = niL;       x2 = niR;
+        } else if (pm === "door" || pm === "panel") {
+          // Дверь/панель — заполняет всю нишу (для insert вычитаем 3мм зазор).
+          // Для overlay налезает на стенки на 14мм — но мы рисуем по нише insert-режима
+          // как достаточное приближение.
+          const GAP = 3;
+          x1 = niL + GAP; x2 = niR - GAP;
+          y1 = niT + GAP; y2 = niB - GAP;
+        } else if (pm === "drawers") {
+          // Ящики — заполняют весь проём.
+          x1 = niL; x2 = niR;
+          y1 = niT; y2 = niB;
+        } else {
+          x1 = niL; x2 = niR;
+          y1 = niT; y2 = niB;
+        }
+
+        const w = x2 - x1;
+        const h = y2 - y1;
+        if (w <= 0 || h <= 0) {
           zoneHighlight.visible = false;
           return;
         }
-        // Центр зоны в 3D
-        const cxMm = (xL + xR) / 2;
-        const cyMm = (yT + yB) / 2;
+        // Центр силуэта в 3D
+        const cxMm = (x1 + x2) / 2;
+        const cyMm = (y1 + y2) / 2;
         const cx = (cxMm - cW / 2) * S;
         const cy = (cH / 2 - cyMm) * S;
-        // Размещаем зону ДАЛЕКО впереди шкафа (50мм), чтобы гарантированно
-        // быть перед дверями (которые тоже выступают спереди на 14-30мм).
-        // depthTest:false уже отключён, так что z-конфликта не будет, но
-        // лишний запас не повредит.
+        // Размещаем впереди шкафа (50мм), чтобы быть перед дверями.
         zoneHighlight.position.set(cx, cy, d / 2 + 0.05);
-        zoneHighlight.scale.set(zoneW, zoneH, 1);
+        zoneHighlight.scale.set(w * S, h * S, 1);
         zoneHighlight.visible = true;
       };
 
       const onPointerDown = e => {
         // На тач-устройствах предотвращаем скролл страницы
         if (e.pointerType === 'touch') e.preventDefault();
-        const { placeMode: pm } = propsRef.current;
-        // В placeMode не вращаем — клик считается постановкой элемента
-        isDragging = !pm;
+        // Drag разрешён ВСЕГДА — даже в placeMode (чтобы можно было крутить сцену
+        // перед постановкой элемента). Различение drag vs click делается в onPointerUp
+        // по дистанции (CLICK_THRESHOLD_PX) и времени (CLICK_THRESHOLD_MS).
+        isDragging = true;
         prevX = e.clientX;
         prevY = e.clientY;
         downX = e.clientX;
@@ -953,20 +991,33 @@ export default function Wardrobe3D({
       };
       const onPointerMove = e => {
         const { placeMode: pm } = propsRef.current;
-        // В placeMode — обновляем подсветку зоны при каждом движении (не drag вращения)
-        if (pm) {
-          updateZoneHighlight(e.clientX, e.clientY);
+        // Если идёт drag (мышь зажата и движется) — крутим сцену.
+        // Иначе (просто hover в placeMode) — обновляем подсветку зоны.
+        if (isDragging) {
+          // Различаем «настоящий drag» от «дёрнул мышью при клике» по порогу:
+          // если переместились дальше CLICK_THRESHOLD_PX — это уже точно drag
+          const dx = e.clientX - downX;
+          const dy = e.clientY - downY;
+          const totalDist = Math.sqrt(dx * dx + dy * dy);
+          if (totalDist >= CLICK_THRESHOLD_PX) {
+            // Это вращение
+            rotY += (e.clientX - prevX) * 0.004;
+            rotX = Math.max(-1.0, Math.min(1.0, rotX + (e.clientY - prevY) * 0.004));
+            prevX = e.clientX;
+            prevY = e.clientY;
+            // В placeMode при настоящем drag скрываем подсветку (мы крутим, не выбираем)
+            if (pm) zoneHighlight.visible = false;
+          }
           return;
         }
-        if (!isDragging) return;
-        rotY += (e.clientX - prevX) * 0.004;
-        rotX = Math.max(-1.0, Math.min(1.0, rotX + (e.clientY - prevY) * 0.004));
-        prevX = e.clientX;
-        prevY = e.clientY;
+        // Hover без зажатой кнопки — только в placeMode обновляем подсветку
+        if (pm) {
+          updateZoneHighlight(e.clientX, e.clientY);
+        }
       };
       const onPointerUp = (e) => {
         isDragging = false;
-        const { placeMode: pm, placeInZone: piz } = propsRef.current;
+        const { placeMode: pm, placeInZone: piz, setPlaceMode: spm } = propsRef.current;
         // Короткий клик (не drag)?
         const dx = (e?.clientX ?? 0) - downX;
         const dy = (e?.clientY ?? 0) - downY;
@@ -974,31 +1025,37 @@ export default function Wardrobe3D({
         const isClick = Math.sqrt(dx * dx + dy * dy) < CLICK_THRESHOLD_PX && dt < CLICK_THRESHOLD_MS;
         if (!isClick) return;
 
-        // ─── Режим постановки элемента: проекция → placeInZone ───
+        // Сначала всегда проверяем — попал ли клик ПО ЭЛЕМЕНТУ.
+        // Если да — выделяем (даже в placeMode!), и если был placeMode — сбрасываем его.
+        // Это решает проблему: после постановки стойки её нельзя было выделить,
+        // потому что placeMode оставался активным и клик считался постановкой.
+        const rect = renderer.domElement.getBoundingClientRect();
+        ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(ndc, camera);
+        const hits = raycaster.intersectObject(group, true);
+        const hit = hits.find(h => h.object?.userData?.elementId);
+
+        if (hit && onElementClick) {
+          // Клик попал на существующий элемент → выделяем
+          if (pm && spm) spm(null);   // выходим из placeMode
+          zoneHighlight.visible = false;
+          onElementClick(hit.object.userData.elementId);
+          return;
+        }
+
+        // Клик в пустое место
         if (pm && piz) {
+          // ─── Режим постановки: проекция → placeInZone ───
           const proj = screenToCabinetMm(e.clientX, e.clientY);
           if (proj) {
-            // 2-й параметр zone не используется в новом коде purePlaceInZone — передаём null
             piz(null, proj.clickX, proj.clickY);
             zoneHighlight.visible = false;
           }
           return;
         }
-
-        // ─── Обычный режим: выделение элемента ───
-        if (onElementClick) {
-          const rect = renderer.domElement.getBoundingClientRect();
-          ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-          ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-          raycaster.setFromCamera(ndc, camera);
-          const hits = raycaster.intersectObject(group, true);
-          const hit = hits.find(h => h.object?.userData?.elementId);
-          if (hit) {
-            onElementClick(hit.object.userData.elementId);
-          } else {
-            onElementClick(null);
-          }
-        }
+        // ─── Обычный режим: снимаем выделение ───
+        if (onElementClick) onElementClick(null);
       };
 
       // ── Touch: pinch-zoom двумя пальцами ──────────────
