@@ -357,14 +357,17 @@ export default function Wardrobe3D({
     // ═══ PROJECTION PLANE — невидимая плоскость для raycast click-to-place ═══
     // Расположена на передней грани шкафа (z = +d/2), размер = iW × iH.
     // Используется только в placeMode для определения координат клика в шкафу.
-    // Не видна, не блокирует свет, не отбрасывает тень.
+    // ВАЖНО: visible:false НЕ работает с raycaster'ом — плоскость становится не пересекаемой.
+    // Поэтому делаем её прозрачной (opacity:0) и без записи в z-buffer.
     const placeProjPlane = (() => {
       const iWm = (showCorpus ? W - 2 * T : W) * S;
       const iHm = (showCorpus ? H - 2 * T : H) * S;
       const planeGeo = new THREE.PlaneGeometry(iWm, iHm);
       const planeMat = new THREE.MeshBasicMaterial({
-        visible: false,           // невидима
+        transparent: true,
+        opacity: 0,               // невидима визуально
         side: THREE.DoubleSide,   // raycast с обеих сторон
+        depthWrite: false,        // не пишет в z-buffer (не загораживает другие меши)
       });
       const plane = new THREE.Mesh(planeGeo, planeMat);
       plane.position.set(0, 0, d / 2 + 0.01); // чуть впереди шкафа
@@ -854,6 +857,17 @@ export default function Wardrobe3D({
         ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
         raycaster.setFromCamera(ndc, camera);
         const hits = raycaster.intersectObject(placeProjPlane, false);
+        // ВРЕМЕННЫЙ ДИАГНОСТИЧЕСКИЙ ЛОГ — убрать после фикса
+        if (!stateRef.current._loggedProj) {
+          stateRef.current._loggedProj = true;
+          console.log('[3D place] первый raycast:', {
+            ndc: { x: ndc.x, y: ndc.y },
+            hits: hits.length,
+            placeProjPlane: !!placeProjPlane,
+            planePosition: placeProjPlane?.position,
+            planeMaterial: { opacity: placeProjPlane?.material?.opacity, transparent: placeProjPlane?.material?.transparent, visible: placeProjPlane?.material?.visible },
+          });
+        }
         if (!hits.length) return null;
         const point = hits[0].point;
         // Обратная формула из toX/toY:
@@ -872,6 +886,11 @@ export default function Wardrobe3D({
       // Иначе скрывает подсветку.
       const updateZoneHighlight = (clientX, clientY) => {
         const { placeMode: pm, findDoorBounds: fdb, iW: cW, iH: cH, t: ct } = propsRef.current;
+        // ВРЕМЕННЫЙ ЛОГ — раз в 30 движений мыши
+        stateRef.current._mvCnt = (stateRef.current._mvCnt || 0) + 1;
+        if (stateRef.current._mvCnt % 30 === 1) {
+          console.log('[3D zone] tick', { placeMode: pm, hasFdb: !!fdb, mvCnt: stateRef.current._mvCnt });
+        }
         if (!pm || !fdb) {
           zoneHighlight.visible = false;
           return;
@@ -882,6 +901,9 @@ export default function Wardrobe3D({
           return;
         }
         const bounds = fdb(proj.clickX, proj.clickY);
+        if (stateRef.current._mvCnt % 30 === 1) {
+          console.log('[3D zone] proj+bounds:', { proj, bounds });
+        }
         if (!bounds) {
           zoneHighlight.visible = false;
           return;
