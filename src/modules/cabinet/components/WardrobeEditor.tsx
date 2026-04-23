@@ -44,7 +44,12 @@ export default function WardrobeEditor() {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [dimDirOverrides, setDimDirOverrides] = useState({});
-  const [show3d, setShow3d] = useState(false);
+  // 3D — главный режим (по умолчанию открыт при загрузке).
+  // Клик на элемент в 3D → выделяем его + переходим в 2D для редактирования.
+  // Из 2D можно вернуться в 3D кнопкой «К 3D просмотру».
+  const [show3d, setShow3d] = useState(true);
+  // Галочка в 2D: после постановки элемента вернуться в 3D автоматически.
+  const [autoReturnTo3d, setAutoReturnTo3d] = useState(false);
   /* Unified placement: click tool → highlight zones → click zone → place element
      For doors: special mode where user picks 4 boundaries */
   const [placeMode, setPlaceMode] = useState(null); // null | "shelf" | "stud" | "drawers" | "rod" | "door" | "panel"
@@ -132,12 +137,17 @@ export default function WardrobeEditor() {
       setPlaceMode(null);
       return;
     }
-    setElements(prev => adjust([...prev, result.element]));
+    setElements(prev => {
+      const withNew = [...prev, result.element];
+      return adjust(withNew);
+    });
     if (!result.keepPlaceMode) {
       setPlaceMode(null);
       setSelId(result.element.id);
+      // Автовозврат в 3D после постановки элемента (если галочка включена)
+      if (autoReturnTo3d) setShow3d(true);
     }
-  }, [placeMode, elements, adjust, iW, iH, t, findDoorBounds, doorPrefs, panelPrefs]);
+  }, [placeMode, elements, adjust, iW, iH, t, findDoorBounds, doorPrefs, panelPrefs, autoReturnTo3d]);
 
   const delSel = useCallback(() => { if (!selId) return; setElements(prev => adjust(prev.filter(e => e.id !== selId))); setSelId(null); }, [selId, adjust]);
 
@@ -609,6 +619,8 @@ export default function WardrobeEditor() {
         showDoors={showDoors}
         setShowDoors={setShowDoors}
         setShow3d={setShow3d}
+        autoReturnTo3d={autoReturnTo3d}
+        setAutoReturnTo3d={setAutoReturnTo3d}
       />
 
       {/* ═══ PRE-PLACEMENT PREFS ═══
@@ -840,7 +852,22 @@ export default function WardrobeEditor() {
         </>
       )}
 
-      {show3d && <Wardrobe3D corpus={corpus} elements={elements} corpusTexture={corpusTexInfo} facadeTexture={facadeTexInfo} showDoors={showDoors} showCorpus={showCorpus} onClose={() => setShow3d(false)} />}
+      {show3d && <Wardrobe3D
+        corpus={corpus}
+        elements={elements}
+        corpusTexture={corpusTexInfo}
+        facadeTexture={facadeTexInfo}
+        showDoors={showDoors}
+        showCorpus={showCorpus}
+        onClose={() => setShow3d(false)}
+        selId={selId}
+        onElementClick={(id) => {
+          // Клик по элементу в 3D → выделяем и переходим в 2D для редактирования.
+          // Клик в пустое место (id=null) — просто снимаем выделение, не переключаемся.
+          setSelId(id);
+          if (id) setShow3d(false);
+        }}
+      />}
     </div>
   );
 }

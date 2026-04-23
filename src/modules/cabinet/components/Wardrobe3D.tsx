@@ -87,7 +87,15 @@ function createLDSPPanel(pw, ph, pd, mat, edgeMat, edgeBand = {}, grainDir = "h"
   return group;
 }
 
-export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeTexture, showDoors = true, showCorpus = true, onClose }) {
+export default function Wardrobe3D({
+  corpus, elements, corpusTexture, facadeTexture,
+  showDoors = true, showCorpus = true,
+  onClose,
+  // Новое в v1 3D-first: интерактивный режим
+  selId = null,             // id выделенного элемента (для outline)
+  onElementClick = null,    // callback: (elementId: string | null) => void
+  showRoom = true,          // показывать ли комнату (стены+пол)
+}) {
   const mountRef = useRef(null);
   const stateRef = useRef({});
 
@@ -219,14 +227,54 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
     const iW = showCorpus ? W - 2 * T : W;
     const iH = showCorpus ? H - 2 * T : H;
 
-    // ── Floor shadow plane ──
-    const floorGeo = new THREE.PlaneGeometry(6, 6);
-    const floorMat = new THREE.ShadowMaterial({ opacity: 0.35 });
-    const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -h / 2;
-    floor.receiveShadow = true;
-    scene.add(floor);
+    // ═══ ROOM — простая комната для понимания масштаба ═══
+    // - Пол: 4×4м, светло-серый матовый (нейтральный «бетон»)
+    // - Задняя стена: шире шкафа на 500мм с каждой стороны, высота +500мм
+    // - Левая стена: 500мм в глубину, перпендикулярно задней (для эффекта угла)
+    // Шкаф стоит у задней стены (z = -d/2 совпадает со стеной).
+    if (showRoom) {
+      const roomW = Math.max(w + 1, 3);          // ≥3м ширина комнаты
+      const roomH = Math.max(h + 0.5, 2.5);      // потолок на 500мм выше шкафа
+      const sideW = 0.5;                          // 500мм боковая стена
+      const floorSize = Math.max(w + 2, 4);       // пол с запасом 1м с каждой стороны
+
+      // Материалы
+      const floorMat2 = new THREE.MeshStandardMaterial({
+        color: 0xc8c0b0, roughness: 0.95, metalness: 0,
+      });
+      const wallMat = new THREE.MeshStandardMaterial({
+        color: 0xe8e2d5, roughness: 0.92, metalness: 0,
+      });
+
+      // Пол
+      const roomFloor = new THREE.Mesh(new THREE.PlaneGeometry(floorSize, floorSize), floorMat2);
+      roomFloor.rotation.x = -Math.PI / 2;
+      roomFloor.position.y = -h / 2;
+      roomFloor.receiveShadow = true;
+      scene.add(roomFloor);
+
+      // Задняя стена (позади шкафа, z = -d/2)
+      const backWall = new THREE.Mesh(new THREE.PlaneGeometry(roomW, roomH), wallMat);
+      backWall.position.set(0, -h / 2 + roomH / 2, -d / 2 - 0.005);
+      backWall.receiveShadow = true;
+      scene.add(backWall);
+
+      // Левая стена (перпендикулярно задней)
+      const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(sideW + d, roomH), wallMat);
+      leftWall.rotation.y = Math.PI / 2;
+      leftWall.position.set(-w / 2 - 0.005, -h / 2 + roomH / 2, -d / 2 + (sideW + d) / 2);
+      leftWall.receiveShadow = true;
+      scene.add(leftWall);
+    } else {
+      // Старое поведение — просто теневой пол (для тестов или мобильного если понадобится)
+      const floorGeo2 = new THREE.PlaneGeometry(6, 6);
+      const floorMat3 = new THREE.ShadowMaterial({ opacity: 0.35 });
+      const floorT = new THREE.Mesh(floorGeo2, floorMat3);
+      floorT.rotation.x = -Math.PI / 2;
+      floorT.position.y = -h / 2;
+      floorT.receiveShadow = true;
+      scene.add(floorT);
+    }
 
     /* ─── Coordinate helpers ─── */
     // Convert inner mm coords to 3D position
@@ -236,7 +284,13 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
     /* ═══════════════════════════════
        INTERNAL ELEMENTS
        ═══════════════════════════════ */
+    // Карта id → Object3D[] — чтобы быстро найти все меши элемента для подсветки (outline).
+    const elementMeshes = new Map();
+
     elements.forEach(el => {
+      // Запоминаем сколько детей group было ДО обработки этого элемента,
+      // чтобы потом пометить все новые userData.elementId = el.id
+      const childrenBefore = group.children.length;
 
       /* ── SHELF (Полка) ──
          Real construction:
@@ -539,6 +593,16 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
           { top: true, bottom: true, left: true, right: true }
         );
       }
+
+      // После обработки элемента: всем новым children группы присваиваем elementId.
+      // Это нужно для raycast'а (чтобы понять на что кликнули) и для outline (подсветка).
+      const addedMeshes = group.children.slice(childrenBefore);
+      addedMeshes.forEach(obj => {
+        obj.userData.elementId = el.id;
+        // Рекурсивно у вложенных (у стойки/полки корневой — Group из createLDSPPanel)
+        obj.traverse?.(c => { c.userData.elementId = el.id; });
+      });
+      elementMeshes.set(el.id, addedMeshes);
     });
 
     scene.add(group);
@@ -600,17 +664,65 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
     mountRef.current.innerHTML = "";
     mountRef.current.appendChild(renderer.domElement);
 
-    return { scene, camera, renderer, dist };
-  }, [corpus, elements, corpusTexture, facadeTexture, showDoors, showCorpus]);
+    return { scene, camera, renderer, dist, elementMeshes, group };
+  }, [corpus, elements, corpusTexture, facadeTexture, showDoors, showCorpus, showRoom]);
 
   useEffect(() => {
     if (!mountRef.current) return;
     let cancelled = false;
 
-    build().then(({ scene, camera, renderer, dist }) => {
+    build().then(({ scene, camera, renderer, dist, elementMeshes, group }) => {
       if (cancelled) return;
 
       let isDragging = false, prevX = 0, prevY = 0, rotY = 0.35, rotX = 0.12, zoom = 1;
+
+      // ── Raycast setup — для клика по элементам ──
+      const raycaster = new THREE.Raycaster();
+      const ndc = new THREE.Vector2();
+      // Запоминаем начальные координаты pointerdown — если pointerup близко, это клик (не drag).
+      let downX = 0, downY = 0, downTime = 0;
+      const CLICK_THRESHOLD_PX = 6;
+      const CLICK_THRESHOLD_MS = 400;
+
+      // ── Outline (подсветка) выделенного элемента ──
+      // Создаём group для outline-линий, обновляем его при изменении selId.
+      const outlineGroup = new THREE.Group();
+      scene.add(outlineGroup);
+      const OUTLINE_COLOR = 0xfbbf24;
+      const updateOutline = (id) => {
+        // Удаляем старые линии
+        while (outlineGroup.children.length) {
+          const c = outlineGroup.children.pop();
+          c.geometry?.dispose?.();
+          c.material?.dispose?.();
+        }
+        if (!id) return;
+        const meshes = elementMeshes.get(id);
+        if (!meshes) return;
+        // Для каждой mesh с BoxGeometry строим EdgesGeometry
+        const mat = new THREE.LineBasicMaterial({ color: OUTLINE_COLOR, linewidth: 2 });
+        meshes.forEach(obj => {
+          obj.traverse?.(c => {
+            if (c.isMesh && c.geometry) {
+              const edges = new THREE.EdgesGeometry(c.geometry, 15);
+              const line = new THREE.LineSegments(edges, mat);
+              // Копируем world-трансформацию
+              obj.updateMatrixWorld?.(true);
+              c.updateMatrixWorld?.(true);
+              line.position.copy(c.getWorldPosition(new THREE.Vector3()));
+              line.quaternion.copy(c.getWorldQuaternion(new THREE.Quaternion()));
+              line.scale.copy(c.getWorldScale(new THREE.Vector3()));
+              // Чуть увеличиваем чтобы outline был виден поверх меша
+              line.scale.multiplyScalar(1.008);
+              outlineGroup.add(line);
+            }
+          });
+        });
+      };
+      // Сохраняем updateOutline в stateRef, чтобы можно было дёргать при изменении selId снаружи
+      stateRef.current.updateOutline = updateOutline;
+      // Начальная подсветка (если selId уже задан)
+      updateOutline(selId);
 
       const onWheel = e => {
         e.preventDefault();
@@ -622,6 +734,9 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
         isDragging = true;
         prevX = e.clientX;
         prevY = e.clientY;
+        downX = e.clientX;
+        downY = e.clientY;
+        downTime = Date.now();
         renderer.domElement.setPointerCapture(e.pointerId);
       };
       const onPointerMove = e => {
@@ -631,7 +746,30 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
         prevX = e.clientX;
         prevY = e.clientY;
       };
-      const onPointerUp = () => isDragging = false;
+      const onPointerUp = (e) => {
+        isDragging = false;
+        // Если это был короткий клик (не drag) — делаем raycast
+        if (onElementClick) {
+          const dx = (e?.clientX ?? 0) - downX;
+          const dy = (e?.clientY ?? 0) - downY;
+          const dt = Date.now() - downTime;
+          if (Math.sqrt(dx * dx + dy * dy) < CLICK_THRESHOLD_PX && dt < CLICK_THRESHOLD_MS) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(ndc, camera);
+            // Ищем пересечения с дочерними объектами группы шкафа (без комнаты/outline)
+            const hits = raycaster.intersectObject(group, true);
+            const hit = hits.find(h => h.object?.userData?.elementId);
+            if (hit) {
+              onElementClick(hit.object.userData.elementId);
+            } else {
+              // Клик в пустое место — сбрасываем выделение
+              onElementClick(null);
+            }
+          }
+        }
+      };
 
       // ── Touch: pinch-zoom двумя пальцами ──────────────
       let pinchStartDist = 0;
@@ -714,6 +852,13 @@ export default function Wardrobe3D({ corpus, elements, corpusTexture, facadeText
       stateRef.current.cleanup?.();
     };
   }, [build]);
+
+  // Синхронизация outline-подсветки с selId (обновляется без полного перестроения сцены)
+  useEffect(() => {
+    if (stateRef.current.updateOutline) {
+      stateRef.current.updateOutline(selId);
+    }
+  }, [selId]);
 
   return (
     <div style={{
