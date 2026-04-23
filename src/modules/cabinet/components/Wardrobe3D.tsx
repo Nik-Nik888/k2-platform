@@ -765,44 +765,36 @@ export default function Wardrobe3D({
     mountRef.current.innerHTML = "";
     mountRef.current.appendChild(renderer.domElement);
 
-    // ═══ ZONE HIGHLIGHT — подсветка зоны постановки в placeMode ═══
-    // Полупрозрачный жёлтый прямоугольник + жёлтая обводка, показывает куда встанет элемент.
-    // Изначально невидим, появляется при движении мыши в placeMode и hover'е над зоной.
+    // ═══ ZONE HIGHLIGHT — подсветка контура элемента в placeMode ═══
+    // Жёлтая рамка по контуру (из 4-х тонких box-палочек), как outline у выделенного элемента.
+    // Без заливки — чтобы видеть содержимое шкафа за подсветкой.
+    // Изначально невидим, появляется при движении мыши в placeMode.
+    //
+    // Толщина обводки задана в МЕТРАХ (не масштабируется со scale группы),
+    // потому что мы используем дочерние меши которые позиционируются вручную в updateZoneHighlight.
     const zoneHighlight = (() => {
       const grp = new THREE.Group();
-      // Заливка
-      const fillGeo = new THREE.PlaneGeometry(1, 1);
-      const fillMat = new THREE.MeshBasicMaterial({
-        color: 0xfbbf24,
-        transparent: true,
-        opacity: 0.45,            // увеличено с 0.28 для видимости
-        side: THREE.DoubleSide,
-        depthTest: false,
-        depthWrite: false,
-      });
-      const fillMesh = new THREE.Mesh(fillGeo, fillMat);
-      fillMesh.renderOrder = 997;
-      grp.add(fillMesh);
-      // Обводка по периметру (LineSegments)
-      const halfW = 0.5, halfH = 0.5;
-      const edgePos = [
-        -halfW, -halfH, 0,   halfW, -halfH, 0,
-         halfW, -halfH, 0,   halfW,  halfH, 0,
-         halfW,  halfH, 0,  -halfW,  halfH, 0,
-        -halfW,  halfH, 0,  -halfW, -halfH, 0,
-      ];
-      const edgeGeo = new THREE.BufferGeometry();
-      edgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(edgePos, 3));
-      const edgeMat = new THREE.LineBasicMaterial({
+      const edgeMat = new THREE.MeshBasicMaterial({
         color: 0xfbbf24,
         transparent: true,
         opacity: 0.95,
         depthTest: false,
         depthWrite: false,
       });
-      const edgeLines = new THREE.LineSegments(edgeGeo, edgeMat);
-      edgeLines.renderOrder = 998;
-      grp.add(edgeLines);
+      // 4 box-палочки: top, bottom, left, right
+      // Размеры устанавливаются через scale в updateZoneHighlight, но геометрия — единичный куб.
+      // Используем BoxGeometry(1,1,1) и затем scale в updateZoneHighlight.
+      const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+      const top = new THREE.Mesh(boxGeo, edgeMat);
+      const bottom = new THREE.Mesh(boxGeo, edgeMat);
+      const left = new THREE.Mesh(boxGeo, edgeMat);
+      const right = new THREE.Mesh(boxGeo, edgeMat);
+      [top, bottom, left, right].forEach(m => {
+        m.renderOrder = 998;
+        grp.add(m);
+      });
+      // Сохраняем ссылки на меши прямо в группе для удобства updateZoneHighlight
+      grp.userData.edges = { top, bottom, left, right };
       grp.visible = false;
       scene.add(grp);
       return grp;
@@ -964,14 +956,36 @@ export default function Wardrobe3D({
           zoneHighlight.visible = false;
           return;
         }
-        // Центр силуэта в 3D
+        // Центр силуэта в 3D (метры)
         const cxMm = (x1 + x2) / 2;
         const cyMm = (y1 + y2) / 2;
         const cx = (cxMm - cW / 2) * S;
         const cy = (cH / 2 - cyMm) * S;
-        // Размещаем впереди шкафа (50мм), чтобы быть перед дверями.
-        zoneHighlight.position.set(cx, cy, d / 2 + 0.05);
-        zoneHighlight.scale.set(w * S, h * S, 1);
+        const wM = w * S; // ширина рамки в метрах
+        const hM = h * S; // высота рамки в метрах
+        const zPos = d / 2 + 0.05; // 50мм впереди шкафа
+
+        // Размещаем группу в центре (для общей позиции и поворота — пока не используем)
+        zoneHighlight.position.set(cx, cy, zPos);
+        zoneHighlight.scale.set(1, 1, 1); // важно: scale на группе НЕ применяем, иначе боксы исказятся
+
+        // Толщина рамки: 12мм в метрах (видимая, но не громоздкая)
+        const T_FRAME = 0.012;
+        const T_DEPTH = 0.001; // глубина боксов — символическая, чтобы они были плоскими
+        const { top, bottom, left, right } = zoneHighlight.userData.edges;
+        // Top — горизонтальная палочка по верху (y = +hM/2), полная ширина wM
+        top.scale.set(wM + T_FRAME, T_FRAME, T_DEPTH);
+        top.position.set(0, hM / 2, 0);
+        // Bottom
+        bottom.scale.set(wM + T_FRAME, T_FRAME, T_DEPTH);
+        bottom.position.set(0, -hM / 2, 0);
+        // Left — вертикальная палочка по левому краю
+        left.scale.set(T_FRAME, hM, T_DEPTH);
+        left.position.set(-wM / 2, 0, 0);
+        // Right
+        right.scale.set(T_FRAME, hM, T_DEPTH);
+        right.position.set(wM / 2, 0, 0);
+
         zoneHighlight.visible = true;
       };
 
