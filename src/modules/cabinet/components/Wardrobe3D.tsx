@@ -784,14 +784,14 @@ export default function Wardrobe3D({
       return mesh;
     })();
 
-    return { scene, camera, renderer, dist, elementMeshes, group, placeProjPlane, zoneHighlight };
+    return { scene, camera, renderer, dist, elementMeshes, group, placeProjPlane, zoneHighlight, S, d };
   }, [corpus, elements, corpusTexture, facadeTexture, showDoors, showCorpus, showRoom]);
 
   useEffect(() => {
     if (!mountRef.current) return;
     let cancelled = false;
 
-    build().then(({ scene, camera, renderer, dist, elementMeshes, group, placeProjPlane, zoneHighlight }) => {
+    build().then(({ scene, camera, renderer, dist, elementMeshes, group, placeProjPlane, zoneHighlight, S, d }) => {
       if (cancelled) return;
 
       let isDragging = false, prevX = 0, prevY = 0, rotY = 0.35, rotX = 0.12, zoom = 1;
@@ -857,17 +857,6 @@ export default function Wardrobe3D({
         ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
         raycaster.setFromCamera(ndc, camera);
         const hits = raycaster.intersectObject(placeProjPlane, false);
-        // ВРЕМЕННЫЙ ДИАГНОСТИЧЕСКИЙ ЛОГ — убрать после фикса
-        if (!stateRef.current._loggedProj) {
-          stateRef.current._loggedProj = true;
-          console.log('[3D place] первый raycast:', {
-            ndc: { x: ndc.x, y: ndc.y },
-            hits: hits.length,
-            placeProjPlane: !!placeProjPlane,
-            planePosition: placeProjPlane?.position,
-            planeMaterial: { opacity: placeProjPlane?.material?.opacity, transparent: placeProjPlane?.material?.transparent, visible: placeProjPlane?.material?.visible },
-          });
-        }
         if (!hits.length) return null;
         const point = hits[0].point;
         // Обратная формула из toX/toY:
@@ -886,11 +875,6 @@ export default function Wardrobe3D({
       // Иначе скрывает подсветку.
       const updateZoneHighlight = (clientX, clientY) => {
         const { placeMode: pm, findDoorBounds: fdb, iW: cW, iH: cH, t: ct } = propsRef.current;
-        // ВРЕМЕННЫЙ ЛОГ — раз в 30 движений мыши
-        stateRef.current._mvCnt = (stateRef.current._mvCnt || 0) + 1;
-        if (stateRef.current._mvCnt % 30 === 1) {
-          console.log('[3D zone] tick', { placeMode: pm, hasFdb: !!fdb, mvCnt: stateRef.current._mvCnt });
-        }
         if (!pm || !fdb) {
           zoneHighlight.visible = false;
           return;
@@ -901,9 +885,6 @@ export default function Wardrobe3D({
           return;
         }
         const bounds = fdb(proj.clickX, proj.clickY);
-        if (stateRef.current._mvCnt % 30 === 1) {
-          console.log('[3D zone] proj+bounds:', { proj, bounds });
-        }
         if (!bounds) {
           zoneHighlight.visible = false;
           return;

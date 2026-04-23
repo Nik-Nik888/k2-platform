@@ -615,7 +615,12 @@ export default function WardrobeEditor() {
         showDoors={showDoors}
         setShowDoors={setShowDoors}
         show3d={show3d}
-        setShow3d={setShow3d}
+        setShow3d={(v) => {
+          // При переходе в 3D сбрасываем placeMode (если был активен в 2D),
+          // иначе клик по элементу в 3D будет восприниматься как постановка, а не выделение
+          if (v && placeMode) setPlaceMode(null);
+          setShow3d(v);
+        }}
       />
 
       {/* ═══ PRE-PLACEMENT PREFS ═══
