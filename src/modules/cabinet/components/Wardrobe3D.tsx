@@ -139,69 +139,73 @@ export default function Wardrobe3D({
     propsRef.current = { placeMode, setPlaceMode, findDoorBounds, placeInZone, iW, iH, t, showDims, elements };
   });
 
-  // ═══ Расчёт подписей размеров ═══
-  // Итог: массив { key, text, x3d, y3d, z3d, anchor } — позиции в 3D-пространстве (метры).
-  // Реальные экранные координаты (left/top) будут пересчитываться в animate-tick.
-  // anchor: "below" = центрируем под точкой, "left" = справа от точки, "right" = слева.
+  // ═══ Расчёт размеров для чертёжного стиля ═══
+  // Каждая запись: { key, text, p1, p2, axis, offset3d } — две 3D-точки (метры)
+  // измеряемого отрезка + ось (h/v) + вектор смещения линии размера наружу от шкафа.
+  // Линия проекции и риски рисуются в SVG overlay; позиция обновляется в animate-tick.
   const dimsData = (() => {
     if (!showDims) return [];
     const S = 1 / 1000;
     const { width: W, height: H, depth: D } = corpus;
-    // Внутренние размеры (от стенки до стенки / от пола до потолка)
-    const iWmm = iW; // берём из props — уже учтено корпус/без
+    const iWmm = iW;
     const iHmm = iH;
-    // Для 3D-координат: шкаф центрирован в (0,0,0), передняя грань z = d/2
     const halfW = (showCorpus ? W - 2 * t : W) * S / 2;
     const halfH = (showCorpus ? H - 2 * t : H) * S / 2;
     const halfD = D * S / 2;
+    // Смещения в метрах: насколько размерная линия отстоит от шкафа
+    const OFF_NEAR = 0.05;  // ближняя линия (колонки/полки)
+    const OFF_FAR = 0.13;   // дальняя (общие габариты)
+    // Z-координата передней грани
+    const zFront = halfD;
 
-    const labels = [];
+    const dims = [];
 
-    // ── Габариты шкафа ──
-    // Ширина — подпись по центру снизу, чуть ниже шкафа
-    labels.push({
-      key: "total-w", text: `${W}`,
-      x3d: 0, y3d: -halfH - 0.08, z3d: halfD,
-      anchor: "center",
-    });
-    // Высота — слева от шкафа, по центру высоты
-    labels.push({
-      key: "total-h", text: `${H}`,
-      x3d: -halfW - 0.08, y3d: 0, z3d: halfD,
-      anchor: "right",
-    });
-    // Глубина — справа-снизу
-    labels.push({
-      key: "total-d", text: `${D}`,
-      x3d: halfW + 0.08, y3d: -halfH, z3d: 0,
-      anchor: "left",
+    // ── Общая ширина (дальняя линия сверху) ──
+    dims.push({
+      key: "total-w", text: `${W}`, axis: "h",
+      p1: { x: -halfW, y: halfH, z: zFront },
+      p2: { x:  halfW, y: halfH, z: zFront },
+      offset3d: { x: 0, y:  OFF_FAR, z: 0 },
     });
 
-    // ── Ширины колонок между стойками ──
-    // Собираем все стойки (включая виртуальные стенки слева/справа)
+    // ── Общая высота (справа снаружи) ──
+    dims.push({
+      key: "total-h", text: `${H}`, axis: "v",
+      p1: { x: halfW, y:  halfH, z: zFront },
+      p2: { x: halfW, y: -halfH, z: zFront },
+      offset3d: { x: OFF_FAR, y: 0, z: 0 },
+    });
+
+    // ── Глубина (справа-снизу, отводим вправо по X) ──
+    dims.push({
+      key: "total-d", text: `${D}`, axis: "d",
+      p1: { x: halfW, y: -halfH, z:  halfD },
+      p2: { x: halfW, y: -halfH, z: -halfD },
+      offset3d: { x: OFF_NEAR, y: -OFF_NEAR, z: 0 },
+    });
+
+    // ── Ширины колонок (ближняя линия сверху) ──
     const studs = elements
       .filter(e => e.kind === "stud")
       .map(e => ({ x: e.x, w: e.w ?? t }))
       .sort((a, b) => a.x - b.x);
-    // «Границы колонок» — левая стенка (x=0), все стойки, правая стенка (x=iWmm)
     const vBoundaries = [0, ...studs.flatMap(s => [s.x, s.x + s.w]), iWmm];
-    // Убираем дубликаты
     const vBoundsUniq = Array.from(new Set(vBoundaries)).sort((a, b) => a - b);
     for (let i = 0; i < vBoundsUniq.length - 1; i++) {
-      const x1 = vBoundsUniq[i], x2 = vBoundsUniq[i + 1];
-      const colW = x2 - x1;
-      if (colW < 20) continue; // пропускаем узкие «колонки» (сама стойка)
-      // Центр колонки (3D-координата)
-      const cxMm = (x1 + x2) / 2;
-      const cx = (cxMm - iWmm / 2) * S;
-      labels.push({
-        key: `col-${i}`, text: `${colW}`,
-        x3d: cx, y3d: -halfH - 0.03, z3d: halfD,
-        anchor: "center",
+      const x1mm = vBoundsUniq[i], x2mm = vBoundsUniq[i + 1];
+      const colW = x2mm - x1mm;
+      if (colW < 20) continue;
+      const x1 = (x1mm - iWmm / 2) * S;
+      const x2 = (x2mm - iWmm / 2) * S;
+      dims.push({
+        key: `col-${i}`, text: `${colW}`, axis: "h",
+        p1: { x: x1, y: halfH, z: zFront },
+        p2: { x: x2, y: halfH, z: zFront },
+        offset3d: { x: 0, y: OFF_NEAR, z: 0 },
       });
     }
 
-    // ── Высоты проёмов между полками ──
+    // ── Высоты проёмов (ближняя линия слева) ──
     const shelves = elements
       .filter(e => e.kind === "shelf")
       .map(e => ({ y: e.y, h: e.h ?? t }))
@@ -209,37 +213,38 @@ export default function Wardrobe3D({
     const hBoundaries = [0, ...shelves.flatMap(s => [s.y, s.y + s.h]), iHmm];
     const hBoundsUniq = Array.from(new Set(hBoundaries)).sort((a, b) => a - b);
     for (let i = 0; i < hBoundsUniq.length - 1; i++) {
-      const y1 = hBoundsUniq[i], y2 = hBoundsUniq[i + 1];
-      const rowH = y2 - y1;
+      const y1mm = hBoundsUniq[i], y2mm = hBoundsUniq[i + 1];
+      const rowH = y2mm - y1mm;
       if (rowH < 20) continue;
-      const cyMm = (y1 + y2) / 2;
-      const cy = (iHmm / 2 - cyMm) * S;
-      labels.push({
-        key: `row-${i}`, text: `${rowH}`,
-        x3d: -halfW - 0.03, y3d: cy, z3d: halfD,
-        anchor: "right",
+      const y1 = (iHmm / 2 - y1mm) * S;
+      const y2 = (iHmm / 2 - y2mm) * S;
+      dims.push({
+        key: `row-${i}`, text: `${rowH}`, axis: "v",
+        p1: { x: -halfW, y: y1, z: zFront },
+        p2: { x: -halfW, y: y2, z: zFront },
+        offset3d: { x: -OFF_NEAR, y: 0, z: 0 },
       });
     }
 
-    return labels;
+    return dims;
   })();
 
-  // После рендера (когда divs уже в DOM) — синхронизируем dimLabelsRef.
-  // dimLabelsRef хранит Map: key → { el: HTMLDivElement, x3d, y3d, z3d } — для быстрого обновления в animate-tick.
+  // После рендера — синхронизируем dimLabelsRef с SVG-группами.
+  // dimLabelsRef.current.groups: Map<key, { g, p1, p2, offset3d, axis }>
   useEffect(() => {
     if (!dimsOverlayRef.current) {
-      dimLabelsRef.current.labels = null;
+      dimLabelsRef.current.groups = null;
       return;
     }
     const map = new Map();
     dimsData.forEach(d => {
-      const el = dimsOverlayRef.current.querySelector(`[data-dim-key="${d.key}"]`);
-      if (el) {
-        map.set(d.key, { el, x3d: d.x3d, y3d: d.y3d, z3d: d.z3d });
+      const g = dimsOverlayRef.current.querySelector(`[data-dim-key="${d.key}"]`);
+      if (g) {
+        g.dataset.text = d.text;
+        map.set(d.key, { g, p1: d.p1, p2: d.p2, offset3d: d.offset3d, axis: d.axis });
       }
     });
-    dimLabelsRef.current.labels = map;
-    // Сразу обновим позиции (не ждём animate-tick)
+    dimLabelsRef.current.groups = map;
     if (stateRef.current.updateDimLabels) {
       stateRef.current.updateDimLabels();
     }
@@ -1326,21 +1331,51 @@ export default function Wardrobe3D({
         return { px, py, visible };
       };
 
-      // Обновляет позиции HTML-подписей размеров.
-      // Подписи хранятся в dimLabelsRef.current.labels: Map<key, { el, x3d, y3d, z3d }>.
+      // Обновляет SVG-элементы размерных линий.
+      // dimLabelsRef.current.groups: Map<key, { g: SVGGElement, p1, p2, offset3d, axis }>
       const updateDimLabels = () => {
-        const labels = dimLabelsRef.current.labels;
-        if (!labels) return;
-        const rect = renderer.domElement.getBoundingClientRect();
-        labels.forEach(({ el, x3d, y3d, z3d }) => {
-          const p = projectToScreen(x3d, y3d, z3d);
-          if (!p.visible) {
-            el.style.display = "none";
+        const groups = dimLabelsRef.current.groups;
+        if (!groups) return;
+        groups.forEach(({ g, p1, p2, offset3d, axis }) => {
+          // Проецируем p1, p2 и их смещённые варианты
+          const sp1 = projectToScreen(p1.x, p1.y, p1.z);
+          const sp2 = projectToScreen(p2.x, p2.y, p2.z);
+          const dp1 = projectToScreen(p1.x + offset3d.x, p1.y + offset3d.y, p1.z + offset3d.z);
+          const dp2 = projectToScreen(p2.x + offset3d.x, p2.y + offset3d.y, p2.z + offset3d.z);
+          if (!sp1.visible || !sp2.visible || !dp1.visible || !dp2.visible) {
+            g.style.display = "none";
             return;
           }
-          el.style.display = "";
-          el.style.left = `${p.px}px`;
-          el.style.top = `${p.py}px`;
+          g.style.display = "";
+          // Выносные линии (sp → dp)
+          const ext1 = g.querySelector('[data-ext="1"]');
+          const ext2 = g.querySelector('[data-ext="2"]');
+          ext1.setAttribute("x1", sp1.px); ext1.setAttribute("y1", sp1.py);
+          ext1.setAttribute("x2", dp1.px); ext1.setAttribute("y2", dp1.py);
+          ext2.setAttribute("x1", sp2.px); ext2.setAttribute("y1", sp2.py);
+          ext2.setAttribute("x2", dp2.px); ext2.setAttribute("y2", dp2.py);
+          // Размерная линия между смещёнными точками
+          const dimLine = g.querySelector('[data-dim-line="1"]');
+          dimLine.setAttribute("x1", dp1.px); dimLine.setAttribute("y1", dp1.py);
+          dimLine.setAttribute("x2", dp2.px); dimLine.setAttribute("y2", dp2.py);
+          // Текст — в середине размерной линии, сдвинут на ~12px перпендикулярно наружу
+          const text = g.querySelector('[data-dim-text="1"]');
+          const midX = (dp1.px + dp2.px) / 2;
+          const midY = (dp1.py + dp2.py) / 2;
+          // Нормаль к линии (для сдвига текста наружу от шкафа)
+          const lineDx = dp2.px - dp1.px;
+          const lineDy = dp2.py - dp1.py;
+          const lineLen = Math.sqrt(lineDx * lineDx + lineDy * lineDy) || 1;
+          // Нормаль — в сторону от измеряемого отрезка (sp → dp направление)
+          const outDx = (dp1.px - sp1.px + dp2.px - sp2.px) / 2;
+          const outDy = (dp1.py - sp1.py + dp2.py - sp2.py) / 2;
+          const outLen = Math.sqrt(outDx * outDx + outDy * outDy) || 1;
+          const offPx = 10;
+          const tx = midX + (outDx / outLen) * offPx;
+          const ty = midY + (outDy / outLen) * offPx;
+          text.setAttribute("x", tx);
+          text.setAttribute("y", ty);
+          text.textContent = g.dataset.text || "";
         });
       };
 
@@ -1503,87 +1538,84 @@ export default function Wardrobe3D({
             cursor: placeMode ? "crosshair" : "grab",
           }} />
 
-          {/* Overlay с подписями размеров — абсолютное позиционирование поверх canvas */}
-          <div
+          {/* SVG overlay — чертёжные размерные линии с рисками и цифрами */}
+          <svg
             ref={dimsOverlayRef}
             style={{
               position: "absolute", inset: 0,
-              pointerEvents: "none", // не перехватывает клики/drag
-              overflow: "hidden",
+              pointerEvents: "none",
+              overflow: "visible",
               zIndex: 5,
             }}
+            width="100%" height="100%"
           >
-            {dimsData.map(d => {
-              // translate для anchor: "center" = -50% / -50%, "right" = -100% / -50%, "left" = 0 / -50%
-              const translateX = d.anchor === "right" ? "-100%" : d.anchor === "left" ? "0%" : "-50%";
-              return (
-                <div
-                  key={d.key}
-                  data-dim-key={d.key}
-                  style={{
-                    position: "absolute",
-                    left: 0, top: 0,
-                    transform: `translate(${translateX}, -50%)`,
-                    padding: "2px 6px",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    fontFamily: "'IBM Plex Mono', monospace",
-                    color: "#60a5fa",
-                    background: "rgba(8,10,16,0.75)",
-                    border: "1px solid rgba(96,165,250,0.35)",
-                    borderRadius: 3,
-                    whiteSpace: "nowrap",
-                    userSelect: "none",
-                  }}
-                >{d.text}</div>
-              );
-            })}
+            {dimsData.map(d => (
+              <g key={d.key} data-dim-key={d.key} style={{ display: "none" }}>
+                {/* Выносные линии (extension lines) — от точки шкафа до размерной линии */}
+                <line data-ext="1" stroke="#94a3b8" strokeWidth="1" opacity="0.7" />
+                <line data-ext="2" stroke="#94a3b8" strokeWidth="1" opacity="0.7" />
+                {/* Размерная линия с рисками */}
+                <line data-dim-line="1" stroke="#cbd5e1" strokeWidth="1.3" markerStart="url(#dim-tick)" markerEnd="url(#dim-tick)" />
+                {/* Текст (число) поверх линии */}
+                <text data-dim-text="1" fill="#e2e8f0" fontSize="13" fontFamily="'IBM Plex Mono', monospace" fontWeight="700" textAnchor="middle" dominantBaseline="central" stroke="#08090c" strokeWidth="3" paintOrder="stroke" />
+              </g>
+            ))}
+            {/* Markers для рисок */}
+            <defs>
+              <marker id="dim-tick" viewBox="-5 -5 10 10" refX="0" refY="0" markerWidth="8" markerHeight="8" orient="auto">
+                <line x1="-3" y1="-3" x2="3" y2="3" stroke="#cbd5e1" strokeWidth="1.5" />
+              </marker>
+            </defs>
+          </svg>
 
-            {/* Ghost-dim labels (2 цифры) — обновляются напрямую в updateZoneHighlight.
-                При placeMode: для стойки показывают левую/правую будущие колонки,
-                для полки — верхний/нижний проёмы, для двери/панели/ящиков — собственные размеры.
-                Цвет жёлтый (соответствует фантому), display:none по умолчанию. */}
-            <div
-              ref={ghostDimARef}
-              style={{
-                position: "absolute",
-                left: 0, top: 0,
-                transform: "translate(-50%, -50%)",
-                padding: "3px 8px",
-                fontSize: 13,
-                fontWeight: 700,
-                fontFamily: "'IBM Plex Mono', monospace",
-                color: "#000",
-                background: "rgba(251,191,36,0.95)",
-                border: "1px solid rgba(217,119,6,0.6)",
-                borderRadius: 3,
-                whiteSpace: "nowrap",
-                userSelect: "none",
-                display: "none",
-                boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
-              }}
-            />
-            <div
-              ref={ghostDimBRef}
-              style={{
-                position: "absolute",
-                left: 0, top: 0,
-                transform: "translate(-50%, -50%)",
-                padding: "3px 8px",
-                fontSize: 13,
-                fontWeight: 700,
-                fontFamily: "'IBM Plex Mono', monospace",
-                color: "#000",
-                background: "rgba(251,191,36,0.95)",
-                border: "1px solid rgba(217,119,6,0.6)",
-                borderRadius: 3,
-                whiteSpace: "nowrap",
-                userSelect: "none",
-                display: "none",
-                boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
-              }}
-            />
-          </div>
+          {/* Ghost-dim labels (2 цифры) — обновляются напрямую в updateZoneHighlight.
+              При placeMode: для стойки показывают левую/правую будущие колонки,
+              для полки — верхний/нижний проёмы, для двери/панели/ящиков — собственные размеры.
+              Цвет жёлтый (соответствует фантому), display:none по умолчанию. */}
+          <div
+            ref={ghostDimARef}
+            style={{
+              position: "absolute",
+              left: 0, top: 0,
+              transform: "translate(-50%, -50%)",
+              padding: "3px 8px",
+              fontSize: 13,
+              fontWeight: 700,
+              fontFamily: "'IBM Plex Mono', monospace",
+              color: "#000",
+              background: "rgba(251,191,36,0.95)",
+              border: "1px solid rgba(217,119,6,0.6)",
+              borderRadius: 3,
+              whiteSpace: "nowrap",
+              userSelect: "none",
+              display: "none",
+              boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
+              zIndex: 6,
+              pointerEvents: "none",
+            }}
+          />
+          <div
+            ref={ghostDimBRef}
+            style={{
+              position: "absolute",
+              left: 0, top: 0,
+              transform: "translate(-50%, -50%)",
+              padding: "3px 8px",
+              fontSize: 13,
+              fontWeight: 700,
+              fontFamily: "'IBM Plex Mono', monospace",
+              color: "#000",
+              background: "rgba(251,191,36,0.95)",
+              border: "1px solid rgba(217,119,6,0.6)",
+              borderRadius: 3,
+              whiteSpace: "nowrap",
+              userSelect: "none",
+              display: "none",
+              boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
+              zIndex: 6,
+              pointerEvents: "none",
+            }}
+          />
 
           {/* Кнопка toggle размеров — справа внизу canvas */}
           <button
