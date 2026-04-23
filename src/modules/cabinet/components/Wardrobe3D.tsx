@@ -189,6 +189,55 @@ export default function Wardrobe3D({
     fn(mx, my);
   }, [lockedValue, lockedDim]);
 
+  // ═══ Клавиатура для click-to-edit ═══
+  // Space: активирует ввод активной цифры (A → B → A циклически).
+  // Enter: commit (только если уже есть lockedDim — обрабатывается в input onKeyDown).
+  // Escape: cancel.
+  // Работает только при placeMode === "stud" (на Этапе 1).
+  useEffect(() => {
+    if (placeMode !== "stud") return;
+    const onKey = (e) => {
+      const { lockedDim: lD } = propsRef.current;
+      if (e.key === " " || e.type === "k2-toggle-lock") {
+        // Space — переключить активную сторону
+        // НЕ активируем, если курсор не над шкафом (нет zoneHighlight).
+        // Проверяем через lastNiche — он сохраняется только когда курсор в нише.
+        const niche = stateRef.current.lastNiche;
+        if (!niche) return;
+        e.preventDefault?.();
+        if (lD === null) {
+          // Первый Space → активируем A
+          const txt = ghostDimARef.current?.textContent ?? "";
+          setLockedNiche(niche);
+          setLockedDim("A");
+          setLockedValue(txt.trim());
+        } else if (lD === "A") {
+          // Второй Space → переключаемся на B
+          const txt = ghostDimBRef.current?.textContent ?? "";
+          setLockedDim("B");
+          setLockedValue(txt.trim());
+        } else if (lD === "B") {
+          // Третий Space → обратно на A
+          const txt = ghostDimARef.current?.textContent ?? "";
+          setLockedDim("A");
+          setLockedValue(txt.trim());
+        }
+      } else if (e.key === "Escape" && lD !== null) {
+        e.preventDefault();
+        setLockedDim(null);
+        setLockedValue("");
+        setLockedNiche(null);
+      }
+      // Enter обрабатывается в input onKeyDown напрямую.
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("k2-toggle-lock", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("k2-toggle-lock", onKey);
+    };
+  }, [placeMode]);
+
   // Callback: применить зафиксированное значение — ставит элемент точно.
   // Вызывается при Enter в input.
   const commitLockedPlacement = () => {
@@ -1696,22 +1745,13 @@ export default function Wardrobe3D({
               При placeMode: для стойки показывают левую/правую будущие колонки,
               для полки — верхний/нижний проёмы, для двери/панели/ящиков — собственные размеры.
               Цвет жёлтый (соответствует фантому), display:none по умолчанию.
-              Стойка (Этап 1): КЛИКАБЕЛЬНЫ — клик → input → Enter → точная установка. */}
+              Стойка (Этап 1): активация режима ввода по клавише Space (см. useEffect).
+              Space циклически переключает: null → A → B → A. Enter = commit, Escape = cancel. */}
           <GhostDimBadge
             refEl={ghostDimARef}
             isLocked={lockedDim === "A"}
             lockedValue={lockedValue}
             setLockedValue={setLockedValue}
-            clickable={placeMode === "stud"}
-            onClick={() => {
-              // Снимаем текст из div (который обновляет updateZoneHighlight) как стартовое значение
-              const txt = ghostDimARef.current?.textContent ?? "";
-              // Сохраним текущую нишу (чтобы при наборе пересчитывать фантом в той же нише)
-              const niche = stateRef.current.lastNiche;
-              if (niche) setLockedNiche(niche);
-              setLockedDim("A");
-              setLockedValue(txt.trim());
-            }}
             onCommit={() => commitLockedPlacement()}
             onCancel={() => {
               setLockedDim(null);
@@ -1725,14 +1765,6 @@ export default function Wardrobe3D({
             isLocked={lockedDim === "B"}
             lockedValue={lockedValue}
             setLockedValue={setLockedValue}
-            clickable={placeMode === "stud"}
-            onClick={() => {
-              const txt = ghostDimBRef.current?.textContent ?? "";
-              const niche = stateRef.current.lastNiche;
-              if (niche) setLockedNiche(niche);
-              setLockedDim("B");
-              setLockedValue(txt.trim());
-            }}
             onCommit={() => commitLockedPlacement()}
             onCancel={() => {
               setLockedDim(null);
@@ -1764,7 +1796,8 @@ export default function Wardrobe3D({
             <div style={{
               position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)",
               padding: "8px 16px", borderRadius: 6,
-              background: "rgba(34,197,94,0.92)", color: "#000",
+              background: lockedDim ? "rgba(251,191,36,0.95)" : "rgba(34,197,94,0.92)",
+              color: "#000",
               fontSize: 12, fontWeight: 700,
               fontFamily: "'IBM Plex Mono',monospace",
               display: "flex", alignItems: "center", gap: 10,
@@ -1774,7 +1807,11 @@ export default function Wardrobe3D({
             }}>
               <span>+ {PLACE_LABELS[placeMode] || placeMode}</span>
               <span style={{ opacity: 0.7, fontSize: 10 }}>
-                · кликни в зону
+                {lockedDim
+                  ? `· вводим ${lockedDim === "A" ? "←" : "→"} · Space=сменить · Enter=OK · Esc=отмена`
+                  : placeMode === "stud"
+                    ? "· клик = поставить · Space = точный ввод"
+                    : "· кликни в зону"}
               </span>
               <button
                 onClick={() => setPlaceMode?.(null)}
@@ -1816,22 +1853,18 @@ export default function Wardrobe3D({
 // refEl вешается на корневой div (контейнер позиционирования).
 // Внутри — либо текст (отображаемый режим), либо <input> (режим ввода).
 //
-// Показ/скрытие: updateZoneHighlight ставит style.display = "" / "none" на refEl.
-// Текст: обновляется через refEl.textContent → но если isLocked, текст не трогаем
-// (чтобы не перебить input). Решение — в updateZoneHighlight смотреть lockedDim
-// и не обновлять text в заблокированном badge. См. код updateZoneHighlight.
+// Активация режима ввода — по клавише Space (не клик!), потому что фантом следует
+// за мышью и навестись на badge было бы невозможно. Keyboard handler в Wardrobe3D.
+// onBlur не обрабатывается — это управляется в Wardrobe3D через Escape/Enter.
 function GhostDimBadge({
   refEl,
   isLocked,
   lockedValue,
   setLockedValue,
-  clickable,
-  onClick,
   onCommit,
   onCancel,
   inputRef,
 }) {
-  // Когда badge в lock-режиме — показываем input вместо текста
   const baseStyle = {
     position: "absolute",
     left: 0, top: 0,
@@ -1849,37 +1882,40 @@ function GhostDimBadge({
     display: "none",
     boxShadow: isLocked ? "0 0 0 3px rgba(251,191,36,0.35), 0 2px 6px rgba(0,0,0,0.4)" : "0 2px 6px rgba(0,0,0,0.4)",
     zIndex: isLocked ? 8 : 6,
-    pointerEvents: clickable ? "auto" : "none",
-    cursor: clickable && !isLocked ? "pointer" : "text",
+    pointerEvents: "none",
     minWidth: isLocked ? 55 : "auto",
     textAlign: "center",
   };
 
   if (isLocked) {
     return (
-      <div ref={refEl} style={baseStyle}>
+      <div ref={refEl} style={{ ...baseStyle, pointerEvents: "auto" }}>
         <input
           ref={inputRef}
           type="text"
           inputMode="numeric"
           value={lockedValue}
           onChange={e => {
-            // Разрешаем только цифры (без минусов и точек — стойка в мм, целое)
             const v = e.target.value.replace(/[^\d]/g, "");
             setLockedValue(v);
           }}
           onKeyDown={e => {
+            // Enter / Escape обработаны глобальным keyboard handler в Wardrobe3D.
+            // Но т.к. input перехватывает клавиатуру, дублируем обработку:
             if (e.key === "Enter") {
               e.preventDefault();
               onCommit();
             } else if (e.key === "Escape") {
               e.preventDefault();
               onCancel();
+            } else if (e.key === " ") {
+              // Space внутри input — пропускаем к глобальному handler (переключить сторону)
+              // preventDefault чтобы пробел не вставился в число, но всплытие разрешаем.
+              e.preventDefault();
+              // Вызываем нашу глобальную логику через onCommit-like callback
+              // Используем отдельный callback через prop? Проще — dispatch синтетический keydown:
+              window.dispatchEvent(new KeyboardEvent("k2-toggle-lock", { key: " " }));
             }
-          }}
-          onBlur={() => {
-            // Клик мимо — отмена ввода
-            onCancel();
           }}
           style={{
             width: "100%",
@@ -1899,13 +1935,7 @@ function GhostDimBadge({
     );
   }
 
-  return (
-    <div
-      ref={refEl}
-      style={baseStyle}
-      onClick={clickable ? onClick : undefined}
-    />
-  );
+  return <div ref={refEl} style={baseStyle} />;
 }
 
 // ═══════════════════════════════════════════════════════════════
