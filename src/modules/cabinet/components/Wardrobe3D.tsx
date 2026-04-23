@@ -765,36 +765,37 @@ export default function Wardrobe3D({
     mountRef.current.innerHTML = "";
     mountRef.current.appendChild(renderer.domElement);
 
-    // ═══ ZONE HIGHLIGHT — подсветка контура элемента в placeMode ═══
-    // Жёлтая рамка по контуру (из 4-х тонких box-палочек), как outline у выделенного элемента.
-    // Без заливки — чтобы видеть содержимое шкафа за подсветкой.
-    // Изначально невидим, появляется при движении мыши в placeMode.
-    //
-    // Толщина обводки задана в МЕТРАХ (не масштабируется со scale группы),
-    // потому что мы используем дочерние меши которые позиционируются вручную в updateZoneHighlight.
+    // ═══ ZONE HIGHLIGHT — полный силуэт будущего элемента в 3D ═══
+    // Полупрозрачный жёлтый параллелепипед в реальных размерах элемента (W×H×D)
+    // + жёлтая обводка по рёбрам сверху. Выглядит как «фантом» элемента —
+    // понятно куда встанет, в каких размерах, с какой глубиной.
     const zoneHighlight = (() => {
       const grp = new THREE.Group();
-      const edgeMat = new THREE.MeshBasicMaterial({
+      // Заливка — полупрозрачный жёлтый solid box (масштабируется через scale)
+      const fillGeo = new THREE.BoxGeometry(1, 1, 1);
+      const fillMat = new THREE.MeshBasicMaterial({
         color: 0xfbbf24,
         transparent: true,
-        opacity: 0.95,
-        depthTest: false,
-        depthWrite: false,
+        opacity: 0.4,
+        depthWrite: false,         // не пишем в z-buffer — другие меши не закрывает
       });
-      // 4 box-палочки: top, bottom, left, right
-      // Размеры устанавливаются через scale в updateZoneHighlight, но геометрия — единичный куб.
-      // Используем BoxGeometry(1,1,1) и затем scale в updateZoneHighlight.
-      const boxGeo = new THREE.BoxGeometry(1, 1, 1);
-      const top = new THREE.Mesh(boxGeo, edgeMat);
-      const bottom = new THREE.Mesh(boxGeo, edgeMat);
-      const left = new THREE.Mesh(boxGeo, edgeMat);
-      const right = new THREE.Mesh(boxGeo, edgeMat);
-      [top, bottom, left, right].forEach(m => {
-        m.renderOrder = 998;
-        grp.add(m);
+      const fillMesh = new THREE.Mesh(fillGeo, fillMat);
+      fillMesh.renderOrder = 996;
+      grp.add(fillMesh);
+      // Outline — яркие жёлтые рёбра поверх (EdgesGeometry от того же box)
+      const edgeGeo = new THREE.EdgesGeometry(fillGeo);
+      const edgeMat = new THREE.LineBasicMaterial({
+        color: 0xfbbf24,
+        transparent: true,
+        opacity: 1.0,
+        depthTest: false,          // рёбра видны поверх всего
       });
-      // Сохраняем ссылки на меши прямо в группе для удобства updateZoneHighlight
-      grp.userData.edges = { top, bottom, left, right };
+      const edges = new THREE.LineSegments(edgeGeo, edgeMat);
+      edges.renderOrder = 999;
+      grp.add(edges);
+      // Сохраняем ссылки для лёгкого доступа в updateZoneHighlight
+      grp.userData.fillMesh = fillMesh;
+      grp.userData.edges = edges;
       grp.visible = false;
       scene.add(grp);
       return grp;
@@ -956,38 +957,41 @@ export default function Wardrobe3D({
           zoneHighlight.visible = false;
           return;
         }
-        // Центр силуэта в 3D (метры)
+
+        // ─── Размеры и позиция «фантома» элемента в 3D ───
+        // Глубина зависит от типа элемента (как в реальной сцене Wardrobe3D).
         const cxMm = (x1 + x2) / 2;
         const cyMm = (y1 + y2) / 2;
         const cx = (cxMm - cW / 2) * S;
         const cy = (cH / 2 - cyMm) * S;
-        const wM = w * S; // ширина рамки в метрах
-        const hM = h * S; // высота рамки в метрах
-        const zPos = d / 2 + 0.05; // 50мм впереди шкафа
+        const wM = w * S;
+        const hM = h * S;
 
-        // Размещаем группу в центре
+        // Глубина и Z-позиция для каждого типа элемента
+        let depthM, zPos;
+        if (pm === "door" || pm === "panel") {
+          // Дверь/панель — тонкая (16мм) на передней грани шкафа
+          depthM = ct * S;
+          zPos = d / 2 + depthM / 2 + 0.001;
+        } else if (pm === "rod") {
+          // Штанга — тонкая трубка по середине глубины шкафа
+          depthM = 0.025; // 25мм диаметр
+          zPos = 0;
+        } else {
+          // Стойка / полка / ящики — на полную глубину шкафа минус задняя стенка
+          depthM = d - 0.005;
+          zPos = 0;
+        }
+
         zoneHighlight.position.set(cx, cy, zPos);
-        zoneHighlight.scale.set(1, 1, 1); // важно: scale на группе НЕ применяем, иначе боксы исказятся
+        zoneHighlight.scale.set(1, 1, 1); // не трогаем — размеры через scale на mesh'ах
 
-        // Адаптивная толщина рамки: для тонкого элемента (стойка 16мм) рамка должна
-        // быть тоньше элемента, иначе она его полностью закрывает.
-        // Базовая толщина 4мм, но не больше 30% от наименьшего из размеров элемента.
-        const minDim = Math.min(wM, hM);
-        const T_FRAME = Math.min(0.004, minDim * 0.3);
-        const T_DEPTH = 0.002; // тонкая глубина боксов
-        const { top, bottom, left, right } = zoneHighlight.userData.edges;
-        // Top — горизонтальная палочка по верху (y = +hM/2), полная ширина wM
-        top.scale.set(wM, T_FRAME, T_DEPTH);
-        top.position.set(0, hM / 2 - T_FRAME / 2, 0);
-        // Bottom
-        bottom.scale.set(wM, T_FRAME, T_DEPTH);
-        bottom.position.set(0, -hM / 2 + T_FRAME / 2, 0);
-        // Left — вертикальная палочка по левому краю (между top и bottom)
-        left.scale.set(T_FRAME, hM - 2 * T_FRAME, T_DEPTH);
-        left.position.set(-wM / 2 + T_FRAME / 2, 0, 0);
-        // Right
-        right.scale.set(T_FRAME, hM - 2 * T_FRAME, T_DEPTH);
-        right.position.set(wM / 2 - T_FRAME / 2, 0, 0);
+        // Заливка: solid box в реальных размерах элемента
+        const fillMesh = zoneHighlight.userData.fillMesh;
+        const edges = zoneHighlight.userData.edges;
+        fillMesh.scale.set(wM, hM, depthM);
+        // Outline — рёбра того же box (чуть больше чтобы был виден)
+        edges.scale.set(wM * 1.01, hM * 1.01, depthM * 1.01);
 
         zoneHighlight.visible = true;
       };
