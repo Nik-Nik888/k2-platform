@@ -766,22 +766,46 @@ export default function Wardrobe3D({
     mountRef.current.appendChild(renderer.domElement);
 
     // ═══ ZONE HIGHLIGHT — подсветка зоны постановки в placeMode ═══
-    // Полупрозрачный жёлтый прямоугольник, показывает куда встанет элемент при клике.
+    // Полупрозрачный жёлтый прямоугольник + жёлтая обводка, показывает куда встанет элемент.
     // Изначально невидим, появляется при движении мыши в placeMode и hover'е над зоной.
     const zoneHighlight = (() => {
-      const geo = new THREE.PlaneGeometry(1, 1); // размер задаётся через scale
-      const mat = new THREE.MeshBasicMaterial({
+      const grp = new THREE.Group();
+      // Заливка
+      const fillGeo = new THREE.PlaneGeometry(1, 1);
+      const fillMat = new THREE.MeshBasicMaterial({
         color: 0xfbbf24,
         transparent: true,
-        opacity: 0.28,
+        opacity: 0.45,            // увеличено с 0.28 для видимости
         side: THREE.DoubleSide,
         depthTest: false,
+        depthWrite: false,
       });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.visible = false;
-      mesh.renderOrder = 997;
-      scene.add(mesh);
-      return mesh;
+      const fillMesh = new THREE.Mesh(fillGeo, fillMat);
+      fillMesh.renderOrder = 997;
+      grp.add(fillMesh);
+      // Обводка по периметру (LineSegments)
+      const halfW = 0.5, halfH = 0.5;
+      const edgePos = [
+        -halfW, -halfH, 0,   halfW, -halfH, 0,
+         halfW, -halfH, 0,   halfW,  halfH, 0,
+         halfW,  halfH, 0,  -halfW,  halfH, 0,
+        -halfW,  halfH, 0,  -halfW, -halfH, 0,
+      ];
+      const edgeGeo = new THREE.BufferGeometry();
+      edgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(edgePos, 3));
+      const edgeMat = new THREE.LineBasicMaterial({
+        color: 0xfbbf24,
+        transparent: true,
+        opacity: 0.95,
+        depthTest: false,
+        depthWrite: false,
+      });
+      const edgeLines = new THREE.LineSegments(edgeGeo, edgeMat);
+      edgeLines.renderOrder = 998;
+      grp.add(edgeLines);
+      grp.visible = false;
+      scene.add(grp);
+      return grp;
     })();
 
     return { scene, camera, renderer, dist, elementMeshes, group, placeProjPlane, zoneHighlight, S, d };
@@ -905,7 +929,11 @@ export default function Wardrobe3D({
         const cyMm = (yT + yB) / 2;
         const cx = (cxMm - cW / 2) * S;
         const cy = (cH / 2 - cyMm) * S;
-        zoneHighlight.position.set(cx, cy, d / 2 + 0.005);
+        // Размещаем зону ДАЛЕКО впереди шкафа (50мм), чтобы гарантированно
+        // быть перед дверями (которые тоже выступают спереди на 14-30мм).
+        // depthTest:false уже отключён, так что z-конфликта не будет, но
+        // лишний запас не повредит.
+        zoneHighlight.position.set(cx, cy, d / 2 + 0.05);
         zoneHighlight.scale.set(zoneW, zoneH, 1);
         zoneHighlight.visible = true;
       };
