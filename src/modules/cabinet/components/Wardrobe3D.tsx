@@ -28,6 +28,12 @@ function loadTex(src) {
   });
 }
 
+/** Метки типов элементов — переиспользуются в indicator postановки и панели свойств */
+const PLACE_LABELS = {
+  shelf: "Полка", stud: "Стойка", drawers: "Ящики",
+  rod: "Штанга", door: "Дверь", panel: "Панель",
+};
+
 /* ─── Edge-banded ЛДСП panel ───
    Creates a panel with visible edge banding on specified faces.
    edgeBand: { top, bottom, left, right, front, back } — which edges have кромка (0.4mm PVC/ABS)
@@ -103,9 +109,24 @@ export default function Wardrobe3D({
   isMobile = false,
   // Меню добавления элементов
   onAddElement = null,      // (type: string) => void — нажата кнопка «+ Стойка», «+ Полка» и т.д.
+  // Click-to-place в 3D (Сессия 2)
+  placeMode = null,         // активный режим постановки: 'shelf'|'stud'|'door'|'panel'|'rod'|'drawers'|null
+  setPlaceMode = null,      // (mode: string|null) => void
+  findDoorBounds = null,    // (clickX, clickY) => { left, right, top, bottom } — для подсветки зоны
+  placeInZone = null,       // (zone, clickX, clickY) => void — постановка элемента
 }) {
   const mountRef = useRef(null);
   const stateRef = useRef({});
+
+  // Ref для актуальных props placement — handlers внутри Three.js не пересоздаются
+  // при изменении props (build пересоздавать дорого), поэтому читаем свежие значения через ref.
+  const propsRef = useRef({
+    placeMode, setPlaceMode, findDoorBounds, placeInZone,
+    iW, iH, t,
+  });
+  useEffect(() => {
+    propsRef.current = { placeMode, setPlaceMode, findDoorBounds, placeInZone, iW, iH, t };
+  });
 
   const build = useCallback(async () => {
     const { width: W, height: H, depth: D, thickness: T } = corpus;
@@ -332,6 +353,26 @@ export default function Wardrobe3D({
       wireframe.renderOrder = 999;
       scene.add(wireframe);
     }
+
+    // ═══ PROJECTION PLANE — невидимая плоскость для raycast click-to-place ═══
+    // Расположена на передней грани шкафа (z = +d/2), размер = iW × iH.
+    // Используется только в placeMode для определения координат клика в шкафу.
+    // Не видна, не блокирует свет, не отбрасывает тень.
+    const placeProjPlane = (() => {
+      const iWm = (showCorpus ? W - 2 * T : W) * S;
+      const iHm = (showCorpus ? H - 2 * T : H) * S;
+      const planeGeo = new THREE.PlaneGeometry(iWm, iHm);
+      const planeMat = new THREE.MeshBasicMaterial({
+        visible: false,           // невидима
+        side: THREE.DoubleSide,   // raycast с обеих сторон
+      });
+      const plane = new THREE.Mesh(planeGeo, planeMat);
+      plane.position.set(0, 0, d / 2 + 0.01); // чуть впереди шкафа
+      // Помечаем чтобы raycaster мог фильтровать
+      plane.userData.isPlaceProjPlane = true;
+      scene.add(plane);
+      return plane;
+    })();
 
     /* ─── Coordinate helpers ─── */
     // Convert inner mm coords to 3D position
@@ -721,14 +762,33 @@ export default function Wardrobe3D({
     mountRef.current.innerHTML = "";
     mountRef.current.appendChild(renderer.domElement);
 
-    return { scene, camera, renderer, dist, elementMeshes, group };
+    // ═══ ZONE HIGHLIGHT — подсветка зоны постановки в placeMode ═══
+    // Полупрозрачный жёлтый прямоугольник, показывает куда встанет элемент при клике.
+    // Изначально невидим, появляется при движении мыши в placeMode и hover'е над зоной.
+    const zoneHighlight = (() => {
+      const geo = new THREE.PlaneGeometry(1, 1); // размер задаётся через scale
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xfbbf24,
+        transparent: true,
+        opacity: 0.28,
+        side: THREE.DoubleSide,
+        depthTest: false,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.visible = false;
+      mesh.renderOrder = 997;
+      scene.add(mesh);
+      return mesh;
+    })();
+
+    return { scene, camera, renderer, dist, elementMeshes, group, placeProjPlane, zoneHighlight };
   }, [corpus, elements, corpusTexture, facadeTexture, showDoors, showCorpus, showRoom]);
 
   useEffect(() => {
     if (!mountRef.current) return;
     let cancelled = false;
 
-    build().then(({ scene, camera, renderer, dist, elementMeshes, group }) => {
+    build().then(({ scene, camera, renderer, dist, elementMeshes, group, placeProjPlane, zoneHighlight }) => {
       if (cancelled) return;
 
       let isDragging = false, prevX = 0, prevY = 0, rotY = 0.35, rotX = 0.12, zoom = 1;
@@ -785,10 +845,74 @@ export default function Wardrobe3D({
         e.preventDefault();
         zoom = Math.max(0.3, Math.min(3, zoom + e.deltaY * -0.0008));
       };
+
+      // ── Helper: проекция screen coords → шкафные координаты в мм ──
+      // Возвращает {clickX, clickY} в мм или null если клик мимо шкафа.
+      const screenToCabinetMm = (clientX, clientY) => {
+        const rect = renderer.domElement.getBoundingClientRect();
+        ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+        ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(ndc, camera);
+        const hits = raycaster.intersectObject(placeProjPlane, false);
+        if (!hits.length) return null;
+        const point = hits[0].point;
+        // Обратная формула из toX/toY:
+        // toX(mmX) = (mmX - iW/2) * S  →  mmX = point.x / S + iW/2
+        // toY(mmY) = (iH/2 - mmY) * S  →  mmY = iH/2 - point.y / S
+        const { iW: cW, iH: cH } = propsRef.current;
+        const clickX = point.x / S + cW / 2;
+        const clickY = cH / 2 - point.y / S;
+        // Клик должен быть внутри [0, iW] × [0, iH]
+        if (clickX < 0 || clickX > cW || clickY < 0 || clickY > cH) return null;
+        return { clickX, clickY };
+      };
+
+      // ── Helper: обновить подсветку зоны под курсором ──
+      // Если placeMode активен и курсор над шкафом — подсвечивает зону.
+      // Иначе скрывает подсветку.
+      const updateZoneHighlight = (clientX, clientY) => {
+        const { placeMode: pm, findDoorBounds: fdb, iW: cW, iH: cH, t: ct } = propsRef.current;
+        if (!pm || !fdb) {
+          zoneHighlight.visible = false;
+          return;
+        }
+        const proj = screenToCabinetMm(clientX, clientY);
+        if (!proj) {
+          zoneHighlight.visible = false;
+          return;
+        }
+        const bounds = fdb(proj.clickX, proj.clickY);
+        if (!bounds) {
+          zoneHighlight.visible = false;
+          return;
+        }
+        // Зона = прямоугольник [innerEdge.left, innerEdge.right] × [innerEdge.top, innerEdge.bottom]
+        const xL = bounds.left.innerEdge ?? bounds.left.x ?? 0;
+        const xR = bounds.right.innerEdge ?? bounds.right.x ?? cW;
+        const yT = bounds.top.innerEdge ?? bounds.top.y ?? 0;
+        const yB = bounds.bottom.innerEdge ?? bounds.bottom.y ?? cH;
+        const zoneW = (xR - xL) * S;
+        const zoneH = (yB - yT) * S;
+        if (zoneW <= 0 || zoneH <= 0) {
+          zoneHighlight.visible = false;
+          return;
+        }
+        // Центр зоны в 3D
+        const cxMm = (xL + xR) / 2;
+        const cyMm = (yT + yB) / 2;
+        const cx = (cxMm - cW / 2) * S;
+        const cy = (cH / 2 - cyMm) * S;
+        zoneHighlight.position.set(cx, cy, d / 2 + 0.005);
+        zoneHighlight.scale.set(zoneW, zoneH, 1);
+        zoneHighlight.visible = true;
+      };
+
       const onPointerDown = e => {
         // На тач-устройствах предотвращаем скролл страницы
         if (e.pointerType === 'touch') e.preventDefault();
-        isDragging = true;
+        const { placeMode: pm } = propsRef.current;
+        // В placeMode не вращаем — клик считается постановкой элемента
+        isDragging = !pm;
         prevX = e.clientX;
         prevY = e.clientY;
         downX = e.clientX;
@@ -797,6 +921,12 @@ export default function Wardrobe3D({
         renderer.domElement.setPointerCapture(e.pointerId);
       };
       const onPointerMove = e => {
+        const { placeMode: pm } = propsRef.current;
+        // В placeMode — обновляем подсветку зоны при каждом движении (не drag вращения)
+        if (pm) {
+          updateZoneHighlight(e.clientX, e.clientY);
+          return;
+        }
         if (!isDragging) return;
         rotY += (e.clientX - prevX) * 0.004;
         rotX = Math.max(-1.0, Math.min(1.0, rotX + (e.clientY - prevY) * 0.004));
@@ -805,25 +935,37 @@ export default function Wardrobe3D({
       };
       const onPointerUp = (e) => {
         isDragging = false;
-        // Если это был короткий клик (не drag) — делаем raycast
+        const { placeMode: pm, placeInZone: piz } = propsRef.current;
+        // Короткий клик (не drag)?
+        const dx = (e?.clientX ?? 0) - downX;
+        const dy = (e?.clientY ?? 0) - downY;
+        const dt = Date.now() - downTime;
+        const isClick = Math.sqrt(dx * dx + dy * dy) < CLICK_THRESHOLD_PX && dt < CLICK_THRESHOLD_MS;
+        if (!isClick) return;
+
+        // ─── Режим постановки элемента: проекция → placeInZone ───
+        if (pm && piz) {
+          const proj = screenToCabinetMm(e.clientX, e.clientY);
+          if (proj) {
+            // 2-й параметр zone не используется в новом коде purePlaceInZone — передаём null
+            piz(null, proj.clickX, proj.clickY);
+            zoneHighlight.visible = false;
+          }
+          return;
+        }
+
+        // ─── Обычный режим: выделение элемента ───
         if (onElementClick) {
-          const dx = (e?.clientX ?? 0) - downX;
-          const dy = (e?.clientY ?? 0) - downY;
-          const dt = Date.now() - downTime;
-          if (Math.sqrt(dx * dx + dy * dy) < CLICK_THRESHOLD_PX && dt < CLICK_THRESHOLD_MS) {
-            const rect = renderer.domElement.getBoundingClientRect();
-            ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-            ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-            raycaster.setFromCamera(ndc, camera);
-            // Ищем пересечения с дочерними объектами группы шкафа (без комнаты/outline)
-            const hits = raycaster.intersectObject(group, true);
-            const hit = hits.find(h => h.object?.userData?.elementId);
-            if (hit) {
-              onElementClick(hit.object.userData.elementId);
-            } else {
-              // Клик в пустое место — сбрасываем выделение
-              onElementClick(null);
-            }
+          const rect = renderer.domElement.getBoundingClientRect();
+          ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+          ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+          raycaster.setFromCamera(ndc, camera);
+          const hits = raycaster.intersectObject(group, true);
+          const hit = hits.find(h => h.object?.userData?.elementId);
+          if (hit) {
+            onElementClick(hit.object.userData.elementId);
+          } else {
+            onElementClick(null);
           }
         }
       };
@@ -1011,10 +1153,47 @@ export default function Wardrobe3D({
         flexDirection: isMobile ? "column" : "row",
         minHeight: 0,
       }}>
-        <div ref={mountRef} style={{ flex: 1, cursor: "grab", minHeight: 0 }} />
+        {/* 3D canvas + индикатор placeMode сверху */}
+        <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
+          <div ref={mountRef} style={{
+            width: "100%", height: "100%",
+            cursor: placeMode ? "crosshair" : "grab",
+          }} />
 
-        {/* Панель свойств — появляется при выделении элемента */}
-        {selEl && (
+          {/* Индикатор активного placeMode — поверх 3D, сверху */}
+          {placeMode && (
+            <div style={{
+              position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)",
+              padding: "8px 16px", borderRadius: 6,
+              background: "rgba(34,197,94,0.92)", color: "#000",
+              fontSize: 12, fontWeight: 700,
+              fontFamily: "'IBM Plex Mono',monospace",
+              display: "flex", alignItems: "center", gap: 10,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+              zIndex: 10,
+              pointerEvents: "auto",
+            }}>
+              <span>+ {PLACE_LABELS[placeMode] || placeMode}</span>
+              <span style={{ opacity: 0.7, fontSize: 10 }}>
+                · кликни в зону
+              </span>
+              <button
+                onClick={() => setPlaceMode?.(null)}
+                style={{
+                  background: "rgba(0,0,0,0.25)", border: "none",
+                  borderRadius: 4, padding: "2px 8px",
+                  color: "#000", fontWeight: 700, fontSize: 12,
+                  cursor: "pointer",
+                }}
+                title="Отменить постановку"
+              >✕</button>
+            </div>
+          )}
+        </div>
+
+        {/* Панель свойств — появляется при выделении элемента.
+            В placeMode скрыта чтобы не загораживать подсветку зоны постановки. */}
+        {selEl && !placeMode && (
           <PropsPanel3D
             selEl={selEl}
             updateEl={updateEl}
@@ -1041,11 +1220,6 @@ export default function Wardrobe3D({
 // В Сессии 2 будет расширен: добавление новых элементов через click-to-place.
 function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, isMobile }) {
   if (!selEl) return null;
-
-  const TYPE_LABELS = {
-    shelf: "Полка", stud: "Стойка", drawers: "Ящики",
-    rod: "Штанга", door: "Дверь", panel: "Панель",
-  };
 
   const baseStyle = isMobile ? {
     position: "absolute", bottom: 0, left: 0, right: 0,
@@ -1096,7 +1270,7 @@ function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, isMobile })
           fontSize: 13, fontWeight: 700, color: "#d97706",
           fontFamily: "'IBM Plex Mono',monospace",
         }}>
-          {TYPE_LABELS[selEl.type] || selEl.type}
+          {PLACE_LABELS[selEl.type] || selEl.type}
         </div>
         <button onClick={onClose} style={{
           background: "none", border: "none", color: "#666",

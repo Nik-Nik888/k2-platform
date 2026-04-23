@@ -626,7 +626,7 @@ export default function WardrobeEditor() {
       {placeMode === "door" && (
         <div style={{
           position: "fixed", top: isMobile ? 60 : 68, left: "50%", transform: "translateX(-50%)",
-          zIndex: 50, background: "rgba(18,18,28,0.96)", border: "1px solid rgba(217,119,6,0.4)",
+          zIndex: 200, background: "rgba(18,18,28,0.96)", border: "1px solid rgba(217,119,6,0.4)",
           borderRadius: 8, padding: "10px 12px", boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
           display: "flex", alignItems: "center", gap: 10, fontSize: 12,
           fontFamily: "'IBM Plex Mono',monospace",
@@ -671,7 +671,7 @@ export default function WardrobeEditor() {
       {placeMode === "panel" && (
         <div style={{
           position: "fixed", top: isMobile ? 60 : 68, left: "50%", transform: "translateX(-50%)",
-          zIndex: 50, background: "rgba(18,18,28,0.96)", border: "1px solid rgba(96,165,250,0.4)",
+          zIndex: 200, background: "rgba(18,18,28,0.96)", border: "1px solid rgba(96,165,250,0.4)",
           borderRadius: 8, padding: "10px 12px", boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
           display: "flex", alignItems: "center", gap: 10, fontSize: 12,
           fontFamily: "'IBM Plex Mono',monospace",
@@ -869,13 +869,17 @@ export default function WardrobeEditor() {
         iH={iH}
         t={t}
         isMobile={isMobile}
-        // Кнопка «+ Стойка/Полка/...» в 3D-toolbar:
-        // переключаем в 2D + ставим placeMode → пользователь кликает в зону → элемент появится.
-        // После этого через кнопку «🧊 3D» в шапке вернётся обратно в 3D.
+        // Кнопка «+ Стойка/Полка/...» в 3D-toolbar — активирует placeMode НЕ выходя из 3D.
+        // Дальше пользователь кликает в зону прямо в 3D — элемент ставится через
+        // raycast → screenToCabinetMm → placeInZone (Сессия 2).
         onAddElement={(type) => {
           setPlaceMode(type as any);
-          setShow3d(false);
         }}
+        // Click-to-place в 3D
+        placeMode={placeMode}
+        setPlaceMode={setPlaceMode}
+        findDoorBounds={findDoorBounds}
+        placeInZone={placeInZone}
       />}
     </div>
   );
