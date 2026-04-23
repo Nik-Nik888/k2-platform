@@ -965,26 +965,29 @@ export default function Wardrobe3D({
         const hM = h * S; // высота рамки в метрах
         const zPos = d / 2 + 0.05; // 50мм впереди шкафа
 
-        // Размещаем группу в центре (для общей позиции и поворота — пока не используем)
+        // Размещаем группу в центре
         zoneHighlight.position.set(cx, cy, zPos);
         zoneHighlight.scale.set(1, 1, 1); // важно: scale на группе НЕ применяем, иначе боксы исказятся
 
-        // Толщина рамки: 12мм в метрах (видимая, но не громоздкая)
-        const T_FRAME = 0.012;
-        const T_DEPTH = 0.001; // глубина боксов — символическая, чтобы они были плоскими
+        // Адаптивная толщина рамки: для тонкого элемента (стойка 16мм) рамка должна
+        // быть тоньше элемента, иначе она его полностью закрывает.
+        // Базовая толщина 4мм, но не больше 30% от наименьшего из размеров элемента.
+        const minDim = Math.min(wM, hM);
+        const T_FRAME = Math.min(0.004, minDim * 0.3);
+        const T_DEPTH = 0.002; // тонкая глубина боксов
         const { top, bottom, left, right } = zoneHighlight.userData.edges;
         // Top — горизонтальная палочка по верху (y = +hM/2), полная ширина wM
-        top.scale.set(wM + T_FRAME, T_FRAME, T_DEPTH);
-        top.position.set(0, hM / 2, 0);
+        top.scale.set(wM, T_FRAME, T_DEPTH);
+        top.position.set(0, hM / 2 - T_FRAME / 2, 0);
         // Bottom
-        bottom.scale.set(wM + T_FRAME, T_FRAME, T_DEPTH);
-        bottom.position.set(0, -hM / 2, 0);
-        // Left — вертикальная палочка по левому краю
-        left.scale.set(T_FRAME, hM, T_DEPTH);
-        left.position.set(-wM / 2, 0, 0);
+        bottom.scale.set(wM, T_FRAME, T_DEPTH);
+        bottom.position.set(0, -hM / 2 + T_FRAME / 2, 0);
+        // Left — вертикальная палочка по левому краю (между top и bottom)
+        left.scale.set(T_FRAME, hM - 2 * T_FRAME, T_DEPTH);
+        left.position.set(-wM / 2 + T_FRAME / 2, 0, 0);
         // Right
-        right.scale.set(T_FRAME, hM, T_DEPTH);
-        right.position.set(wM / 2, 0, 0);
+        right.scale.set(T_FRAME, hM - 2 * T_FRAME, T_DEPTH);
+        right.position.set(wM / 2 - T_FRAME / 2, 0, 0);
 
         zoneHighlight.visible = true;
       };
