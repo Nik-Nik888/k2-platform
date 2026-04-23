@@ -22,6 +22,7 @@ export interface HeaderProps {
   showDoors: boolean;
   setShowDoors: (fn: (p: boolean) => boolean) => void;
   /** Открытие 3D-просмотра. */
+  show3d: boolean;
   setShow3d: (v: boolean) => void;
 }
 
@@ -39,7 +40,7 @@ export function Header(props: HeaderProps) {
     mobileDragMode, setMobileDragMode, isMobile,
     placeMode, setPlaceMode,
     showDoors, setShowDoors,
-    setShow3d,
+    show3d, setShow3d,
   } = props;
 
   return (
@@ -119,16 +120,16 @@ export function Header(props: HeaderProps) {
           }}
         >🚪 Двери {showDoors ? "👁" : "👁‍🗨"}</button>
 
-        {/* Переключение на 2D-редактор (альтернативный режим) */}
+        {/* Toggle 2D ↔ 3D (показывает куда переключит) */}
         <button
-          onClick={() => setShow3d(false)}
+          onClick={() => setShow3d(!show3d)}
           style={{
             padding: "4px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700,
             cursor: "pointer", border: "1px solid rgba(96,165,250,0.3)",
             background: "rgba(96,165,250,0.12)", color: "#60a5fa",
           }}
-          title="Переключиться на классический 2D-редактор"
-        >📐 2D</button>
+          title={show3d ? "Переключиться на классический 2D-редактор" : "Вернуться в 3D-просмотр"}
+        >{show3d ? "📐 2D" : "🧊 3D"}</button>
       </div>
     </div>
   );

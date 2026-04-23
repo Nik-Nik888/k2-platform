@@ -614,6 +614,7 @@ export default function WardrobeEditor() {
         setPlaceMode={setPlaceMode}
         showDoors={showDoors}
         setShowDoors={setShowDoors}
+        show3d={show3d}
         setShow3d={setShow3d}
       />
 
@@ -868,6 +869,13 @@ export default function WardrobeEditor() {
         iH={iH}
         t={t}
         isMobile={isMobile}
+        // Кнопка «+ Стойка/Полка/...» в 3D-toolbar:
+        // переключаем в 2D + ставим placeMode → пользователь кликает в зону → элемент появится.
+        // После этого через кнопку «🧊 3D» в шапке вернётся обратно в 3D.
+        onAddElement={(type) => {
+          setPlaceMode(type as any);
+          setShow3d(false);
+        }}
       />}
     </div>
   );

@@ -101,6 +101,8 @@ export default function Wardrobe3D({
   delSel = null,            // () => void
   iW = 0, iH = 0, t = 16,
   isMobile = false,
+  // Меню добавления элементов
+  onAddElement = null,      // (type: string) => void — нажата кнопка «+ Стойка», «+ Полка» и т.д.
 }) {
   const mountRef = useRef(null);
   const stateRef = useRef({});
@@ -284,17 +286,12 @@ export default function Wardrobe3D({
 
     // ═══ WIREFRAME-РАМКА — тонкий контур рабочей зоны шкафа ═══
     // Показывает внутренние границы шкафа (iW × iH × D), чтобы даже при showCorpus=false
-    // было видно «где шкаф». При showCorpus=true дублирует корпус, но не мешает — тонкая линия.
+    // было видно «где шкаф». При showCorpus=true дублирует корпус, но не мешает.
+    // Для контраста на бежевой стене комнаты рисуем ДВЕ линии: тёмную-тень + яркую-оранжевую.
     {
       const iWm = (showCorpus ? W - 2 * T : W) * S;
       const iHm = (showCorpus ? H - 2 * T : H) * S;
       const dM = d;
-      // Центр рамки совпадает с центром сцены (0, 0, 0)
-      const wireMat = new THREE.LineBasicMaterial({
-        color: 0xd97706,  // оранжевый, как primary цвет проекта
-        transparent: true,
-        opacity: 0.45,
-      });
       const halfW = iWm / 2, halfH = iHm / 2, halfD = dM / 2;
       // 8 вершин прямоугольного параллелепипеда
       const v = [
@@ -315,7 +312,24 @@ export default function Wardrobe3D({
       });
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+
+      // Слой 1 — тёмная тень (чуть больше, за передним планом)
+      const shadowMat = new THREE.LineBasicMaterial({
+        color: 0x1a0f05, transparent: true, opacity: 0.9,
+        depthTest: false, // рисуется поверх всего
+      });
+      const wireShadow = new THREE.LineSegments(geo.clone(), shadowMat);
+      wireShadow.renderOrder = 998;
+      scene.add(wireShadow);
+
+      // Слой 2 — яркая оранжевая (поверх тени)
+      const wireMat = new THREE.LineBasicMaterial({
+        color: 0xfb923c,  // ярко-оранжевый (чуть светлее primary)
+        transparent: false,
+        depthTest: false, // рисуется поверх всего
+      });
       const wireframe = new THREE.LineSegments(geo, wireMat);
+      wireframe.renderOrder = 999;
       scene.add(wireframe);
     }
 
@@ -911,9 +925,10 @@ export default function Wardrobe3D({
     }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "10px 20px",
+        padding: "10px 16px",
         borderBottom: "1px solid #1a1a1a",
         background: "rgba(8,9,12,0.95)",
+        gap: 12, flexWrap: "wrap",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{
@@ -938,6 +953,43 @@ export default function Wardrobe3D({
             </div>
           </div>
         </div>
+
+        {/* Toolbar — добавить элементы (открывает placeMode в 2D, затем клик в зону) */}
+        {onAddElement && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 4,
+            flex: isMobile ? "0 0 auto" : "initial",
+          }}>
+            {[
+              { type: "shelf",   icon: "━", label: "Полка"  },
+              { type: "stud",    icon: "┃", label: "Стойка" },
+              { type: "drawers", icon: "☰", label: "Ящики"  },
+              { type: "rod",     icon: "⎯", label: "Штанга" },
+              { type: "door",    icon: "🚪", label: "Дверь"  },
+              { type: "panel",   icon: "▯", label: "Панель" },
+            ].map(it => (
+              <button
+                key={it.type}
+                onClick={() => onAddElement(it.type)}
+                style={{
+                  padding: "6px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600,
+                  cursor: "pointer", border: "1px solid rgba(217,119,6,0.3)",
+                  background: "rgba(217,119,6,0.08)", color: "#d97706",
+                  fontFamily: "'IBM Plex Mono',monospace",
+                  whiteSpace: "nowrap",
+                  display: "flex", alignItems: "center", gap: 4,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(217,119,6,0.2)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "rgba(217,119,6,0.08)"; }}
+                title={`Добавить: ${it.label}`}
+              >
+                <span style={{ fontSize: 13 }}>{it.icon}</span>
+                {!isMobile && <span>+ {it.label}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+
         <button onClick={onClose} style={{
           padding: "6px 16px", borderRadius: 6, fontSize: 12, fontWeight: 700,
           cursor: "pointer",
