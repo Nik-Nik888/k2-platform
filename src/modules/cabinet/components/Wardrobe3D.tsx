@@ -1499,7 +1499,11 @@ export default function Wardrobe3D({
             posA3D = { x: cx, y: cy - 0.04, z: d / 2 + 0.06 };
           }
 
-          if (posA3D) {
+          // Когда lockedDim активен — НЕ двигаем позицию/текст активного badge.
+          // Это предотвращает blur/перерисовку input'а при каждом animate-tick.
+          const aFrozen = lD === "A";
+          const bFrozen = lD === "B";
+          if (posA3D && !aFrozen) {
             const pA = projFn(posA3D.x, posA3D.y, posA3D.z);
             if (pA.visible) {
               ghostA.style.display = "";
@@ -1512,10 +1516,10 @@ export default function Wardrobe3D({
             } else {
               ghostA.style.display = "none";
             }
-          } else {
+          } else if (!aFrozen) {
             ghostA.style.display = "none";
           }
-          if (posB3D) {
+          if (posB3D && !bFrozen) {
             const pB = projFn(posB3D.x, posB3D.y, posB3D.z);
             if (pB.visible) {
               ghostB.style.display = "";
@@ -1527,7 +1531,7 @@ export default function Wardrobe3D({
             } else {
               ghostB.style.display = "none";
             }
-          } else {
+          } else if (!bFrozen) {
             ghostB.style.display = "none";
           }
         }
@@ -1791,20 +1795,26 @@ export default function Wardrobe3D({
         const offX = Math.max(elX + (isPanelInsert ? (sE.w || 400) * S / 2 : 0) + 0.04, 0);
         const pA = projectToScreen(offX, elY, aCenterZ);
         const pB = projectToScreen(offX, elY, bCenterZ);
-        if (pA.visible) {
+        // Когда editDim активен — НЕ обновляем позицию/текст активного badge.
+        // Позиция "замораживается" в момент активации, чтобы input не дёргался
+        // при каждом animate-tick (особенно на мобильных где reflow → blur).
+        // Неактивный badge продолжает обновляться нормально.
+        const aFrozen = eD === "A";
+        const bFrozen = eD === "B";
+        if (pA.visible && !aFrozen) {
           aEl.style.display = "";
           aEl.style.left = `${pA.px}px`;
           aEl.style.top = `${pA.py}px`;
           if (!aEl.querySelector("input")) aEl.textContent = `${A}`;
-        } else {
+        } else if (!aFrozen) {
           aEl.style.display = "none";
         }
-        if (pB.visible) {
+        if (pB.visible && !bFrozen) {
           bEl.style.display = "";
           bEl.style.left = `${pB.px}px`;
           bEl.style.top = `${pB.py}px`;
           if (!bEl.querySelector("input")) bEl.textContent = `${B}`;
-        } else {
+        } else if (!bFrozen) {
           bEl.style.display = "none";
         }
       };
@@ -2437,13 +2447,24 @@ function GhostDimBadge({
   if (isLocked) {
     return (
       <div ref={refEl} style={{ ...baseStyle, pointerEvents: "auto" }}>
+        {/* Uncontrolled input: defaultValue и читаем через ref.
+            Это избавляет от джиттера и потери курсора при каждой букве,
+            которые возникают на мобильных из-за controlled re-render'а.
+            key={isLocked} гарантирует что input пересоздаётся только
+            при активации/деактивации lock-режима, а не при каждой цифре. */}
         <input
           ref={inputRef}
           type="text"
           inputMode="numeric"
-          value={lockedValue}
-          onChange={e => {
+          defaultValue={lockedValue}
+          onInput={e => {
+            // Чистим нецифры прямо в DOM, без setState
             const v = e.target.value.replace(/[^\d]/g, "");
+            if (v !== e.target.value) {
+              e.target.value = v;
+            }
+            // Сообщаем родителю новое значение — он использует его для пересчёта
+            // фантома в реальном времени (placeMode) или для updateEl на commit.
             setLockedValue(v);
           }}
           onKeyDown={e => {
@@ -2454,7 +2475,6 @@ function GhostDimBadge({
               e.preventDefault();
               onCancel();
             } else if (e.key === " ") {
-              // Space внутри input → переключаем сторону (не даём пробелу вставиться)
               e.preventDefault();
               onToggle?.();
             }
