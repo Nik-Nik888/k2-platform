@@ -1201,14 +1201,14 @@ export default function Wardrobe3D({
       return grp;
     })();
 
-    return { scene, camera, renderer, dist, elementMeshes, group, placeProjPlane, zoneHighlight, S, d };
+    return { scene, camera, renderer, dist, elementMeshes, group, placeProjPlane, zoneHighlight, S, d, cTex, fTex };
   }, [corpus, elements, corpusTexture, facadeTexture, showDoors, showCorpus, showRoom]);
 
   useEffect(() => {
     if (!mountRef.current) return;
     let cancelled = false;
 
-    build().then(({ scene, camera, renderer, dist, elementMeshes, group, placeProjPlane, zoneHighlight, S, d }) => {
+    build().then(({ scene, camera, renderer, dist, elementMeshes, group, placeProjPlane, zoneHighlight, S, d, cTex, fTex }) => {
       if (cancelled) return;
 
       let isDragging = false, prevX = 0, prevY = 0, rotY = 0.35, rotX = 0.12, zoom = 1;
@@ -1847,7 +1847,51 @@ export default function Wardrobe3D({
         renderer.domElement.removeEventListener("touchend", onTouchEnd);
         renderer.domElement.removeEventListener("touchcancel", onTouchEnd);
         window.removeEventListener("resize", onResize);
+
+        // ═══ Полная очистка сцены ═══
+        // Without this, each 2D↔3D switch leaves all geometries/materials/textures
+        // in GPU memory and eventually leads to "Too many active WebGL contexts" warning.
+        // Обходим все объекты в сцене и освобождаем их GPU-ресурсы.
+        const disposeMaterial = (mat) => {
+          if (!mat) return;
+          // Освобождаем все текстуры материала
+          for (const key of Object.keys(mat)) {
+            const value = mat[key];
+            if (value && value.isTexture) {
+              value.dispose();
+            }
+          }
+          mat.dispose?.();
+        };
+        scene.traverse((obj) => {
+          // Geometry
+          obj.geometry?.dispose?.();
+          // Material (может быть массив для multi-material)
+          const m = obj.material;
+          if (Array.isArray(m)) {
+            m.forEach(disposeMaterial);
+          } else if (m) {
+            disposeMaterial(m);
+          }
+        });
+        // Также освобождаем загруженные текстуры корпуса/фасада (кэш в модуле).
+        // Не вызываем loadTex.dispose() — loadTex — это наш helper, не объект.
+        // Используем clear() на сцене чтобы убрать ссылки.
+        cTex?.dispose?.();
+        fTex?.dispose?.();
+        scene.clear();
+
+        // Освобождаем сам renderer и его WebGL context.
         renderer.dispose();
+        // forceContextLoss явно говорит драйверу GPU "забудь этот context".
+        // Без этого, несмотря на dispose(), браузер держит контекст в пуле и
+        // после нескольких переключений упирается в лимит (обычно 16 контекстов).
+        renderer.forceContextLoss?.();
+
+        // Убираем canvas из DOM, чтобы React не хранил ссылку на старый элемент.
+        if (renderer.domElement?.parentNode) {
+          renderer.domElement.parentNode.removeChild(renderer.domElement);
+        }
       };
     });
 
@@ -2257,9 +2301,10 @@ function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, isMobile })
   } : {
     width: 320, minWidth: 320, flexShrink: 0,
     background: "rgba(11,12,16,0.98)",
-    borderLeft: "1px solid rgba(50,50,60,0.4)",
+    borderLeft: "3px solid red", // TEMP DEBUG
     padding: "16px 18px",
     overflowY: "auto",
+    zIndex: 50, // TEMP DEBUG
   };
 
   // Компактное числовое поле
