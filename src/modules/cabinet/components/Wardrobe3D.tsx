@@ -124,10 +124,13 @@ export default function Wardrobe3D({
   // Ghost-dim labels (2 цифры рядом с жёлтым фантомом при placeMode)
   const ghostDimARef = useRef(null);
   const ghostDimBRef = useRef(null);
+  // Edit-dim labels — 2 цифры глубины у ВЫДЕЛЕННОГО элемента (панель insert, штанга)
+  const editDimARef = useRef(null);
+  const editDimBRef = useRef(null);
   // Показывать ли общие размеры (габариты, между-стоечные/полочные)
   const [showDims, setShowDims] = useState(true);
 
-  // ═══ Ghost-dim input state (Этап 1: стойка) ═══
+  // ═══ Ghost-dim input state (Этап 1-3: стойка/полка/штанга при постановке) ═══
   // Когда пользователь кликает на жёлтую цифру — она превращается в input.
   // lockedDim: "A" | "B" | null — какая цифра сейчас в режиме ввода
   // lockedValue: число в мм — что введено в input (может быть "" пока пользователь печатает)
@@ -137,6 +140,13 @@ export default function Wardrobe3D({
   const [lockedNiche, setLockedNiche] = useState(null);
   const lockedInputRef = useRef(null);
 
+  // ═══ Edit-Z state (Этап 5: панель insert / штанга после установки) ═══
+  // Когда выделена панель-insert или штанга, показываем 2 цифры глубины (A=спереди, B=сзади).
+  // Space активирует ввод. editDim отличается от lockedDim чтобы placement и edit не конфликтовали.
+  const [editDim, setEditDim] = useState(null);
+  const [editValue, setEditValue] = useState("");
+  const editInputRef = useRef(null);
+
   // Ref для актуальных props placement — handlers внутри Three.js не пересоздаются
   // при изменении props (build пересоздавать дорого), поэтому читаем свежие значения через ref.
   const propsRef = useRef({
@@ -145,11 +155,13 @@ export default function Wardrobe3D({
     showDims,
     elements,
     lockedDim, lockedValue, lockedNiche,
+    editDim, editValue, selEl,
   });
   useEffect(() => {
     propsRef.current = {
       placeMode, setPlaceMode, findDoorBounds, placeInZone, iW, iH, t, showDims, elements,
       lockedDim, lockedValue, lockedNiche,
+      editDim, editValue, selEl,
     };
   });
 
@@ -167,6 +179,20 @@ export default function Wardrobe3D({
     setLockedValue("");
     setLockedNiche(null);
   }, [placeMode]);
+
+  // Сброс edit-режима когда сменилось выделение (или снято)
+  useEffect(() => {
+    setEditDim(null);
+    setEditValue("");
+  }, [selEl?.id]);
+
+  // Фокус в edit-input при активации
+  useEffect(() => {
+    if (editDim && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
+    }
+  }, [editDim]);
 
   // При изменении введённого значения в input — пересчитать фантом в реальном времени.
   // Используем координаты последней позиции курсора (или центр canvas если мышь не двигалась).
@@ -219,6 +245,77 @@ export default function Wardrobe3D({
     setLockedNiche(null);
   };
 
+  // ═══ Edit-Z controls (Этап 5) ═══
+  // Работает для выделенной панели insert или штанги.
+  // A = значение спереди (утоплена от передней грани шкафа)
+  // B = значение сзади (до задней стенки)
+  const editableZ = selEl && (
+    (selEl.type === "panel" && selEl.panelType === "insert") ||
+    selEl.type === "rod"
+  );
+
+  const toggleEditSide = () => {
+    if (!editableZ) return;
+    const { editDim: eD } = propsRef.current;
+    if (eD === null) {
+      const txt = editDimARef.current?.textContent ?? "";
+      setEditDim("A");
+      setEditValue(txt.trim());
+    } else if (eD === "A") {
+      const txt = editDimBRef.current?.textContent ?? "";
+      setEditDim("B");
+      setEditValue(txt.trim());
+    } else {
+      const txt = editDimARef.current?.textContent ?? "";
+      setEditDim("A");
+      setEditValue(txt.trim());
+    }
+  };
+  const cancelEdit = () => {
+    setEditDim(null);
+    setEditValue("");
+  };
+  const commitEditZ = () => {
+    const parsed = parseFloat(editValue);
+    if (!Number.isFinite(parsed) || parsed < 0 || !selEl || !updateEl) {
+      cancelEdit();
+      return;
+    }
+    const { depth: D } = corpus;
+    // Толщина элемента по Z
+    let objT;
+    if (selEl.type === "panel") {
+      objT = t; // панель = ЛДСП t мм
+    } else {
+      objT = 25; // штанга — диаметр 25мм
+    }
+    // A = расстояние от ПЕРЕДНЕЙ грани шкафа до ПЕРЕДНЕЙ грани элемента
+    // B = расстояние от ЗАДНЕЙ грани элемента до ЗАДНЕЙ стенки
+    // depthOffset = B (от задней стенки до задней грани элемента)
+    // z для штанги = центр относительно центра шкафа = -D/2 + B + objT/2
+    // Для панели используем depthOffset (через формулу в рендере)
+    let newDepthOffset;
+    if (editDim === "A") {
+      // A = утопление спереди → depthOffset = D - objT - A
+      newDepthOffset = D - objT - parsed;
+    } else {
+      // B = до задней стенки → depthOffset = B
+      newDepthOffset = parsed;
+    }
+    // Кламп в [0, D - objT]
+    newDepthOffset = Math.max(0, Math.min(D - objT, newDepthOffset));
+    if (selEl.type === "panel") {
+      // Для панели используем depthOffset + depth=objT
+      updateEl(selEl.id, { depthOffset: newDepthOffset, depth: objT });
+    } else if (selEl.type === "rod") {
+      // Для штанги z = центр относительно центра шкафа
+      // centerZ = -D/2 + newDepthOffset + objT/2
+      const newZ = -D / 2 + newDepthOffset + objT / 2;
+      updateEl(selEl.id, { z: newZ });
+    }
+    cancelEdit();
+  };
+
   useEffect(() => {
     // Клавиатура активна только для тех режимов где реализован lock-ввод.
     if (placeMode !== "stud" && placeMode !== "shelf" && placeMode !== "rod") return;
@@ -239,6 +336,26 @@ export default function Wardrobe3D({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [placeMode]);
+
+  // Keyboard handler для edit-Z выделенного элемента (панель insert / штанга)
+  useEffect(() => {
+    if (!editableZ) return;
+    if (placeMode) return; // не конфликтуем с placement
+    const onKey = (e) => {
+      const isInputFocused = document.activeElement?.tagName === "INPUT";
+      if (isInputFocused) return;
+      const { editDim: eD } = propsRef.current;
+      if (e.key === " ") {
+        e.preventDefault();
+        toggleEditSide();
+      } else if (e.key === "Escape" && eD !== null) {
+        e.preventDefault();
+        cancelEdit();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editableZ, placeMode]);
 
   // Callback: применить зафиксированное значение — ставит элемент точно.
   // Вызывается при Enter в input.
@@ -1610,6 +1727,86 @@ export default function Wardrobe3D({
       stateRef.current.updateDimLabels = updateDimLabels;
       stateRef.current.updateZoneHighlight = updateZoneHighlight;
 
+      // ── updateEditDimLabels — 2 жёлтые цифры глубины у выделенного элемента ──
+      // Показываем только если selEl — panel insert или rod.
+      // A = спереди (утоплено от передней грани), B = сзади (до задней стенки).
+      const updateEditDimLabels = () => {
+        const { selEl: sE, editDim: eD } = propsRef.current;
+        const aEl = editDimARef.current;
+        const bEl = editDimBRef.current;
+        if (!aEl || !bEl) return;
+        if (!sE) {
+          aEl.style.display = "none";
+          bEl.style.display = "none";
+          return;
+        }
+        // Определяем тип и размеры
+        const D = corpus.depth;
+        const isPanelInsert = sE.type === "panel" && sE.panelType === "insert";
+        const isRod = sE.type === "rod";
+        if (!isPanelInsert && !isRod) {
+          aEl.style.display = "none";
+          bEl.style.display = "none";
+          return;
+        }
+        // Толщина элемента по Z и позиция центра (в мм от центра шкафа)
+        let objT, centerZmm;
+        if (isPanelInsert) {
+          objT = t;
+          // Из рендера: если depthOffset/depth заданы — используем, иначе insert = d/2 - t/2 - 2 (2мм зазор)
+          const hasOff = typeof sE.depthOffset === "number";
+          if (hasOff) {
+            const off = sE.depthOffset;
+            const dp = typeof sE.depth === "number" ? sE.depth : objT;
+            centerZmm = -D / 2 + off + dp / 2;
+          } else {
+            centerZmm = D / 2 - objT / 2 - 2; // 2мм зазор
+          }
+        } else {
+          // rod
+          objT = 25;
+          centerZmm = sE.z ?? 0;
+        }
+        // A = D/2 - (centerZmm + objT/2)  (от передней грани до переда элемента)
+        // B = (centerZmm - objT/2) - (-D/2) = centerZmm - objT/2 + D/2
+        const A = Math.round(D / 2 - (centerZmm + objT / 2));
+        const B = Math.round(centerZmm - objT / 2 + D / 2);
+        // 3D-координаты элемента для позиционирования подписи
+        const elX = isPanelInsert
+          ? ((sE.x || 0) + (sE.w || 400) / 2 - iW / 2) * S
+          : ((sE.x || 0) + (sE.w || 400) / 2 - iW / 2) * S;
+        const elY = isPanelInsert
+          ? (iH / 2 - ((sE.y || 0) + (sE.h || iH) / 2)) * S
+          : (iH / 2 - (sE.y || 150)) * S;
+        const centerZ = centerZmm * S;
+        const objTm = objT * S;
+        // Подпись A — между передней гранью шкафа и элементом (центр по Z)
+        const aCenterZ = (d / 2 + centerZ + objTm / 2) / 2;
+        // Подпись B — между задней гранью элемента и задней стенкой
+        const bCenterZ = (centerZ - objTm / 2 + (-d / 2)) / 2;
+        // Правее элемента для видимости (смещение вправо по X)
+        const offX = Math.max(elX + (isPanelInsert ? (sE.w || 400) * S / 2 : 0) + 0.04, 0);
+        const pA = projectToScreen(offX, elY, aCenterZ);
+        const pB = projectToScreen(offX, elY, bCenterZ);
+        if (pA.visible) {
+          aEl.style.display = "";
+          aEl.style.left = `${pA.px}px`;
+          aEl.style.top = `${pA.py}px`;
+          if (!aEl.querySelector("input")) aEl.textContent = `${A}`;
+        } else {
+          aEl.style.display = "none";
+        }
+        if (pB.visible) {
+          bEl.style.display = "";
+          bEl.style.left = `${pB.px}px`;
+          bEl.style.top = `${pB.py}px`;
+          if (!bEl.querySelector("input")) bEl.textContent = `${B}`;
+        } else {
+          bEl.style.display = "none";
+        }
+      };
+      stateRef.current.updateEditDimLabels = updateEditDimLabels;
+
       const animate = () => {
         stateRef.current.animId = requestAnimationFrame(animate);
         if (!isDragging) {} // no auto-rotation — manual only
@@ -1623,7 +1820,10 @@ export default function Wardrobe3D({
         renderer.render(scene, camera);
         // Обновляем подписи (throttle через frame skip)
         dimFrameSkip = (dimFrameSkip + 1) % 2;
-        if (dimFrameSkip === 0) updateDimLabels();
+        if (dimFrameSkip === 0) {
+          updateDimLabels();
+          updateEditDimLabels();
+        }
       };
       animate();
 
@@ -1822,6 +2022,30 @@ export default function Wardrobe3D({
             inputRef={lockedDim === "B" ? lockedInputRef : undefined}
           />
 
+          {/* Edit-dim labels для Z-редактирования выделенного элемента
+              (панель insert или штанга). Позиция обновляется в animate-tick
+              через updateEditDimLabels. Активация Space → input → Enter. */}
+          <GhostDimBadge
+            refEl={editDimARef}
+            isLocked={editDim === "A"}
+            lockedValue={editValue}
+            setLockedValue={setEditValue}
+            onCommit={commitEditZ}
+            onCancel={cancelEdit}
+            onToggle={toggleEditSide}
+            inputRef={editDim === "A" ? editInputRef : undefined}
+          />
+          <GhostDimBadge
+            refEl={editDimBRef}
+            isLocked={editDim === "B"}
+            lockedValue={editValue}
+            setLockedValue={setEditValue}
+            onCommit={commitEditZ}
+            onCancel={cancelEdit}
+            onToggle={toggleEditSide}
+            inputRef={editDim === "B" ? editInputRef : undefined}
+          />
+
           {/* Кнопка toggle размеров — справа внизу canvas */}
           <button
             onClick={() => setShowDims(v => !v)}
@@ -1873,6 +2097,30 @@ export default function Wardrobe3D({
                 }}
                 title="Отменить постановку"
               >✕</button>
+            </div>
+          )}
+
+          {/* Индикатор edit-Z — для выделенной панели-insert или штанги.
+              Показывается когда НЕТ placeMode (чтобы не конфликтовать с плашкой постановки). */}
+          {!placeMode && editableZ && (
+            <div style={{
+              position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)",
+              padding: "8px 16px", borderRadius: 6,
+              background: editDim ? "rgba(251,191,36,0.95)" : "rgba(96,165,250,0.92)",
+              color: "#000",
+              fontSize: 12, fontWeight: 700,
+              fontFamily: "'IBM Plex Mono',monospace",
+              display: "flex", alignItems: "center", gap: 10,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+              zIndex: 10,
+              pointerEvents: "auto",
+            }}>
+              <span>Глубина {selEl?.type === "panel" ? "панели" : "штанги"}</span>
+              <span style={{ opacity: 0.7, fontSize: 10 }}>
+                {editDim
+                  ? `· вводим ${editDim === "A" ? "спереди" : "сзади"} · Space=сменить · Enter=OK · Esc=отмена`
+                  : "· Space = редактировать Z"}
+              </span>
             </div>
           )}
         </div>
