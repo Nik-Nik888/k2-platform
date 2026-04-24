@@ -74,13 +74,15 @@ export function computeShelfSpan(
     const left = xBreaks[i], right = xBreaks[i + 1];
     if (anchor >= left && anchor < right) {
       const sl = left + (i > 0 ? t : 0);
-      return { x: sl, w: right - sl };
+      // Защита: ширина должна быть положительной (мин 20мм), иначе полка пропадает с экрана
+      const w = Math.max(20, right - sl);
+      return { x: sl, w };
     }
   }
   const lastLeft = xBreaks[xBreaks.length - 2];
   const lastIdx = xBreaks.length - 2;
   const sl = lastLeft + (lastIdx > 0 ? t : 0);
-  return { x: sl, w: iW - sl };
+  return { x: sl, w: Math.max(20, iW - sl) };
 }
 
 /**

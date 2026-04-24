@@ -235,8 +235,10 @@ export default function Wardrobe3D({
     setEditSnapshot(null);
   };
   const commitEditZ = (typedValue) => {
+    console.log("[commitEditZ]", { typedValue, editDim, selEl: selEl?.id, selElType: selEl?.type, hasUpdateEl: !!updateEl });
     const parsed = parseFloat(typedValue);
     if (!Number.isFinite(parsed) || parsed < 0 || !selEl || !updateEl) {
+      console.log("[commitEditZ] EARLY EXIT");
       cancelEdit();
       return;
     }
@@ -265,11 +267,13 @@ export default function Wardrobe3D({
     newDepthOffset = Math.max(0, Math.min(D - objT, newDepthOffset));
     if (selEl.type === "panel") {
       // Для панели используем depthOffset + depth=objT
+      console.log("[commitEditZ] PANEL updateEl", { id: selEl.id, depthOffset: newDepthOffset, depth: objT });
       updateEl(selEl.id, { depthOffset: newDepthOffset, depth: objT });
     } else if (selEl.type === "rod") {
       // Для штанги z = центр относительно центра шкафа
       // centerZ = -D/2 + newDepthOffset + objT/2
       const newZ = -D / 2 + newDepthOffset + objT / 2;
+      console.log("[commitEditZ] ROD updateEl", { id: selEl.id, z: newZ });
       updateEl(selEl.id, { z: newZ });
     }
     cancelEdit();
@@ -319,8 +323,10 @@ export default function Wardrobe3D({
   // Callback: применить зафиксированное значение — ставит элемент точно.
   // Вызывается при Enter в input.
   const commitLockedPlacement = (typedValue) => {
+    console.log("[commitLockedPlacement]", { typedValue, lockedDim, lockedNiche, placeMode, hasPlaceInZone: !!placeInZone });
     const parsed = parseFloat(typedValue);
     if (!Number.isFinite(parsed) || parsed < 0 || !lockedNiche || !placeInZone) {
+      console.log("[commitLockedPlacement] EARLY EXIT", { parsed, hasNiche: !!lockedNiche, hasFn: !!placeInZone });
       cancelLocked();
       return;
     }
@@ -338,6 +344,7 @@ export default function Wardrobe3D({
         clickX = niR - parsed - t / 2;
       }
       clickX = Math.max(niL + t / 2, Math.min(niR - t / 2, clickX));
+      console.log("[commitLockedPlacement] STUD calling placeInZone", { clickX, midY });
       placeInZone(null, clickX, midY);
     } else if (placeMode === "shelf") {
       // A (верхний проём = lockedValue): y1 = niT + lockedValue → clickY = y1 + t/2 = niT + lockedValue + t/2
@@ -350,6 +357,7 @@ export default function Wardrobe3D({
       }
       // Кламп так чтобы полка не вылезла за нишу
       clickY = Math.max(niT + t / 2, Math.min(niB - t / 2, clickY));
+      console.log("[commitLockedPlacement] SHELF calling placeInZone", { midX, clickY });
       placeInZone(null, midX, clickY);
     } else if (placeMode === "rod") {
       // A (верхний проём = lockedValue): rodY = niT + lockedValue → clickY = rodY
@@ -1022,7 +1030,9 @@ export default function Wardrobe3D({
         // 2. Иначе если задан depthOffset — аналогично, от задней стенки
         // 3. Иначе — по типу (overlay/insert)
         const hasCustomDepth = typeof el.depth === "number" && el.depth > 0;
-        const hasCustomOffset = typeof el.depthOffset === "number" && el.depthOffset > 0;
+        // Был баг: depthOffset > 0 пропускал случай 0мм (панель у задней стенки).
+        // Принимаем любое неотрицательное значение, включая 0.
+        const hasCustomOffset = typeof el.depthOffset === "number" && el.depthOffset >= 0;
 
         let panelZ;
         if (hasCustomDepth || hasCustomOffset) {
@@ -2199,11 +2209,7 @@ export default function Wardrobe3D({
               initialValue={(lockedDim === "A"
                 ? ghostDimARef.current?.textContent
                 : ghostDimBRef.current?.textContent) ?? ""}
-              onCommit={(val) => {
-                setLockedValue(val);
-                // setState асинхронный — переиспользуем val напрямую
-                setTimeout(() => commitLockedPlacement(val), 0);
-              }}
+              onCommit={(val) => commitLockedPlacement(val)}
               onCancel={cancelLocked}
               onToggle={toggleLockedSide}
               hint={lockedDim === "A"
@@ -2219,10 +2225,7 @@ export default function Wardrobe3D({
               initialValue={(editDim === "A"
                 ? editDimARef.current?.textContent
                 : editDimBRef.current?.textContent) ?? ""}
-              onCommit={(val) => {
-                setEditValue(val);
-                setTimeout(() => commitEditZ(val), 0);
-              }}
+              onCommit={(val) => commitEditZ(val)}
               onCancel={cancelEdit}
               onToggle={toggleEditSide}
               hint={editDim === "A" ? "расстояние от передней грани" : "расстояние до задней стенки"}
