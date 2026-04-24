@@ -235,10 +235,8 @@ export default function Wardrobe3D({
     setEditSnapshot(null);
   };
   const commitEditZ = (typedValue) => {
-    console.log("[commitEditZ]", { typedValue, editDim, selEl: selEl?.id, selElType: selEl?.type, hasUpdateEl: !!updateEl });
     const parsed = parseFloat(typedValue);
     if (!Number.isFinite(parsed) || parsed < 0 || !selEl || !updateEl) {
-      console.log("[commitEditZ] EARLY EXIT");
       cancelEdit();
       return;
     }
@@ -267,13 +265,11 @@ export default function Wardrobe3D({
     newDepthOffset = Math.max(0, Math.min(D - objT, newDepthOffset));
     if (selEl.type === "panel") {
       // Для панели используем depthOffset + depth=objT
-      console.log("[commitEditZ] PANEL updateEl", { id: selEl.id, depthOffset: newDepthOffset, depth: objT });
       updateEl(selEl.id, { depthOffset: newDepthOffset, depth: objT });
     } else if (selEl.type === "rod") {
       // Для штанги z = центр относительно центра шкафа
       // centerZ = -D/2 + newDepthOffset + objT/2
       const newZ = -D / 2 + newDepthOffset + objT / 2;
-      console.log("[commitEditZ] ROD updateEl", { id: selEl.id, z: newZ });
       updateEl(selEl.id, { z: newZ });
     }
     cancelEdit();
@@ -323,10 +319,8 @@ export default function Wardrobe3D({
   // Callback: применить зафиксированное значение — ставит элемент точно.
   // Вызывается при Enter в input.
   const commitLockedPlacement = (typedValue) => {
-    console.log("[commitLockedPlacement]", { typedValue, lockedDim, lockedNiche, placeMode, hasPlaceInZone: !!placeInZone });
     const parsed = parseFloat(typedValue);
     if (!Number.isFinite(parsed) || parsed < 0 || !lockedNiche || !placeInZone) {
-      console.log("[commitLockedPlacement] EARLY EXIT", { parsed, hasNiche: !!lockedNiche, hasFn: !!placeInZone });
       cancelLocked();
       return;
     }
@@ -344,7 +338,6 @@ export default function Wardrobe3D({
         clickX = niR - parsed - t / 2;
       }
       clickX = Math.max(niL + t / 2, Math.min(niR - t / 2, clickX));
-      console.log("[commitLockedPlacement] STUD calling placeInZone", { clickX, midY });
       placeInZone(null, clickX, midY);
     } else if (placeMode === "shelf") {
       // A (верхний проём = lockedValue): y1 = niT + lockedValue → clickY = y1 + t/2 = niT + lockedValue + t/2
@@ -357,7 +350,6 @@ export default function Wardrobe3D({
       }
       // Кламп так чтобы полка не вылезла за нишу
       clickY = Math.max(niT + t / 2, Math.min(niB - t / 2, clickY));
-      console.log("[commitLockedPlacement] SHELF calling placeInZone", { midX, clickY });
       placeInZone(null, midX, clickY);
     } else if (placeMode === "rod") {
       // A (верхний проём = lockedValue): rodY = niT + lockedValue → clickY = rodY
@@ -1528,12 +1520,27 @@ export default function Wardrobe3D({
           const dy = e.clientY - downY;
           const totalDist = Math.sqrt(dx * dx + dy * dy);
           if (totalDist >= CLICK_THRESHOLD_PX) {
-            // Это вращение
+            // ВАЖНО: на touch-устройствах в placeMode НЕ крутим сцену.
+            // Палец просто двигает фантом по сцене (как мышь без зажатия).
+            // Без этого один палец одновременно: ① крутит камеру, ② двигает фантом —
+            // и пользователь не понимает что ставится.
+            // Pinch-zoom (2 пальца) обрабатывается отдельно в onTouchMove.
+            if (pm && e.pointerType === "touch") {
+              // Двигаем фантом за пальцем
+              const { lockedDim: lD } = propsRef.current;
+              if (lD === null) {
+                stateRef.current.lastMouseX = e.clientX;
+                stateRef.current.lastMouseY = e.clientY;
+                updateZoneHighlight(e.clientX, e.clientY);
+              }
+              return;
+            }
+            // Это вращение (мышь на десктопе, или touch без placeMode)
             rotY += (e.clientX - prevX) * 0.004;
             rotX = Math.max(-1.0, Math.min(1.0, rotX + (e.clientY - prevY) * 0.004));
             prevX = e.clientX;
             prevY = e.clientY;
-            // В placeMode при настоящем drag скрываем подсветку (мы крутим, не выбираем)
+            // В placeMode при настоящем drag (мышь) скрываем подсветку (мы крутим, не выбираем)
             if (pm) hideZone();
           }
           return;
@@ -1552,6 +1559,7 @@ export default function Wardrobe3D({
         }
       };
       const onPointerUp = (e) => {
+        const wasTouch = e?.pointerType === "touch";
         isDragging = false;
         const { placeMode: pm, placeInZone: piz, setPlaceMode: spm } = propsRef.current;
         // Короткий клик (не drag)?
@@ -1559,7 +1567,11 @@ export default function Wardrobe3D({
         const dy = (e?.clientY ?? 0) - downY;
         const dt = Date.now() - downTime;
         const isClick = Math.sqrt(dx * dx + dy * dy) < CLICK_THRESHOLD_PX && dt < CLICK_THRESHOLD_MS;
-        if (!isClick) return;
+        // На touch в placeMode мы НЕ крутим сцену (см. onPointerMove), вместо этого
+        // палец двигает фантом. Поэтому отпускание пальца — это всегда «поставить»,
+        // даже если до этого был drag (палец двигал фантом по сцене).
+        const isTouchPlace = wasTouch && pm;
+        if (!isClick && !isTouchPlace) return;
 
         // Сначала всегда проверяем — попал ли клик ПО ЭЛЕМЕНТУ.
         // Если да — выделяем (даже в placeMode!), и если был placeMode — сбрасываем его.
@@ -2261,6 +2273,14 @@ export default function Wardrobe3D({
               initialValue={(lockedDim === "A"
                 ? ghostDimARef.current?.textContent
                 : ghostDimBRef.current?.textContent) ?? ""}
+              maxValue={(() => {
+                if (!lockedNiche) return undefined;
+                const { niL, niR, niT, niB } = lockedNiche;
+                if (placeMode === "stud") return Math.max(0, niR - niL - t);
+                if (placeMode === "shelf") return Math.max(0, niB - niT - t);
+                if (placeMode === "rod") return Math.max(0, niB - niT);
+                return undefined;
+              })()}
               onCommit={(val) => commitLockedPlacement(val)}
               onCancel={cancelLocked}
               onToggle={toggleLockedSide}
@@ -2277,6 +2297,11 @@ export default function Wardrobe3D({
               initialValue={(editDim === "A"
                 ? editDimARef.current?.textContent
                 : editDimBRef.current?.textContent) ?? ""}
+              maxValue={(() => {
+                if (!selEl) return undefined;
+                const objT = selEl.type === "panel" ? t : 25;
+                return Math.max(0, corpus.depth - objT);
+              })()}
               onCommit={(val) => commitEditZ(val)}
               onCancel={cancelEdit}
               onToggle={toggleEditSide}
@@ -2462,7 +2487,7 @@ function GhostDimBadge({ refEl, isActive, onClick }) {
 // Фиксированная позиция сверху canvas (top-center). Не двигается, не пересчитывает сцену.
 // Локальное состояние input'а (useState внутри) — родитель узнаёт значение только при Enter.
 // Это полностью устраняет дёргание: сцена замороженная, пока popup открыт.
-function LockInputPopup({ title, initialValue, side, onCommit, onCancel, onToggle, hint }) {
+function LockInputPopup({ title, initialValue, side, onCommit, onCancel, onToggle, hint, maxValue }) {
   const [val, setVal] = useState(String(initialValue ?? ""));
   const inputRef = useRef(null);
   useEffect(() => {
@@ -2476,11 +2501,20 @@ function LockInputPopup({ title, initialValue, side, onCommit, onCancel, onToggl
       inputRef.current.select();
     }
   }, [side]);
+  // Snap-кнопки. Удобно одним тапом поставить элемент:
+  // - «К стенке» = 0 (вплотную с этой стороны)
+  // - «В центр» = maxValue/2
+  // - «К другой» = maxValue (вплотную с противоположной стороны)
+  const snap = (v) => {
+    const s = String(Math.max(0, Math.round(v)));
+    setVal(s);
+    onCommit(s);
+  };
   return (
     <div style={{
       position: "absolute",
       top: 60, left: "50%", transform: "translateX(-50%)",
-      minWidth: 260,
+      minWidth: 280,
       background: "rgba(11,12,16,0.98)",
       border: "1px solid rgba(251,191,36,0.5)",
       borderRadius: 8,
@@ -2496,6 +2530,44 @@ function LockInputPopup({ title, initialValue, side, onCommit, onCancel, onToggl
       }}>
         {title} {side && <span style={{ color: "#888", marginLeft: 6 }}>· {side === "A" ? "А" : "Б"}</span>}
       </div>
+
+      {/* Snap-кнопки — один тап = поставить вплотную/в центр.
+          Показываем только если родитель передал maxValue (т.е. знает сколько помещается). */}
+      {typeof maxValue === "number" && maxValue > 0 && (
+        <div style={{ display: "flex", gap: 4 }}>
+          <button
+            onClick={() => snap(0)}
+            title="Вплотную к этой стенке"
+            style={{
+              flex: 1, padding: "6px 4px", fontSize: 10, fontWeight: 700,
+              background: "rgba(251,191,36,0.12)", color: "#fbbf24",
+              border: "1px solid rgba(251,191,36,0.4)", borderRadius: 4,
+              cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace",
+            }}
+          >⊟ 0</button>
+          <button
+            onClick={() => snap(maxValue / 2)}
+            title="В центр"
+            style={{
+              flex: 1, padding: "6px 4px", fontSize: 10, fontWeight: 700,
+              background: "rgba(251,191,36,0.12)", color: "#fbbf24",
+              border: "1px solid rgba(251,191,36,0.4)", borderRadius: 4,
+              cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace",
+            }}
+          >◇ Центр</button>
+          <button
+            onClick={() => snap(maxValue)}
+            title="Вплотную к противоположной стенке"
+            style={{
+              flex: 1, padding: "6px 4px", fontSize: 10, fontWeight: 700,
+              background: "rgba(251,191,36,0.12)", color: "#fbbf24",
+              border: "1px solid rgba(251,191,36,0.4)", borderRadius: 4,
+              cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace",
+            }}
+          >{maxValue} ⊠</button>
+        </div>
+      )}
+
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <input
           ref={inputRef}
