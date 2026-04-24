@@ -147,6 +147,25 @@ export default function WardrobeEditor() {
 
   const delSel = useCallback(() => { if (!selId) return; setElements(prev => adjust(prev.filter(e => e.id !== selId))); setSelId(null); }, [selId, adjust]);
 
+  // Дублирование элемента со сдвигом. Сдвиг зависит от типа:
+  // - Вертикальные (stud, door, panel) → X +300мм
+  // - Горизонтальные (shelf, rod, drawers) → Y +250мм
+  // После создания вызываем adjust чтобы не вылезти за границы / не пересечься.
+  const duplicateEl = useCallback((id) => {
+    const src = elements.find(e => e.id === id);
+    if (!src) return;
+    const newId = `e${Date.now()}`;
+    const copy = { ...src, id: newId, _order: Math.max(...elements.map(e => e._order || 0), 0) + 1 };
+    // Сдвиг
+    if (src.type === "stud" || src.type === "door" || src.type === "panel") {
+      copy.x = Math.max(0, Math.min(iW - (src.type === "stud" ? t : (src.w || 400)), (src.x || 0) + 300));
+    } else if (src.type === "shelf" || src.type === "rod" || src.type === "drawers") {
+      copy.y = Math.max(0, Math.min(iH - t, (src.y || 0) + 250));
+    }
+    setElements(prev => adjust([...prev, copy]));
+    setSelId(newId);
+  }, [elements, adjust, iW, iH, t]);
+
   const updateEl = useCallback((id, upd) => {
     setElements(prev => {
       let next = prev.map(e => {
@@ -870,6 +889,7 @@ export default function WardrobeEditor() {
         selEl={selEl}
         updateEl={updateEl}
         delSel={delSel}
+        onDuplicate={duplicateEl}
         iW={iW}
         iH={iH}
         t={t}

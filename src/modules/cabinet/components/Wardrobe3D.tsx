@@ -105,6 +105,7 @@ export default function Wardrobe3D({
   selEl = null,             // выделенный элемент (объект из elements)
   updateEl = null,          // (id, upd) => void
   delSel = null,            // () => void
+  onDuplicate = null,       // (id) => void — дублировать выделенный элемент со сдвигом
   iW = 0, iH = 0, t = 16,
   isMobile = false,
   // Меню добавления элементов
@@ -129,6 +130,8 @@ export default function Wardrobe3D({
   const editDimBRef = useRef(null);
   // Показывать ли общие размеры (габариты, между-стоечные/полочные)
   const [showDims, setShowDims] = useState(true);
+  // FAB open/close state — floating "+" button, fan menu со всеми типами элементов
+  const [fabOpen, setFabOpen] = useState(false);
 
   // ═══ Ghost-dim input state (Этап 1-3: стойка/полка/штанга при постановке) ═══
   // Когда пользователь кликает на жёлтую цифру — она превращается в input.
@@ -2170,6 +2173,107 @@ export default function Wardrobe3D({
               </span>
             </div>
           )}
+
+          {/* Контекстное меню выделенного элемента — быстрые действия.
+              Показывается когда есть выделение И нет placeMode.
+              Плавающая плашка снизу-по-центру над canvas.
+              Не мешает PropsPanel (справа/снизу) и индикатору edit-Z (сверху). */}
+          {selEl && !placeMode && (
+            <div style={{
+              position: "absolute",
+              bottom: 24, left: "50%",
+              transform: "translateX(-50%)",
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "6px 8px",
+              borderRadius: 8,
+              background: "rgba(11,12,16,0.95)",
+              border: "1px solid rgba(96,165,250,0.35)",
+              boxShadow: "0 4px 14px rgba(0,0,0,0.5)",
+              zIndex: 11,
+              pointerEvents: "auto",
+            }}>
+              {/* Удалить */}
+              {delSel && (
+                <button
+                  onClick={() => delSel()}
+                  title="Удалить элемент"
+                  style={{
+                    padding: "6px 10px", borderRadius: 5,
+                    border: "1px solid rgba(239,68,68,0.4)",
+                    background: "rgba(239,68,68,0.12)",
+                    color: "#f87171",
+                    fontSize: 11, fontWeight: 700,
+                    fontFamily: "'IBM Plex Mono',monospace",
+                    cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 4,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.25)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(239,68,68,0.12)"; }}
+                >
+                  🗑 Удалить
+                </button>
+              )}
+              {/* Дублировать */}
+              {onDuplicate && (
+                <button
+                  onClick={() => onDuplicate(selEl.id)}
+                  title="Создать копию рядом"
+                  style={{
+                    padding: "6px 10px", borderRadius: 5,
+                    border: "1px solid rgba(96,165,250,0.4)",
+                    background: "rgba(96,165,250,0.12)",
+                    color: "#93c5fd",
+                    fontSize: 11, fontWeight: 700,
+                    fontFamily: "'IBM Plex Mono',monospace",
+                    cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 4,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(96,165,250,0.25)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(96,165,250,0.12)"; }}
+                >
+                  📋 Дублировать
+                </button>
+              )}
+              {/* Глубина — только для insert-панели и штанги. Активирует edit-Z (A). */}
+              {editableZ && (
+                <button
+                  onClick={() => {
+                    const txt = editDimARef.current?.textContent ?? "";
+                    setEditDim("A");
+                    setEditValue(txt.trim());
+                  }}
+                  title="Редактировать глубину (Z)"
+                  style={{
+                    padding: "6px 10px", borderRadius: 5,
+                    border: "1px solid rgba(251,191,36,0.4)",
+                    background: "rgba(251,191,36,0.12)",
+                    color: "#fcd34d",
+                    fontSize: 11, fontWeight: 700,
+                    fontFamily: "'IBM Plex Mono',monospace",
+                    cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 4,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(251,191,36,0.25)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(251,191,36,0.12)"; }}
+                >
+                  📏 Глубина
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* FAB — floating action button "+". Снизу-справа, раскрывается веером.
+              Скрыт когда активен placeMode или выделен элемент (чтобы не мешать их индикаторам). */}
+          {onAddElement && !placeMode && !selEl && (
+            <Fab
+              open={fabOpen}
+              onToggle={() => setFabOpen(v => !v)}
+              onPick={(type) => {
+                setFabOpen(false);
+                onAddElement(type);
+              }}
+            />
+          )}
         </div>
 
         {/* Панель свойств — появляется при выделении элемента.
@@ -2188,6 +2292,104 @@ export default function Wardrobe3D({
         )}
       </div>
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Fab — floating action button "+". Раскрывается веером иконок.
+// ═══════════════════════════════════════════════════════════════
+// Снизу-справа над canvas. Закрывается по клику на кнопку ещё раз,
+// по клику в пустое место (overlay) или после выбора типа.
+function Fab({ open, onToggle, onPick }) {
+  const items = [
+    { type: "shelf",   icon: "━", label: "Полка"  },
+    { type: "stud",    icon: "┃", label: "Стойка" },
+    { type: "rod",     icon: "⎯", label: "Штанга" },
+    { type: "drawers", icon: "☰", label: "Ящики"  },
+    { type: "panel",   icon: "▯", label: "Панель" },
+    { type: "door",    icon: "🚪", label: "Дверь" },
+  ];
+  // Позиции иконок при open=true: веер вверх-влево от кнопки.
+  // Радиус 90px, углы от -100° до -175° (против часовой, дугой над кнопкой).
+  const count = items.length;
+  const startA = -100; // градусы (-90 = прямо вверх, меньше — влево)
+  const endA = -175;
+  return (
+    <>
+      {/* Прозрачный overlay для закрытия по клику вне — только когда открыт */}
+      {open && (
+        <div
+          onClick={onToggle}
+          style={{
+            position: "absolute", inset: 0,
+            zIndex: 11,
+            background: "transparent",
+          }}
+        />
+      )}
+      {/* Иконки-лепестки */}
+      {items.map((it, i) => {
+        const angle = startA + (endA - startA) * (i / (count - 1));
+        const rad = (angle * Math.PI) / 180;
+        const r = 100;
+        const dx = Math.cos(rad) * r;
+        const dy = Math.sin(rad) * r;
+        return (
+          <button
+            key={it.type}
+            onClick={() => onPick(it.type)}
+            title={it.label}
+            style={{
+              position: "absolute",
+              bottom: 24, right: 24,
+              width: 44, height: 44,
+              borderRadius: "50%",
+              border: "1px solid rgba(217,119,6,0.4)",
+              background: "rgba(11,12,16,0.95)",
+              color: "#d97706",
+              fontSize: 16, fontWeight: 700,
+              fontFamily: "'IBM Plex Mono',monospace",
+              cursor: "pointer",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              transform: open
+                ? `translate(${dx}px, ${dy}px) scale(1)`
+                : "translate(0, 0) scale(0.5)",
+              opacity: open ? 1 : 0,
+              pointerEvents: open ? "auto" : "none",
+              transition: `transform 180ms cubic-bezier(.2,.8,.2,1) ${i * 25}ms, opacity 150ms ${i * 25}ms`,
+              zIndex: 12,
+            }}
+          >
+            {it.icon}
+          </button>
+        );
+      })}
+      {/* Сам FAB "+" */}
+      <button
+        onClick={onToggle}
+        title={open ? "Закрыть" : "Добавить элемент"}
+        style={{
+          position: "absolute",
+          bottom: 24, right: 24,
+          width: 52, height: 52,
+          borderRadius: "50%",
+          border: "none",
+          background: "#d97706",
+          color: "#000",
+          fontSize: 26, fontWeight: 700,
+          lineHeight: 1,
+          cursor: "pointer",
+          boxShadow: "0 4px 14px rgba(217,119,6,0.4), 0 2px 6px rgba(0,0,0,0.5)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          transform: open ? "rotate(45deg)" : "rotate(0)",
+          transition: "transform 200ms cubic-bezier(.2,.8,.2,1)",
+          zIndex: 13,
+        }}
+      >
+        +
+      </button>
+    </>
   );
 }
 
