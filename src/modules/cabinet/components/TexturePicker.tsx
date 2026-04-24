@@ -1,28 +1,43 @@
 import { useState, useRef, useEffect } from "react";
 
+// ═══════════════════════════════════════════════════════════════
+// Каталог текстур.
+// ═══════════════════════════════════════════════════════════════
+// ВАЖНО: поле `file` УДАЛЕНО — JPG-файлов текстур в репозитории пока нет.
+// Раньше их попытки загрузки приводили к 16 ошибкам 404 на каждую
+// загрузку страницы. Превью работают через `hex` (плоский цвет).
+//
+// Чтобы вернуть фото-превью конкретной текстуры — достаточно положить
+// файл в `public/textures/` и добавить поле `file: "имя.jpg"` ниже.
+// TEXTURE_CATALOG.find → getTextureInfo → Wardrobe3D автоматически
+// подхватит имя через `imgUrl`.
 export const TEXTURE_CATALOG = [
-  { id: "egger-w1100", code: "W1100 ST9",  name: "Белый Альпийский",     brand: "Egger",     hex: "#f2efe8", file: "egger-w1100-st9.jpg" },
-  { id: "egger-h1401", code: "H1401 ST22", name: "Сосна Касцина",        brand: "Egger",     hex: "#d4c4a0", file: "egger-h1401-st22.jpg" },
-  { id: "egger-h3158", code: "H3158 ST22", name: "Дуб Vicenza",          brand: "Egger",     hex: "#b89a6a", file: "egger-h3158-st22.jpg" },
-  { id: "egger-h3325", code: "H3325 ST28", name: "Дуб Тоб. натуральный", brand: "Egger",     hex: "#c8a870", file: "egger-h3325-st28.jpg" },
-  { id: "egger-h1137", code: "H1137 ST12", name: "Дуб Сонома",           brand: "Egger",     hex: "#c8a96e", file: "egger-h1137-st12.jpg" },
-  { id: "egger-h1399", code: "H1399 ST10", name: "Дуб Денвер трюфель",   brand: "Egger",     hex: "#7a6248", file: "egger-h1399-st10.jpg" },
-  { id: "egger-h3734", code: "H3734 ST9",  name: "Дуб Шато серый",       brand: "Egger",     hex: "#9a8a78", file: "egger-h3734-st9.jpg" },
-  { id: "egger-h3058", code: "H3058 ST22", name: "Венге Мали",           brand: "Egger",     hex: "#3d2b1f", file: "egger-h3058-st22.jpg" },
-  { id: "egger-h3700", code: "H3700 ST10", name: "Орех Пацифик нат.",    brand: "Egger",     hex: "#5c3a1e", file: "egger-h3700-st10.jpg" },
-  { id: "egger-u702",  code: "U702 ST9",   name: "Кашемир",              brand: "Egger",     hex: "#b6a894", file: "egger-u702-st9.jpg" },
-  { id: "egger-u727",  code: "U727 ST9",   name: "Серый камень",         brand: "Egger",     hex: "#8c8c8c", file: "egger-u727-st9.jpg" },
-  { id: "egger-u999",  code: "U999 ST2",   name: "Чёрный",              brand: "Egger",     hex: "#1a1a1a", file: "egger-u999-st2.jpg" },
-  { id: "krono-8622",  code: "8622 BS",    name: "Вяз Кебрано",          brand: "Kronospan", hex: "#7d5a3c", file: "krono-8622-bs.jpg" },
-  { id: "krono-k002",  code: "K002 FP",    name: "Дуб Меридиан",         brand: "Kronospan", hex: "#c4a46c", file: "krono-k002-fp.jpg" },
-  { id: "krono-k003",  code: "K003 FP",    name: "Ясень Шимо светлый",   brand: "Kronospan", hex: "#b8a088", file: "krono-k003-fp.jpg" },
-  { id: "krono-0112",  code: "0112 PE",    name: "Белый гладкий",        brand: "Kronospan", hex: "#f5f5f0", file: "krono-0112-pe.jpg" },
+  { id: "egger-w1100", code: "W1100 ST9",  name: "Белый Альпийский",     brand: "Egger",     hex: "#f2efe8" },
+  { id: "egger-h1401", code: "H1401 ST22", name: "Сосна Касцина",        brand: "Egger",     hex: "#d4c4a0" },
+  { id: "egger-h3158", code: "H3158 ST22", name: "Дуб Vicenza",          brand: "Egger",     hex: "#b89a6a" },
+  { id: "egger-h3325", code: "H3325 ST28", name: "Дуб Тоб. натуральный", brand: "Egger",     hex: "#c8a870" },
+  { id: "egger-h1137", code: "H1137 ST12", name: "Дуб Сонома",           brand: "Egger",     hex: "#c8a96e" },
+  { id: "egger-h1399", code: "H1399 ST10", name: "Дуб Денвер трюфель",   brand: "Egger",     hex: "#7a6248" },
+  { id: "egger-h3734", code: "H3734 ST9",  name: "Дуб Шато серый",       brand: "Egger",     hex: "#9a8a78" },
+  { id: "egger-h3058", code: "H3058 ST22", name: "Венге Мали",           brand: "Egger",     hex: "#3d2b1f" },
+  { id: "egger-h3700", code: "H3700 ST10", name: "Орех Пацифик нат.",    brand: "Egger",     hex: "#5c3a1e" },
+  { id: "egger-u702",  code: "U702 ST9",   name: "Кашемир",              brand: "Egger",     hex: "#b6a894" },
+  { id: "egger-u727",  code: "U727 ST9",   name: "Серый камень",         brand: "Egger",     hex: "#8c8c8c" },
+  { id: "egger-u999",  code: "U999 ST2",   name: "Чёрный",              brand: "Egger",     hex: "#1a1a1a" },
+  { id: "krono-8622",  code: "8622 BS",    name: "Вяз Кебрано",          brand: "Kronospan", hex: "#7d5a3c" },
+  { id: "krono-k002",  code: "K002 FP",    name: "Дуб Меридиан",         brand: "Kronospan", hex: "#c4a46c" },
+  { id: "krono-k003",  code: "K003 FP",    name: "Ясень Шимо светлый",   brand: "Kronospan", hex: "#b8a088" },
+  { id: "krono-0112",  code: "0112 PE",    name: "Белый гладкий",        brand: "Kronospan", hex: "#f5f5f0" },
 ];
 
 /* ═══ Helper ═══ */
 export function getTextureInfo(id, customTextures) {
   const c = TEXTURE_CATALOG.find(t => t.id === id);
-  if (c) return { hex: c.hex, file: c.file, imgUrl: `/textures/${c.file}`, name: c.name, code: c.code };
+  if (c) {
+    // Если у записи есть `file` — используем. Иначе imgUrl = null (без картинки, только hex).
+    const imgUrl = c.file ? `/textures/${c.file}` : null;
+    return { hex: c.hex, file: c.file || "", imgUrl, name: c.name, code: c.code };
+  }
   const cu = customTextures.find(t => t.id === id);
   if (cu) return { hex: cu.hex || "#666", file: "", imgUrl: cu.dataUrl, name: cu.name, code: cu.code || "" };
   return { hex: "#8b7355", file: "", imgUrl: null, name: "По умолчанию", code: "" };
@@ -54,7 +69,10 @@ export function TexturePicker({ corpusTextureId, facadeTextureId, onCorpusChange
   const fileRef = useRef(null);
 
   useEffect(() => {
+    // Предзагружаем только те текстуры у которых реально есть файл.
+    // Записи без `file:` — показываются hex-цветом без запроса к серверу.
     TEXTURE_CATALOG.forEach(tex => {
+      if (!tex.file) return;
       const img = new Image();
       img.onload = () => setLoadedImages(prev => ({ ...prev, [tex.id]: `/textures/${tex.file}` }));
       img.src = `/textures/${tex.file}`;
