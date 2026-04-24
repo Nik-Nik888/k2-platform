@@ -1959,7 +1959,10 @@ export default function Wardrobe3D({
         minHeight: 0,
       }}>
         {/* 3D canvas + индикатор placeMode сверху */}
-        <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
+        {/* minWidth: 0 — обязательно, иначе flex-child с content 100% распирает себя
+            и соседа (PropsPanel3D width:320) выпихивает за экран, из-за чего панель
+            свойств кажется "невидимой" хотя рендерится. */}
+        <div style={{ flex: 1, position: "relative", minHeight: 0, minWidth: 0 }}>
           <div ref={mountRef} style={{
             width: "100%", height: "100%",
             cursor: placeMode ? "crosshair" : "grab",
@@ -2250,6 +2253,7 @@ function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, isMobile })
     borderTop: "1px solid rgba(96,165,250,0.3)",
     padding: "16px 20px 20px",
     boxShadow: "0 -4px 20px rgba(0,0,0,0.5)",
+    zIndex: 50,
   } : {
     width: 320, minWidth: 320, flexShrink: 0,
     background: "rgba(11,12,16,0.98)",
