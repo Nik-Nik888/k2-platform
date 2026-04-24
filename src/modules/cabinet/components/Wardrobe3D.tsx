@@ -134,21 +134,17 @@ export default function Wardrobe3D({
   const [fabOpen, setFabOpen] = useState(false);
 
   // ═══ Ghost-dim input state (Этап 1-3: стойка/полка/штанга при постановке) ═══
-  // Когда пользователь кликает на жёлтую цифру — она превращается в input.
-  // lockedDim: "A" | "B" | null — какая цифра сейчас в режиме ввода
-  // lockedValue: число в мм — что введено в input (может быть "" пока пользователь печатает)
-  // niche: {niL, niR, niT, niB, axis} — границы ниши, в которой идёт ввод (нужно чтобы пересчитать фантом)
+  // Когда пользователь активирует ввод цифры (Space) — она открывается в МОДАЛЬНОМ POPUP
+  // (фиксированная позиция сверху canvas). Сцена замораживается: фантом не двигается
+  // пока идёт набор. Пересчёт только при commit (Enter).
   const [lockedDim, setLockedDim] = useState(null);
-  const [lockedValue, setLockedValue] = useState("");
   const [lockedNiche, setLockedNiche] = useState(null);
-  const lockedInputRef = useRef(null);
+  // Снимок размеров A/B в момент активации — показываем их пока не коммитнут
+  const [lockedSnapshot, setLockedSnapshot] = useState(null);
 
   // ═══ Edit-Z state (Этап 5: панель insert / штанга после установки) ═══
-  // Когда выделена панель-insert или штанга, показываем 2 цифры глубины (A=спереди, B=сзади).
-  // Space активирует ввод. editDim отличается от lockedDim чтобы placement и edit не конфликтовали.
   const [editDim, setEditDim] = useState(null);
-  const [editValue, setEditValue] = useState("");
-  const editInputRef = useRef(null);
+  const [editSnapshot, setEditSnapshot] = useState(null);
 
   // Ref для актуальных props placement — handlers внутри Three.js не пересоздаются
   // при изменении props (build пересоздавать дорого), поэтому читаем свежие значения через ref.
@@ -157,95 +153,56 @@ export default function Wardrobe3D({
     iW, iH, t,
     showDims,
     elements,
-    lockedDim, lockedValue, lockedNiche,
-    editDim, editValue, selEl,
+    lockedDim, lockedNiche, lockedSnapshot,
+    editDim, editSnapshot, selEl,
   });
   useEffect(() => {
     propsRef.current = {
       placeMode, setPlaceMode, findDoorBounds, placeInZone, iW, iH, t, showDims, elements,
-      lockedDim, lockedValue, lockedNiche,
-      editDim, editValue, selEl,
+      lockedDim, lockedNiche, lockedSnapshot,
+      editDim, editSnapshot, selEl,
     };
   });
 
-  // Когда вошли в lock-режим — ставим фокус и выделяем текст
-  useEffect(() => {
-    if (lockedDim && lockedInputRef.current) {
-      lockedInputRef.current.focus();
-      lockedInputRef.current.select();
-    }
-  }, [lockedDim]);
-
-  // Сброс lock-режима когда placeMode изменился (пользователь выбрал другой элемент или отменил)
+  // Сброс lock-режима когда placeMode изменился
   useEffect(() => {
     setLockedDim(null);
-    setLockedValue("");
     setLockedNiche(null);
+    setLockedSnapshot(null);
   }, [placeMode]);
 
   // Сброс edit-режима когда сменилось выделение (или снято)
   useEffect(() => {
     setEditDim(null);
-    setEditValue("");
+    setEditSnapshot(null);
   }, [selEl?.id]);
 
-  // Фокус в edit-input при активации
-  useEffect(() => {
-    if (editDim && editInputRef.current) {
-      editInputRef.current.focus();
-      editInputRef.current.select();
-    }
-  }, [editDim]);
-
-  // При изменении введённого значения в input — пересчитать фантом в реальном времени.
-  // Используем координаты последней позиции курсора (или центр canvas если мышь не двигалась).
-  useEffect(() => {
-    if (lockedDim === null) return;
-    const fn = stateRef.current.updateZoneHighlight;
-    if (!fn) return;
-    let mx = stateRef.current.lastMouseX;
-    let my = stateRef.current.lastMouseY;
-    if (mx == null || my == null) {
-      // Fallback — центр canvas
-      const rect = mountRef.current?.getBoundingClientRect();
-      if (rect) {
-        mx = rect.left + rect.width / 2;
-        my = rect.top + rect.height / 2;
-      } else {
-        return;
-      }
-    }
-    fn(mx, my);
-  }, [lockedValue, lockedDim]);
-
   // ═══ Клавиатура для click-to-edit ═══
-  // Space: активирует ввод активной цифры (A → B → A циклически).
-  // Enter: commit (обрабатывается в input onKeyDown).
-  // Escape: cancel.
-  // Работает только при placeMode === "stud" (на Этапе 1).
+  // Space активирует ввод. Логика взаимодействия теперь через popup-компонент LockInputPopup.
+  // Здесь остаётся только открытие popup'а по Space и cycle A → B → A.
   const toggleLockedSide = () => {
     const { lockedDim: lD } = propsRef.current;
     const niche = stateRef.current.lastNiche;
-    if (!niche) return; // курсор не над шкафом — ничего не делаем
+    if (!niche) return;
+    // Читаем текущие значения A и B из DOM (ghost-dim badge'ев) — это снимок в момент активации.
+    const readSnapshot = () => ({
+      A: parseFloat(ghostDimARef.current?.textContent ?? "") || 0,
+      B: parseFloat(ghostDimBRef.current?.textContent ?? "") || 0,
+    });
     if (lD === null) {
-      const txt = ghostDimARef.current?.textContent ?? "";
       setLockedNiche(niche);
+      setLockedSnapshot(readSnapshot());
       setLockedDim("A");
-      setLockedValue(txt.trim());
     } else if (lD === "A") {
-      const txt = ghostDimBRef.current?.textContent ?? "";
       setLockedDim("B");
-      setLockedValue(txt.trim());
-    } else if (lD === "B") {
-      const txt = ghostDimARef.current?.textContent ?? "";
+    } else {
       setLockedDim("A");
-      setLockedValue(txt.trim());
     }
   };
   const cancelLocked = () => {
     setLockedDim(null);
-    setLockedValue("");
     setLockedNiche(null);
+    setLockedSnapshot(null);
   };
 
   // ═══ Edit-Z controls (Этап 5) ═══
@@ -260,26 +217,25 @@ export default function Wardrobe3D({
   const toggleEditSide = () => {
     if (!editableZ) return;
     const { editDim: eD } = propsRef.current;
+    const readSnapshot = () => ({
+      A: parseFloat(editDimARef.current?.textContent ?? "") || 0,
+      B: parseFloat(editDimBRef.current?.textContent ?? "") || 0,
+    });
     if (eD === null) {
-      const txt = editDimARef.current?.textContent ?? "";
+      setEditSnapshot(readSnapshot());
       setEditDim("A");
-      setEditValue(txt.trim());
     } else if (eD === "A") {
-      const txt = editDimBRef.current?.textContent ?? "";
       setEditDim("B");
-      setEditValue(txt.trim());
     } else {
-      const txt = editDimARef.current?.textContent ?? "";
       setEditDim("A");
-      setEditValue(txt.trim());
     }
   };
   const cancelEdit = () => {
     setEditDim(null);
-    setEditValue("");
+    setEditSnapshot(null);
   };
-  const commitEditZ = () => {
-    const parsed = parseFloat(editValue);
+  const commitEditZ = (typedValue) => {
+    const parsed = parseFloat(typedValue);
     if (!Number.isFinite(parsed) || parsed < 0 || !selEl || !updateEl) {
       cancelEdit();
       return;
@@ -362,13 +318,10 @@ export default function Wardrobe3D({
 
   // Callback: применить зафиксированное значение — ставит элемент точно.
   // Вызывается при Enter в input.
-  const commitLockedPlacement = () => {
-    const parsed = parseFloat(lockedValue);
+  const commitLockedPlacement = (typedValue) => {
+    const parsed = parseFloat(typedValue);
     if (!Number.isFinite(parsed) || parsed < 0 || !lockedNiche || !placeInZone) {
-      // Невалидное значение — отменяем ввод, не ставим элемент
-      setLockedDim(null);
-      setLockedValue("");
-      setLockedNiche(null);
+      cancelLocked();
       return;
     }
     const { niL, niR, niT, niB } = lockedNiche;
@@ -410,10 +363,7 @@ export default function Wardrobe3D({
       clickY = Math.max(niT + 12, Math.min(niB - 12, clickY));
       placeInZone(null, midX, clickY);
     }
-    // Сбрасываем lock после постановки
-    setLockedDim(null);
-    setLockedValue("");
-    setLockedNiche(null);
+    cancelLocked();
   };
 
   // ═══ Расчёт размеров для чертёжного стиля ═══
@@ -2061,50 +2011,14 @@ export default function Wardrobe3D({
               Цвет жёлтый (соответствует фантому), display:none по умолчанию.
               Стойка (Этап 1): активация режима ввода по клавише Space (см. useEffect).
               Space циклически переключает: null → A → B → A. Enter = commit, Escape = cancel. */}
-          <GhostDimBadge
-            refEl={ghostDimARef}
-            isLocked={lockedDim === "A"}
-            lockedValue={lockedValue}
-            setLockedValue={setLockedValue}
-            onCommit={() => commitLockedPlacement()}
-            onCancel={cancelLocked}
-            onToggle={toggleLockedSide}
-            inputRef={lockedDim === "A" ? lockedInputRef : undefined}
-          />
-          <GhostDimBadge
-            refEl={ghostDimBRef}
-            isLocked={lockedDim === "B"}
-            lockedValue={lockedValue}
-            setLockedValue={setLockedValue}
-            onCommit={() => commitLockedPlacement()}
-            onCancel={cancelLocked}
-            onToggle={toggleLockedSide}
-            inputRef={lockedDim === "B" ? lockedInputRef : undefined}
-          />
-
-          {/* Edit-dim labels для Z-редактирования выделенного элемента
-              (панель insert или штанга). Позиция обновляется в animate-tick
-              через updateEditDimLabels. Активация Space → input → Enter. */}
-          <GhostDimBadge
-            refEl={editDimARef}
-            isLocked={editDim === "A"}
-            lockedValue={editValue}
-            setLockedValue={setEditValue}
-            onCommit={commitEditZ}
-            onCancel={cancelEdit}
-            onToggle={toggleEditSide}
-            inputRef={editDim === "A" ? editInputRef : undefined}
-          />
-          <GhostDimBadge
-            refEl={editDimBRef}
-            isLocked={editDim === "B"}
-            lockedValue={editValue}
-            setLockedValue={setEditValue}
-            onCommit={commitEditZ}
-            onCancel={cancelEdit}
-            onToggle={toggleEditSide}
-            inputRef={editDim === "B" ? editInputRef : undefined}
-          />
+          {/* Ghost-dim labels (4 штуки: 2 для placement A/B, 2 для edit-Z A/B).
+              Они — просто жёлтые цифры рядом с элементом/фантомом. Ввод
+              значений идёт в отдельном LockInputPopup (фикс. позиция сверху),
+              чтобы input не перерисовывался при движении сцены. */}
+          <GhostDimBadge refEl={ghostDimARef} isActive={lockedDim === "A"} />
+          <GhostDimBadge refEl={ghostDimBRef} isActive={lockedDim === "B"} />
+          <GhostDimBadge refEl={editDimARef} isActive={editDim === "A"} />
+          <GhostDimBadge refEl={editDimBRef} isActive={editDim === "B"} />
 
           {/* Кнопка toggle размеров — справа внизу canvas */}
           <button
@@ -2272,6 +2186,49 @@ export default function Wardrobe3D({
             </div>
           )}
 
+          {/* LockInputPopup — фикс. popup сверху canvas для ввода точного размера.
+              Появляется при Space или клике на «📏 Глубина». Не двигается пока сцена
+              обновляется — это устраняет дёргание input'а. */}
+          {lockedDim && (
+            <LockInputPopup
+              key={`place-${lockedDim}`}
+              title={placeMode === "stud" ? "Точная позиция стойки" :
+                     placeMode === "shelf" ? "Точная высота полки" :
+                     placeMode === "rod" ? "Точная высота штанги" : "Размер"}
+              side={lockedDim}
+              initialValue={(lockedDim === "A"
+                ? ghostDimARef.current?.textContent
+                : ghostDimBRef.current?.textContent) ?? ""}
+              onCommit={(val) => {
+                setLockedValue(val);
+                // setState асинхронный — переиспользуем val напрямую
+                setTimeout(() => commitLockedPlacement(val), 0);
+              }}
+              onCancel={cancelLocked}
+              onToggle={toggleLockedSide}
+              hint={lockedDim === "A"
+                ? "вводим с одной стороны · ⇄ сменить · Enter=OK · Esc=отмена"
+                : "вводим с другой стороны · ⇄ сменить · Enter=OK · Esc=отмена"}
+            />
+          )}
+          {editDim && (
+            <LockInputPopup
+              key={`edit-${editDim}`}
+              title={selEl?.type === "panel" ? "Глубина панели" : "Глубина штанги"}
+              side={editDim}
+              initialValue={(editDim === "A"
+                ? editDimARef.current?.textContent
+                : editDimBRef.current?.textContent) ?? ""}
+              onCommit={(val) => {
+                setEditValue(val);
+                setTimeout(() => commitEditZ(val), 0);
+              }}
+              onCancel={cancelEdit}
+              onToggle={toggleEditSide}
+              hint={editDim === "A" ? "расстояние от передней грани" : "расстояние до задней стенки"}
+            />
+          )}
+
           {/* FAB — floating action button "+". Снизу-справа, раскрывается веером.
               Скрыт когда активен placeMode или выделен элемент (чтобы не мешать их индикаторам). */}
           {onAddElement && !placeMode && !selEl && (
@@ -2404,73 +2361,88 @@ function Fab({ open, onToggle, onPick }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// GhostDimBadge — жёлтая цифра рядом с фантомом при placeMode.
+// GhostDimBadge — жёлтая цифра рядом с фантомом/элементом.
 // ═══════════════════════════════════════════════════════════════
-// Позиция обновляется императивно из updateZoneHighlight через refEl (ref на контейнер).
-// Внутри — либо текст (отображаемый режим), либо <input> (режим ввода).
-//
-// Активация режима ввода — по клавише Space (глобальный listener в Wardrobe3D).
-// Когда input сфокусирован — window-handler игнорирует Space, а input сам вызывает
-// onToggle (переключить A ↔ B) / onCommit (Enter) / onCancel (Escape).
-function GhostDimBadge({
-  refEl,
-  isLocked,
-  lockedValue,
-  setLockedValue,
-  onCommit,
-  onCancel,
-  onToggle,
-  inputRef,
-}) {
+// Чистый display-компонент. Позиция и текст управляются императивно через refEl
+// (из updateZoneHighlight / updateEditDimLabels). Никакого input внутри —
+// ввод размера теперь идёт через отдельный LockInputPopup (фикс. позиция сверху),
+// чтобы не было подёргиваний от перерисовки сцены во время набора.
+function GhostDimBadge({ refEl, isActive }) {
   const baseStyle = {
     position: "absolute",
     left: 0, top: 0,
     transform: "translate(-50%, -50%)",
-    padding: isLocked ? "1px 4px" : "2px 6px",
+    padding: "2px 6px",
     fontSize: 11,
     fontWeight: 600,
     fontFamily: "'IBM Plex Mono', monospace",
     color: "#1a1a1a",
-    background: isLocked ? "#fde68a" : "rgba(251,191,36,0.92)",
-    border: isLocked ? "1px solid #b45309" : "1px solid rgba(180,83,9,0.5)",
+    background: isActive ? "#fde68a" : "rgba(251,191,36,0.92)",
+    border: isActive ? "1px solid #b45309" : "1px solid rgba(180,83,9,0.5)",
     borderRadius: 2,
     whiteSpace: "nowrap",
     userSelect: "none",
     display: "none",
-    boxShadow: isLocked ? "0 0 0 2px rgba(251,191,36,0.3)" : "0 1px 3px rgba(0,0,0,0.3)",
-    zIndex: isLocked ? 8 : 6,
+    boxShadow: isActive ? "0 0 0 2px rgba(251,191,36,0.3)" : "0 1px 3px rgba(0,0,0,0.3)",
+    zIndex: isActive ? 8 : 6,
     pointerEvents: "none",
     textAlign: "center",
     lineHeight: 1.2,
   };
+  return <div ref={refEl} style={baseStyle} />;
+}
 
-  if (isLocked) {
-    return (
-      <div ref={refEl} style={{ ...baseStyle, pointerEvents: "auto" }}>
-        {/* Uncontrolled input: defaultValue и читаем через ref.
-            Это избавляет от джиттера и потери курсора при каждой букве,
-            которые возникают на мобильных из-за controlled re-render'а.
-            key={isLocked} гарантирует что input пересоздаётся только
-            при активации/деактивации lock-режима, а не при каждой цифре. */}
+// ═══════════════════════════════════════════════════════════════
+// LockInputPopup — модальный popup для ввода точного размера.
+// ═══════════════════════════════════════════════════════════════
+// Фиксированная позиция сверху canvas (top-center). Не двигается, не пересчитывает сцену.
+// Локальное состояние input'а (useState внутри) — родитель узнаёт значение только при Enter.
+// Это полностью устраняет дёргание: сцена замороженная, пока popup открыт.
+function LockInputPopup({ title, initialValue, side, onCommit, onCancel, onToggle, hint }) {
+  const [val, setVal] = useState(String(initialValue ?? ""));
+  const inputRef = useRef(null);
+  useEffect(() => {
+    // Синхронизируем value при смене side (A/B) — читаем новый initialValue
+    setVal(String(initialValue ?? ""));
+  }, [initialValue, side]);
+  useEffect(() => {
+    // Фокус + выделение на mount / после смены стороны
+    if (inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [side]);
+  return (
+    <div style={{
+      position: "absolute",
+      top: 60, left: "50%", transform: "translateX(-50%)",
+      minWidth: 260,
+      background: "rgba(11,12,16,0.98)",
+      border: "1px solid rgba(251,191,36,0.5)",
+      borderRadius: 8,
+      padding: "10px 14px",
+      boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+      display: "flex", flexDirection: "column", gap: 6,
+      zIndex: 30,
+      pointerEvents: "auto",
+    }}>
+      <div style={{
+        fontSize: 10, color: "#fbbf24", textTransform: "uppercase", letterSpacing: "0.08em",
+        fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700,
+      }}>
+        {title} {side && <span style={{ color: "#888", marginLeft: 6 }}>· {side === "A" ? "А" : "Б"}</span>}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <input
           ref={inputRef}
           type="text"
           inputMode="numeric"
-          defaultValue={lockedValue}
-          onInput={e => {
-            // Чистим нецифры прямо в DOM, без setState
-            const v = e.target.value.replace(/[^\d]/g, "");
-            if (v !== e.target.value) {
-              e.target.value = v;
-            }
-            // Сообщаем родителю новое значение — он использует его для пересчёта
-            // фантома в реальном времени (placeMode) или для updateEl на commit.
-            setLockedValue(v);
-          }}
+          value={val}
+          onChange={e => setVal(e.target.value.replace(/[^\d]/g, ""))}
           onKeyDown={e => {
             if (e.key === "Enter") {
               e.preventDefault();
-              onCommit();
+              onCommit(val);
             } else if (e.key === "Escape") {
               e.preventDefault();
               onCancel();
@@ -2480,25 +2452,61 @@ function GhostDimBadge({
             }
           }}
           style={{
-            width: 45,
-            background: "transparent",
-            border: "none",
+            flex: 1,
+            padding: "8px 10px",
+            fontSize: 16,
+            fontWeight: 700,
+            fontFamily: "'IBM Plex Mono',monospace",
+            background: "#0b0c10",
+            border: "1px solid rgba(251,191,36,0.5)",
+            borderRadius: 5,
+            color: "#fde68a",
             outline: "none",
-            fontSize: 11,
-            fontWeight: 600,
-            fontFamily: "'IBM Plex Mono', monospace",
-            color: "#1a1a1a",
             textAlign: "center",
-            padding: 0,
-            margin: 0,
-            lineHeight: 1.2,
+            minWidth: 0,
           }}
         />
+        <span style={{ fontSize: 11, color: "#888", fontFamily: "'IBM Plex Mono',monospace" }}>мм</span>
       </div>
-    );
-  }
-
-  return <div ref={refEl} style={baseStyle} />;
+      <div style={{ display: "flex", gap: 6 }}>
+        <button
+          onClick={() => onCommit(val)}
+          style={{
+            flex: 1, padding: "6px 8px", fontSize: 11, fontWeight: 700,
+            background: "#fbbf24", color: "#000", border: "none", borderRadius: 4,
+            cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace",
+          }}
+        >OK · Enter</button>
+        {onToggle && (
+          <button
+            onClick={onToggle}
+            style={{
+              padding: "6px 10px", fontSize: 11, fontWeight: 600,
+              background: "rgba(96,165,250,0.15)", color: "#93c5fd",
+              border: "1px solid rgba(96,165,250,0.4)", borderRadius: 4,
+              cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace",
+            }}
+            title="Переключить сторону (Space)"
+          >⇄</button>
+        )}
+        <button
+          onClick={onCancel}
+          style={{
+            padding: "6px 10px", fontSize: 11, fontWeight: 600,
+            background: "transparent", color: "#888",
+            border: "1px solid #333", borderRadius: 4,
+            cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace",
+          }}
+          title="Отмена (Escape)"
+        >✕</button>
+      </div>
+      {hint && (
+        <div style={{ fontSize: 9, color: "#666", fontFamily: "'IBM Plex Mono',monospace" }}>
+          {hint}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════

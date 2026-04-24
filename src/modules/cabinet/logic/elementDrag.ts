@@ -46,7 +46,8 @@ export function moveElement(
   }
 
   if (drag.type === "shelf") {
-    const ny = Math.max(0, Math.min(iH, Math.round(cY - drag.oy)));
+    // y = центр полки, кламп с учётом толщины
+    const ny = Math.max(t / 2, Math.min(iH - t / 2, Math.round(cY - drag.oy)));
     return { ...el, y: ny };
   }
 
@@ -57,10 +58,16 @@ export function moveElement(
     return { ...el, x: nx, y: ny };
   }
 
-  // drawers / rod: по Y, X записывается в _dragX и обрабатывается в adjust()
+  // drawers / rod
+  if (drag.type === "rod") {
+    // rod: y — центр штанги; клампим чтобы кронштейны вошли в корпус
+    const ny = Math.max(t, Math.min(iH - t, Math.round(cY - drag.oy)));
+    return { ...el, y: ny, _dragX: cX };
+  }
+  // drawers: y — верхняя грань, клампим так чтобы высота h помещалась
   const ny = Math.max(
     0,
-    Math.min(iH - (drag.type === "drawers" ? (el.h || 450) : 20), Math.round(cY - drag.oy)),
+    Math.min(iH - (el.h || 450), Math.round(cY - drag.oy)),
   );
   return { ...el, y: ny, _dragX: cX };
 }

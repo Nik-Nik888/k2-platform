@@ -128,7 +128,8 @@ function placeShelf(p: {
   const bounds = findDoorBounds(clickX, clickY);
   const shX = bounds.left.x + (bounds.left.isWall ? 0 : t); // offset после левой стойки (если есть)
   const shW = bounds.right.x - shX; // до следующей стойки/стены
-  const y = Math.max(0, Math.min(iH, Math.round(clickY)));
+  // y — центр полки, кламп в [t/2, iH-t/2] чтобы полка целиком внутри корпуса
+  const y = Math.max(t / 2, Math.min(iH - t / 2, Math.round(clickY)));
   return {
     element: { id, type: "shelf", x: shX, y, w: shW, anchorX: shX + shW / 2, _order: order },
     keepPlaceMode: true,

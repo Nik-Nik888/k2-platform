@@ -97,7 +97,9 @@ export function adjust(els: any[], iW: number, iH: number, t: number): any[] {
       return { ...el, x, pTop, pBot };
     }
     if (el.type === "shelf") {
-      const y = Math.max(0, Math.min(iH, el.y || 0));
+      // y — центр полки по вертикали. Клампим так чтобы полка полностью
+      // помещалась в корпусе: верхняя грань ≥ 0, нижняя ≤ iH.
+      const y = Math.max(t / 2, Math.min(iH - t / 2, el.y || 0));
       const x = Math.max(0, Math.min(iW, el.x || 0));
       const w = Math.max(20, Math.min(iW - x, el.w || iW));
       return { ...el, y, x, w };
@@ -110,6 +112,11 @@ export function adjust(els: any[], iW: number, iH: number, t: number): any[] {
       if (el.type === "door" || el.type === "drawers" || el.type === "panel") {
         const h = Math.max(20, Math.min(iH - y, el.h || 100));
         return { ...el, x, y, w, h };
+      }
+      // rod: y — центр, клампим в [t, iH-t] чтобы держатели помещались
+      if (el.type === "rod") {
+        const yRod = Math.max(t, Math.min(iH - t, el.y || 0));
+        return { ...el, x, y: yRod, w };
       }
       return { ...el, x, y, w };
     }

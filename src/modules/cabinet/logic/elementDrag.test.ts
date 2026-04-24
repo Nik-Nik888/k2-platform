@@ -71,13 +71,15 @@ describe('moveElement', () => {
       expect(result.y).toBe(990); // 1000 - oy 10
     });
 
-    it('clamp Y в 0..iH', () => {
+    it('clamp Y учитывает толщину t (полка целиком в корпусе)', () => {
       const el = { id: 'el1', type: 'shelf', y: 500 };
       const drag = makeDrag({ type: 'shelf', oy: 0 });
       const above = moveElement(el, drag, 0, -100, iW, iH, t);
-      expect(above.y).toBe(0);
+      // y = центр полки, не должен быть меньше t/2 (иначе верхняя грань вылезает за корпус)
+      expect(above.y).toBe(t / 2);
       const below = moveElement(el, drag, 0, 3000, iW, iH, t);
-      expect(below.y).toBe(iH);
+      // не больше iH - t/2 (иначе нижняя грань вылезает)
+      expect(below.y).toBe(iH - t / 2);
     });
 
     it('X не меняется (полка двигается только по Y)', () => {
@@ -126,11 +128,13 @@ describe('moveElement', () => {
   });
 
   describe('rod', () => {
-    it('по Y с clamp iH-20', () => {
+    it('по Y с clamp [t, iH-t] (центр штанги, кронштейны в корпусе)', () => {
       const el = { id: 'el1', type: 'rod', y: 500 };
       const drag = makeDrag({ type: 'rod' });
       const below = moveElement(el, drag, 0, 3000, iW, iH, t);
-      expect(below.y).toBe(iH - 20);
+      expect(below.y).toBe(iH - t);
+      const above = moveElement(el, drag, 0, -100, iW, iH, t);
+      expect(above.y).toBe(t);
     });
   });
 });
