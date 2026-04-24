@@ -709,9 +709,13 @@ export default function Wardrobe3D({
     // ВАЖНО: visible:false НЕ работает с raycaster'ом — плоскость становится не пересекаемой.
     // Поэтому делаем её прозрачной (opacity:0) и без записи в z-buffer.
     const placeProjPlane = (() => {
+      // Plane делаем СУЩЕСТВЕННО больше корпуса (×3), чтобы raycaster ловил курсор
+      // даже когда тот ушёл за границы шкафа. Без этого фантом «выпадает» за границей —
+      // raycaster промахивается мимо plane → screenToCabinetMm возвращает null →
+      // hideZone(). Большая plane + clamp в screenToCabinetMm = фантом прилипает к стенке.
       const iWm = (showCorpus ? W - 2 * T : W) * S;
       const iHm = (showCorpus ? H - 2 * T : H) * S;
-      const planeGeo = new THREE.PlaneGeometry(iWm, iHm);
+      const planeGeo = new THREE.PlaneGeometry(iWm * 3, iHm * 3);
       const planeMat = new THREE.MeshBasicMaterial({
         transparent: true,
         opacity: 0,               // невидима визуально
@@ -1240,7 +1244,8 @@ export default function Wardrobe3D({
         // Если курсор ушёл далеко за границы — отбрасываем (фантом скрывается).
         // Иначе клампим в [0, iW] × [0, iH] чтобы фантом оставался у границы,
         // а не пропадал — пользователь может ставить элемент вплотную к стенке.
-        const MARGIN = 200; // мм за границей — terra incognita, скрываем
+        // MARGIN большой потому что plane ×3 от размеров корпуса (см. placeProjPlane).
+        const MARGIN = Math.max(cW, cH); // до 1× размера корпуса за границей — всё ещё клампим
         if (clickX < -MARGIN || clickX > cW + MARGIN ||
             clickY < -MARGIN || clickY > cH + MARGIN) return null;
         clickX = Math.max(0, Math.min(cW, clickX));
