@@ -1608,6 +1608,18 @@ export default function Wardrobe3D({
           const dy = e.touches[0].clientY - e.touches[1].clientY;
           const dist2 = Math.sqrt(dx * dx + dy * dy);
           zoom = Math.max(0.3, Math.min(3, pinchStartZoom * (pinchStartDist / dist2)));
+          return;
+        }
+        // На телефоне в placeMode — одиночный палец двигает фантом (как мышь на ПК).
+        // Без этого pointermove не срабатывает на тач-устройствах для одного пальца.
+        if (e.touches.length === 1) {
+          const { placeMode: pm, lockedDim: lD } = propsRef.current;
+          if (pm && lD === null) {
+            const t0 = e.touches[0];
+            stateRef.current.lastMouseX = t0.clientX;
+            stateRef.current.lastMouseY = t0.clientY;
+            updateZoneHighlight(t0.clientX, t0.clientY);
+          }
         }
       };
       const onTouchEnd = () => {
@@ -2025,10 +2037,44 @@ export default function Wardrobe3D({
               Они — просто жёлтые цифры рядом с элементом/фантомом. Ввод
               значений идёт в отдельном LockInputPopup (фикс. позиция сверху),
               чтобы input не перерисовывался при движении сцены. */}
-          <GhostDimBadge refEl={ghostDimARef} isActive={lockedDim === "A"} />
-          <GhostDimBadge refEl={ghostDimBRef} isActive={lockedDim === "B"} />
-          <GhostDimBadge refEl={editDimARef} isActive={editDim === "A"} />
-          <GhostDimBadge refEl={editDimBRef} isActive={editDim === "B"} />
+          <GhostDimBadge
+            refEl={ghostDimARef}
+            isActive={lockedDim === "A"}
+            onClick={placeMode ? () => {
+              const niche = stateRef.current.lastNiche;
+              if (!niche) return;
+              setLockedNiche(niche);
+              setLockedDim("A");
+              setLockedValue(ghostDimARef.current?.textContent ?? "");
+            } : undefined}
+          />
+          <GhostDimBadge
+            refEl={ghostDimBRef}
+            isActive={lockedDim === "B"}
+            onClick={placeMode ? () => {
+              const niche = stateRef.current.lastNiche;
+              if (!niche) return;
+              setLockedNiche(niche);
+              setLockedDim("B");
+              setLockedValue(ghostDimBRef.current?.textContent ?? "");
+            } : undefined}
+          />
+          <GhostDimBadge
+            refEl={editDimARef}
+            isActive={editDim === "A"}
+            onClick={editableZ ? () => {
+              setEditDim("A");
+              setEditValue(editDimARef.current?.textContent ?? "");
+            } : undefined}
+          />
+          <GhostDimBadge
+            refEl={editDimBRef}
+            isActive={editDim === "B"}
+            onClick={editableZ ? () => {
+              setEditDim("B");
+              setEditValue(editDimBRef.current?.textContent ?? "");
+            } : undefined}
+          />
 
           {/* Кнопка toggle размеров — справа внизу canvas */}
           <button
@@ -2370,29 +2416,38 @@ function Fab({ open, onToggle, onPick }) {
 // (из updateZoneHighlight / updateEditDimLabels). Никакого input внутри —
 // ввод размера теперь идёт через отдельный LockInputPopup (фикс. позиция сверху),
 // чтобы не было подёргиваний от перерисовки сцены во время набора.
-function GhostDimBadge({ refEl, isActive }) {
+function GhostDimBadge({ refEl, isActive, onClick }) {
   const baseStyle = {
     position: "absolute",
     left: 0, top: 0,
     transform: "translate(-50%, -50%)",
-    padding: "2px 6px",
-    fontSize: 11,
-    fontWeight: 600,
+    padding: "6px 10px",                 // больше для удобного тапа
+    fontSize: 13,                        // крупнее на мобильном
+    fontWeight: 700,
     fontFamily: "'IBM Plex Mono', monospace",
     color: "#1a1a1a",
-    background: isActive ? "#fde68a" : "rgba(251,191,36,0.92)",
-    border: isActive ? "1px solid #b45309" : "1px solid rgba(180,83,9,0.5)",
-    borderRadius: 2,
+    background: isActive ? "#fde68a" : "rgba(251,191,36,0.95)",
+    border: isActive ? "2px solid #b45309" : "1px solid rgba(180,83,9,0.6)",
+    borderRadius: 4,
     whiteSpace: "nowrap",
     userSelect: "none",
     display: "none",
-    boxShadow: isActive ? "0 0 0 2px rgba(251,191,36,0.3)" : "0 1px 3px rgba(0,0,0,0.3)",
+    boxShadow: isActive ? "0 0 0 3px rgba(251,191,36,0.35)" : "0 2px 6px rgba(0,0,0,0.5)",
     zIndex: isActive ? 8 : 6,
-    pointerEvents: "none",
+    pointerEvents: onClick ? "auto" : "none",
+    cursor: onClick ? "pointer" : "default",
     textAlign: "center",
     lineHeight: 1.2,
+    minWidth: 32,
   };
-  return <div ref={refEl} style={baseStyle} />;
+  return (
+    <div
+      ref={refEl}
+      style={baseStyle}
+      onClick={onClick}
+      onPointerDown={(e) => { if (onClick) e.stopPropagation(); }}
+    />
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════
