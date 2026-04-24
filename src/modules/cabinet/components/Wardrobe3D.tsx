@@ -1243,10 +1243,16 @@ export default function Wardrobe3D({
         // toX(mmX) = (mmX - iW/2) * S  →  mmX = point.x / S + iW/2
         // toY(mmY) = (iH/2 - mmY) * S  →  mmY = iH/2 - point.y / S
         const { iW: cW, iH: cH } = propsRef.current;
-        const clickX = point.x / S + cW / 2;
-        const clickY = cH / 2 - point.y / S;
-        // Клик должен быть внутри [0, iW] × [0, iH]
-        if (clickX < 0 || clickX > cW || clickY < 0 || clickY > cH) return null;
+        let clickX = point.x / S + cW / 2;
+        let clickY = cH / 2 - point.y / S;
+        // Если курсор ушёл далеко за границы — отбрасываем (фантом скрывается).
+        // Иначе клампим в [0, iW] × [0, iH] чтобы фантом оставался у границы,
+        // а не пропадал — пользователь может ставить элемент вплотную к стенке.
+        const MARGIN = 200; // мм за границей — terra incognita, скрываем
+        if (clickX < -MARGIN || clickX > cW + MARGIN ||
+            clickY < -MARGIN || clickY > cH + MARGIN) return null;
+        clickX = Math.max(0, Math.min(cW, clickX));
+        clickY = Math.max(0, Math.min(cH, clickY));
         return { clickX, clickY };
       };
 
