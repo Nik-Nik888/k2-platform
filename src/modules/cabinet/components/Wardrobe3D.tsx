@@ -128,10 +128,18 @@ export default function Wardrobe3D({
   // Edit-dim labels — 2 цифры глубины у ВЫДЕЛЕННОГО элемента (панель insert, штанга)
   const editDimARef = useRef(null);
   const editDimBRef = useRef(null);
+  // Камера: сохраняем угол/зум между rebuild сцены, чтобы при добавлении элемента
+  // камера не «прыгала» в дефолтное положение.
+  const cameraRef = useRef({ rotY: 0.35, rotX: 0.12, zoom: 1 });
   // Показывать ли общие размеры (габариты, между-стоечные/полочные)
   const [showDims, setShowDims] = useState(true);
   // FAB open/close state — floating "+" button, fan menu со всеми типами элементов
   const [fabOpen, setFabOpen] = useState(false);
+  // На touch: после отпускания пальца в placeMode фантом фиксируется,
+  // показывается плашка с кнопкой ОК для подтверждения постановки.
+  // Это даёт пользователю шанс тапнуть на жёлтую цифру и ввести точный размер
+  // вместо немедленной постановки. Хранит { clickX, clickY } или null.
+  const [pendingPlace, setPendingPlace] = useState(null);
 
   // ═══ Ghost-dim input state (Этап 1-3: стойка/полка/штанга при постановке) ═══
   // Когда пользователь активирует ввод цифры (Space) — она открывается в МОДАЛЬНОМ POPUP
@@ -155,20 +163,29 @@ export default function Wardrobe3D({
     elements,
     lockedDim, lockedNiche, lockedSnapshot,
     editDim, editSnapshot, selEl,
+    pendingPlace,
   });
   useEffect(() => {
     propsRef.current = {
       placeMode, setPlaceMode, findDoorBounds, placeInZone, iW, iH, t, showDims, elements,
       lockedDim, lockedNiche, lockedSnapshot,
       editDim, editSnapshot, selEl,
+      pendingPlace,
     };
   });
+
+  // Сброс pendingPlace когда открывается popup для точного ввода (тап на цифру).
+  // Иначе визуально конфликтовали бы ОК-плашка снизу и popup сверху.
+  useEffect(() => {
+    if (lockedDim) setPendingPlace(null);
+  }, [lockedDim]);
 
   // Сброс lock-режима когда placeMode изменился
   useEffect(() => {
     setLockedDim(null);
     setLockedNiche(null);
     setLockedSnapshot(null);
+    setPendingPlace(null);
   }, [placeMode]);
 
   // Сброс edit-режима когда сменилось выделение (или снято)
@@ -1170,7 +1187,13 @@ export default function Wardrobe3D({
     build().then(({ scene, camera, renderer, dist, elementMeshes, group, placeProjPlane, zoneHighlight, S, d, cTex, fTex }) => {
       if (cancelled) return;
 
-      let isDragging = false, prevX = 0, prevY = 0, rotY = 0.35, rotX = 0.12, zoom = 1;
+      // Камера: восстанавливаем последнее положение из cameraRef (rotY/rotX/zoom).
+      // При первом mount это дефолт, при последующих rebuild — то что пользователь
+      // покрутил вручную.
+      let isDragging = false, prevX = 0, prevY = 0;
+      let rotY = cameraRef.current.rotY;
+      let rotX = cameraRef.current.rotX;
+      let zoom = cameraRef.current.zoom;
 
       // ── Raycast setup — для клика по элементам ──
       const raycaster = new THREE.Raycaster();
@@ -1503,6 +1526,9 @@ export default function Wardrobe3D({
       const onPointerDown = e => {
         // На тач-устройствах предотвращаем скролл страницы
         if (e.pointerType === 'touch') e.preventDefault();
+        // Если был зафиксированный фантом ожидающий ОК — сбрасываем,
+        // пользователь начал новый жест (двигать фантом на новое место).
+        setPendingPlace(null);
         // Drag разрешён ВСЕГДА — даже в placeMode (чтобы можно было крутить сцену
         // перед постановкой элемента). Различение drag vs click делается в onPointerUp
         // по дистанции (CLICK_THRESHOLD_PX) и времени (CLICK_THRESHOLD_MS).
@@ -1515,7 +1541,9 @@ export default function Wardrobe3D({
         renderer.domElement.setPointerCapture(e.pointerId);
       };
       const onPointerMove = e => {
-        const { placeMode: pm } = propsRef.current;
+        const { placeMode: pm, pendingPlace: pp } = propsRef.current;
+        // Если фантом зафиксирован (ждём ОК) — не двигаем
+        if (pp) return;
         // Если идёт drag (мышь зажата и движется) — крутим сцену.
         // Иначе (просто hover в placeMode) — обновляем подсветку зоны.
         if (isDragging) {
@@ -1565,6 +1593,7 @@ export default function Wardrobe3D({
       };
       const onPointerUp = (e) => {
         const wasTouch = e?.pointerType === "touch";
+        const wasDragging = isDragging;
         isDragging = false;
         const { placeMode: pm, placeInZone: piz, setPlaceMode: spm } = propsRef.current;
         // Короткий клик (не drag)?
@@ -1572,11 +1601,22 @@ export default function Wardrobe3D({
         const dy = (e?.clientY ?? 0) - downY;
         const dt = Date.now() - downTime;
         const isClick = Math.sqrt(dx * dx + dy * dy) < CLICK_THRESHOLD_PX && dt < CLICK_THRESHOLD_MS;
-        // На touch в placeMode мы НЕ крутим сцену (см. onPointerMove), вместо этого
-        // палец двигает фантом. Поэтому отпускание пальца — это всегда «поставить»,
-        // даже если до этого был drag (палец двигал фантом по сцене).
-        const isTouchPlace = wasTouch && pm;
-        if (!isClick && !isTouchPlace) return;
+        // На touch в placeMode после РЕАЛЬНОГО drag (двигал палец по сцене) — НЕ ставим
+        // элемент сразу, а фиксируем фантом и показываем плашку ОК. Это даёт
+        // пользователю шанс тапнуть на жёлтую цифру и ввести точный размер
+        // вместо моментальной постановки.
+        // Короткий тап (без drag) — ставим как раньше.
+        const isTouchDragPlace = wasTouch && pm && wasDragging && !isClick;
+        if (isTouchDragPlace) {
+          // Зафиксировать фантом в текущем месте: фантом уже отрисован updateZoneHighlight
+          // на координатах последнего pointermove. Сохраняем эти координаты.
+          const proj = screenToCabinetMm(e.clientX, e.clientY);
+          if (proj) {
+            setPendingPlace({ clickX: proj.clickX, clickY: proj.clickY });
+          }
+          return;
+        }
+        if (!isClick) return;
 
         // Сначала всегда проверяем — попал ли клик ПО ЭЛЕМЕНТУ.
         // Если да — выделяем (даже в placeMode!), и если был placeMode — сбрасываем его.
@@ -1818,6 +1858,11 @@ export default function Wardrobe3D({
       const animate = () => {
         stateRef.current.animId = requestAnimationFrame(animate);
         if (!isDragging) {} // no auto-rotation — manual only
+        // Сохраняем текущее положение камеры в ref — чтобы при следующем rebuild
+        // (добавление элемента, смена текстуры и т.д.) восстановить угол/зум.
+        cameraRef.current.rotY = rotY;
+        cameraRef.current.rotX = rotX;
+        cameraRef.current.zoom = zoom;
         const dd = dist * zoom;
         camera.position.set(
           Math.sin(rotY) * Math.cos(rotX) * dd,
@@ -2068,7 +2113,6 @@ export default function Wardrobe3D({
               if (!niche) return;
               setLockedNiche(niche);
               setLockedDim("A");
-              setLockedValue(ghostDimARef.current?.textContent ?? "");
             } : undefined}
           />
           <GhostDimBadge
@@ -2079,7 +2123,6 @@ export default function Wardrobe3D({
               if (!niche) return;
               setLockedNiche(niche);
               setLockedDim("B");
-              setLockedValue(ghostDimBRef.current?.textContent ?? "");
             } : undefined}
           />
           <GhostDimBadge
@@ -2087,7 +2130,6 @@ export default function Wardrobe3D({
             isActive={editDim === "A"}
             onClick={editableZ ? () => {
               setEditDim("A");
-              setEditValue(editDimARef.current?.textContent ?? "");
             } : undefined}
           />
           <GhostDimBadge
@@ -2095,7 +2137,6 @@ export default function Wardrobe3D({
             isActive={editDim === "B"}
             onClick={editableZ ? () => {
               setEditDim("B");
-              setEditValue(editDimBRef.current?.textContent ?? "");
             } : undefined}
           />
 
@@ -2241,9 +2282,7 @@ export default function Wardrobe3D({
               {editableZ && (
                 <button
                   onClick={() => {
-                    const txt = editDimARef.current?.textContent ?? "";
                     setEditDim("A");
-                    setEditValue(txt.trim());
                   }}
                   title="Редактировать глубину (Z)"
                   style={{
@@ -2312,6 +2351,52 @@ export default function Wardrobe3D({
               onToggle={toggleEditSide}
               hint={editDim === "A" ? "расстояние от передней грани" : "расстояние до задней стенки"}
             />
+          )}
+
+          {/* Pending-place плашка: появляется на touch после отпускания пальца в placeMode.
+              Фантом зафиксирован, пользователь может тапнуть на жёлтую цифру чтобы
+              ввести точное значение, или нажать ✓ для постановки в текущем месте,
+              или ✕ для отмены (фантом снова будет следовать за пальцем). */}
+          {pendingPlace && placeMode && !lockedDim && (
+            <div style={{
+              position: "absolute",
+              bottom: 24, left: "50%", transform: "translateX(-50%)",
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "8px 12px",
+              borderRadius: 10,
+              background: "rgba(11,12,16,0.97)",
+              border: "1px solid rgba(34,197,94,0.5)",
+              boxShadow: "0 6px 20px rgba(0,0,0,0.6)",
+              zIndex: 14,
+              pointerEvents: "auto",
+            }}>
+              <span style={{
+                fontSize: 10, color: "#aaa", fontFamily: "'IBM Plex Mono',monospace",
+                textTransform: "uppercase", letterSpacing: "0.05em",
+              }}>
+                Тап на цифру → размер, или
+              </span>
+              <button
+                onClick={() => {
+                  if (placeInZone) placeInZone(null, pendingPlace.clickX, pendingPlace.clickY);
+                  setPendingPlace(null);
+                }}
+                style={{
+                  padding: "8px 16px", borderRadius: 6, fontSize: 13, fontWeight: 700,
+                  background: "#22c55e", color: "#000", border: "none",
+                  cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace",
+                }}
+              >✓ Поставить</button>
+              <button
+                onClick={() => setPendingPlace(null)}
+                style={{
+                  padding: "8px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600,
+                  background: "transparent", color: "#888",
+                  border: "1px solid #444",
+                  cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace",
+                }}
+              >✕</button>
+            </div>
           )}
 
           {/* FAB — floating action button "+". Снизу-справа, раскрывается веером.
