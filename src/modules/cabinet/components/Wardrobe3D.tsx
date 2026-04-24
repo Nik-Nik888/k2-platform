@@ -220,7 +220,8 @@ export default function Wardrobe3D({
   };
 
   useEffect(() => {
-    if (placeMode !== "stud") return;
+    // Клавиатура активна только для тех режимов где реализован lock-ввод.
+    if (placeMode !== "stud" && placeMode !== "shelf" && placeMode !== "rod") return;
     const onKey = (e) => {
       // Если фокус в input — игнорируем window-keydown, чтобы не конфликтовать
       // с его собственным onKeyDown (он вызовет toggleLockedSide напрямую).
@@ -251,21 +252,43 @@ export default function Wardrobe3D({
       return;
     }
     const { niL, niR, niT, niB } = lockedNiche;
-    // Среднее Y ниши (для stud не критично, важен только X)
+    const midX = (niL + niR) / 2;
     const midY = (niT + niB) / 2;
-    let clickX;
     if (placeMode === "stud") {
       // Пересчёт: где надо кликнуть чтобы stud встал по нужной цифре.
       // A (левая колонка = lockedValue): studX = niL + lockedValue → clickX = niL + lockedValue + t/2
       // B (правая колонка = lockedValue): studX = niR - lockedValue - t → clickX = niR - lockedValue - t/2
+      let clickX;
       if (lockedDim === "A") {
         clickX = niL + parsed + t / 2;
       } else {
         clickX = niR - parsed - t / 2;
       }
-      // Кламп чтобы не вылезло за пределы ниши
       clickX = Math.max(niL + t / 2, Math.min(niR - t / 2, clickX));
       placeInZone(null, clickX, midY);
+    } else if (placeMode === "shelf") {
+      // A (верхний проём = lockedValue): y1 = niT + lockedValue → clickY = y1 + t/2 = niT + lockedValue + t/2
+      // B (нижний проём = lockedValue): y2 = niB - lockedValue → y1 = y2 - t → clickY = y1 + t/2 = niB - lockedValue - t/2
+      let clickY;
+      if (lockedDim === "A") {
+        clickY = niT + parsed + t / 2;
+      } else {
+        clickY = niB - parsed - t / 2;
+      }
+      // Кламп так чтобы полка не вылезла за нишу
+      clickY = Math.max(niT + t / 2, Math.min(niB - t / 2, clickY));
+      placeInZone(null, midX, clickY);
+    } else if (placeMode === "rod") {
+      // A (верхний проём = lockedValue): rodY = niT + lockedValue → clickY = rodY
+      // B (нижний проём = lockedValue): rodY = niB - lockedValue → clickY = rodY
+      let clickY;
+      if (lockedDim === "A") {
+        clickY = niT + parsed;
+      } else {
+        clickY = niB - parsed;
+      }
+      clickY = Math.max(niT + 12, Math.min(niB - 12, clickY));
+      placeInZone(null, midX, clickY);
     }
     // Сбрасываем lock после постановки
     setLockedDim(null);
@@ -799,27 +822,31 @@ export default function Wardrobe3D({
         const rw = (el.w || 400) * S;
         const sx = toX((el.x || 0) + (el.w || 400) / 2);
         const sy = toY(el.y || 150);
+        // Z-позиция: центр глубины штанги от центра шкафа.
+        // el.z измеряется от центра шкафа (0 = центр, +d/2 = передняя грань, -d/2 = задняя).
+        // По умолчанию 0 (центр).
+        const sz = (el.z ?? 0) * S;
 
         // Chrome tube — 25mm diameter
         const rodGeo = new THREE.CylinderGeometry(12.5 * S, 12.5 * S, rw, 24);
         rodGeo.rotateZ(Math.PI / 2);
         const rod = new THREE.Mesh(rodGeo, rodMat);
-        rod.position.set(sx, sy, 0);
+        rod.position.set(sx, sy, sz);
         rod.castShadow = true;
         group.add(rod);
 
         // Rod holders (фланцы) — detailed bracket
         [-rw / 2 - 3 * S, rw / 2 + 3 * S].forEach(ox => {
           // Vertical plate screwed to side/stud
-          addBox(3 * S, 20 * S, 30 * S, sx + ox, sy + 2 * S, 0, metalMat);
+          addBox(3 * S, 20 * S, 30 * S, sx + ox, sy + 2 * S, sz, metalMat);
           // U-bracket holding the tube
-          addBox(8 * S, 4 * S, 28 * S, sx + ox, sy + 12 * S, 0, metalMat);
+          addBox(8 * S, 4 * S, 28 * S, sx + ox, sy + 12 * S, sz, metalMat);
           // Screws
           [{ dy: 6, dz: 8 }, { dy: 6, dz: -8 }, { dy: -6, dz: 8 }, { dy: -6, dz: -8 }].forEach(s => {
             const screwGeo = new THREE.CylinderGeometry(1.5 * S, 1.5 * S, 4 * S, 6);
             screwGeo.rotateZ(Math.PI / 2);
             const screw = new THREE.Mesh(screwGeo, metalMat);
-            screw.position.set(sx + ox + (ox > 0 ? 2 : -2) * S, sy + s.dy * S, s.dz * S);
+            screw.position.set(sx + ox + (ox > 0 ? 2 : -2) * S, sy + s.dy * S, sz + s.dz * S);
             group.add(screw);
           });
         });
@@ -1211,17 +1238,43 @@ export default function Wardrobe3D({
           y1 = effNiT;   y2 = effNiB;
         } else if (pm === "shelf") {
           // Полка — горизонтальная полоска высотой t на полную ширину ниши.
-          // Smart-Y: близко к верху → толщина вниз, близко к низу → вверх, иначе по центру.
-          const shY = Math.round(proj.clickY);
-          if (shY < niT + 5) { y1 = niT; y2 = niT + ct; }
-          else if (shY > niB - 5) { y1 = niB - ct; y2 = niB; }
-          else { y1 = shY - ct / 2; y2 = shY + ct / 2; }
-          x1 = niL; x2 = niR;
+          // Если зафиксирована цифра — ставим полку точно: A=верхний_проём, B=нижний_проём.
+          const parsedLV = typeof lV === "string" ? parseFloat(lV) : lV;
+          if (lD === "A" && Number.isFinite(parsedLV) && parsedLV >= 0) {
+            // A — верхний проём = parsedLV → y1 = effNiT + parsedLV
+            y1 = effNiT + parsedLV;
+            y2 = y1 + ct;
+          } else if (lD === "B" && Number.isFinite(parsedLV) && parsedLV >= 0) {
+            // B — нижний проём = parsedLV → y2 = effNiB - parsedLV → y1 = y2 - ct
+            y2 = effNiB - parsedLV;
+            y1 = y2 - ct;
+          } else {
+            // Обычный режим — Smart-Y snap к краям ниши.
+            const shY = Math.round(proj.clickY);
+            if (shY < niT + 5) { y1 = niT; y2 = niT + ct; }
+            else if (shY > niB - 5) { y1 = niB - ct; y2 = niB; }
+            else { y1 = shY - ct / 2; y2 = shY + ct / 2; }
+          }
+          // Кламп
+          y1 = Math.max(effNiT, Math.min(effNiB - ct, y1));
+          y2 = y1 + ct;
+          x1 = effNiL; x2 = effNiR;
         } else if (pm === "rod") {
-          // Штанга — тонкая (~25мм) горизонтальная палка по середине высоты ниши.
-          const rodY = Math.round(proj.clickY);
+          // Штанга — тонкая (~25мм) горизонтальная палка.
+          // A = верхний проём, B = нижний проём. Центр палки на clickY.
+          const parsedLV = typeof lV === "string" ? parseFloat(lV) : lV;
+          let rodY;
+          if (lD === "A" && Number.isFinite(parsedLV) && parsedLV >= 0) {
+            // A = расстояние от потолка ниши до центра штанги
+            rodY = effNiT + parsedLV;
+          } else if (lD === "B" && Number.isFinite(parsedLV) && parsedLV >= 0) {
+            rodY = effNiB - parsedLV;
+          } else {
+            rodY = Math.round(proj.clickY);
+          }
+          rodY = Math.max(effNiT + 12, Math.min(effNiB - 12, rodY));
           y1 = rodY - 12; y2 = rodY + 12;
-          x1 = niL;       x2 = niR;
+          x1 = effNiL;    x2 = effNiR;
         } else if (pm === "door" || pm === "panel") {
           // Дверь/панель — заполняет всю нишу (для insert вычитаем 3мм зазор).
           // Для overlay налезает на стенки на 14мм — но мы рисуем по нише insert-режима
@@ -1803,8 +1856,10 @@ export default function Wardrobe3D({
               <span>+ {PLACE_LABELS[placeMode] || placeMode}</span>
               <span style={{ opacity: 0.7, fontSize: 10 }}>
                 {lockedDim
-                  ? `· вводим ${lockedDim === "A" ? "←" : "→"} · Space=сменить · Enter=OK · Esc=отмена`
-                  : placeMode === "stud"
+                  ? ((placeMode === "shelf" || placeMode === "rod")
+                      ? `· вводим ${lockedDim === "A" ? "↑" : "↓"} · Space=сменить · Enter=OK · Esc=отмена`
+                      : `· вводим ${lockedDim === "A" ? "←" : "→"} · Space=сменить · Enter=OK · Esc=отмена`)
+                  : (placeMode === "stud" || placeMode === "shelf" || placeMode === "rod")
                     ? "· клик = поставить · Space = точный ввод"
                     : "· кликни в зону"}
               </span>
