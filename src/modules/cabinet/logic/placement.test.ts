@@ -105,7 +105,7 @@ describe('placeInZone', () => {
   });
 
   describe('drawers', () => {
-    it('ящики в пустой зоне: 3 секции, h≤450', () => {
+    it('ящики в пустой зоне: 3 секции, h=maxH (вся высота проема)', () => {
       const result = placeInZone({
         ...makeCtx(),
         placeMode: 'drawers',
@@ -113,10 +113,11 @@ describe('placeInZone', () => {
       });
       expect(result!.element.type).toBe('drawers');
       expect(result!.element.count).toBe(3);
-      expect(result!.element.h).toBe(450);
+      // В пустом шкафу проем = весь iH, ящики занимают всю высоту
+      expect(result!.element.h).toBe(iH);
       expect(result!.element.drawerHeights).toHaveLength(3);
       const sum = result!.element.drawerHeights.reduce((a: number, b: number) => a + b, 0);
-      expect(sum).toBe(450);
+      expect(sum).toBe(iH);
     });
 
     it('зона менее 100мм по ширине → null', () => {
@@ -142,14 +143,14 @@ describe('placeInZone', () => {
       expect(result!.keepPlaceMode).toBe(false);
     });
 
-    it('ящики стоят на дне (botY-h)', () => {
+    it('ящики стоят с верха проема (y = topY)', () => {
       const result = placeInZone({
         ...makeCtx(),
         placeMode: 'drawers',
         clickX: 600, clickY: 1000,
       });
-      // В пустом шкафу botY=iH, h=450 → y = iH - 450
-      expect(result!.element.y).toBe(iH - 450);
+      // В пустом шкафу topY=0, ящики с самого верха
+      expect(result!.element.y).toBe(0);
     });
   });
 
