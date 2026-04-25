@@ -173,14 +173,14 @@ export default function Wardrobe3D({
     elements,
     lockedDim, lockedNiche, lockedSnapshot,
     editDim, editSnapshot, selEl, selId,
-    pendingPlace, drag3d,
+    pendingPlace, drag3d, drag3dInput,
   });
   useEffect(() => {
     propsRef.current = {
       placeMode, setPlaceMode, findDoorBounds, placeInZone, iW, iH, t, showDims, elements,
       lockedDim, lockedNiche, lockedSnapshot,
       editDim, editSnapshot, selEl, selId,
-      pendingPlace, drag3d,
+      pendingPlace, drag3d, drag3dInput,
     };
   });
 
@@ -477,6 +477,30 @@ export default function Wardrobe3D({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [editableZ, placeMode]);
+
+  // Keyboard handler для drag3d — Space открывает popup точного ввода,
+  // повторный Space переключает сторону A/B, Escape отменяет drag.
+  useEffect(() => {
+    if (!drag3d) return;
+    const onKey = (e) => {
+      const isInputFocused = document.activeElement?.tagName === "INPUT";
+      if (isInputFocused) return;
+      if (e.key === " ") {
+        e.preventDefault();
+        setDrag3dInput(prev => {
+          if (!prev) return { side: "A" };
+          if (prev.side === "A") return { side: "B" };
+          return null; // 3-й Space — закрывает
+        });
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        setDrag3dInput(null);
+        setDrag3d(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drag3d]);
 
   // Callback: применить зафиксированное значение — ставит элемент точно.
   // Вызывается при Enter в input.
@@ -1893,26 +1917,29 @@ export default function Wardrobe3D({
         renderer.domElement.setPointerCapture(e.pointerId);
 
         // ─── Long-press для drag-n-drop существующего элемента ───
-        // Если pointerdown на элементе, который уже выделен — через 500мс
-        // активируем режим перетаскивания. При движении до этого времени
-        // таймер отменяется (это был обычный drag для вращения сцены).
-        const { placeMode: pmd, selId: curSel, elements: els } = propsRef.current;
-        if (!pmd && curSel) {
-          // Raycaster на элементы
+        // Запускаем таймер для ЛЮБОГО элемента под курсором (не только уже
+        // выделенного). Это убирает лишний шаг «сначала выделить — потом
+        // зажать»: сейчас одно нажатие = выделить + drag.
+        // При движении до 500мс таймер отменяется (это был жест вращения).
+        const { placeMode: pmd, elements: els } = propsRef.current;
+        if (!pmd) {
           const rect = renderer.domElement.getBoundingClientRect();
           ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
           ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
           raycaster.setFromCamera(ndc, camera);
           const hits = raycaster.intersectObject(group, true);
-          const hit = hits.find(h => h.object?.userData?.elementId === curSel);
+          const hit = hits.find(h => h.object?.userData?.elementId);
           if (hit) {
+            const hitId = hit.object.userData.elementId;
             // Запускаем таймер long-press
             stateRef.current.longPressTimer = setTimeout(() => {
-              const srcEl = els.find(x => x.id === curSel);
+              const srcEl = els.find(x => x.id === hitId);
               if (!srcEl) return;
               // Хаптик на тач
               if (e.pointerType === "touch" && navigator.vibrate) navigator.vibrate(30);
-              setDrag3d({ id: curSel, type: srcEl.type, origEl: srcEl });
+              // Выделяем элемент (если не был выделен) и сразу запускаем drag
+              if (onElementClick) onElementClick(hitId);
+              setDrag3d({ id: hitId, type: srcEl.type, origEl: srcEl });
               isDragging = false; // отключаем вращение во время drag элемента
             }, 500);
           }
@@ -1999,23 +2026,56 @@ export default function Wardrobe3D({
           clearTimeout(stateRef.current.longPressTimer);
           stateRef.current.longPressTimer = null;
         }
-        // Завершение drag3d — НЕ коммитим сразу. Переводим в режим ожидания
-        // подтверждения: фантом остаётся видимым с цифрами, появляется плашка
-        // «✓ Поставить ✕». Тап на цифру → popup для точного ввода.
-        // Это аналогично pendingPlace при установке нового элемента.
+        // Завершение drag3d — коммитим pending обновление сразу при отпускании
+        // (как при placement новой стойки/полки). Если у пользователя в данный
+        // момент открыт popup точного ввода (drag3dInput) — пропускаем коммит,
+        // popup сам решит позицию.
         if (propsRef.current.drag3d) {
-          // pending обновление уже сохранено в stateRef.drag3dPending через
-          // moveDraggedElement3D. Просто переводим drag3d в awaitingConfirm.
-          if (stateRef.current.drag3dPending) {
-            setDrag3d(prev => prev ? { ...prev, awaitingConfirm: true } : prev);
-          } else {
-            // Если pending пустой (пользователь не двинул) — отменяем
-            stateRef.current.drag3dLabelPositions = null;
-            zoneHighlight.visible = false;
-            if (ghostDimARef.current) ghostDimARef.current.style.display = "none";
-            if (ghostDimBRef.current) ghostDimBRef.current.style.display = "none";
-            setDrag3d(null);
+          // Если popup уже открыт — пользователь набирает точное число, не трогаем
+          if (propsRef.current.drag3dInput) return;
+          const pending = stateRef.current.drag3dPending;
+          if (pending && updateEl) {
+            const upd = {};
+            if (pending.next.x !== undefined) upd.x = pending.next.x;
+            if (pending.next.y !== undefined) upd.y = pending.next.y;
+            const orig = propsRef.current.drag3d?.origEl || {};
+            const dragType = propsRef.current.drag3d?.type;
+            // Дверь: помечаем manualW/manualH чтобы adjust() не пересчитал
+            if (dragType === "door") {
+              upd.manualW = true;
+              upd.manualH = true;
+              if (orig.w) upd.w = orig.w;
+              if (orig.h) upd.h = orig.h;
+            }
+            // Авто-подгонка ширины: drawers всегда, panel только если insert
+            const isInsertPanel = dragType === "panel" && orig.panelType === "insert";
+            if (dragType === "drawers" || isInsertPanel) {
+              const fdb = propsRef.current.findDoorBounds;
+              const ct = propsRef.current.t;
+              const defaultH = dragType === "drawers" ? 450 : 600;
+              const defaultW = dragType === "drawers" ? 400 : 400;
+              const newX = upd.x ?? orig.x ?? 0;
+              const newY = upd.y ?? orig.y ?? 0;
+              const cyMm = newY + (orig.h || defaultH) / 2;
+              const cxMm = newX + (orig.w || defaultW) / 2;
+              if (fdb) {
+                const bounds = fdb(cxMm, cyMm);
+                if (bounds) {
+                  const innerLeft = bounds.left.x + (bounds.left.isWall ? 0 : ct);
+                  const innerRight = bounds.right.x;
+                  const innerW = Math.max(100, innerRight - innerLeft);
+                  upd.x = innerLeft;
+                  upd.w = innerW;
+                }
+              }
+            }
+            updateEl(pending.id, upd);
           }
+          // Сброс drag3d состояния — useEffect cleanup для drag3d.id уберёт
+          // фантом и цифры
+          stateRef.current.drag3dPending = null;
+          stateRef.current.drag3dLabelPositions = null;
+          setDrag3d(null);
           return;
         }
         const { placeMode: pm, placeInZone: piz, setPlaceMode: spm } = propsRef.current;
@@ -2673,7 +2733,7 @@ export default function Wardrobe3D({
 
           {/* Индикатор drag3d — когда пользователь тащит существующий элемент.
               Показывает тип и подсказку «отпустите для подтверждения». */}
-          {drag3d && !drag3d.awaitingConfirm && (
+          {drag3d && (
             <div style={{
               position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)",
               padding: "6px 12px", borderRadius: 6,
@@ -2688,48 +2748,7 @@ export default function Wardrobe3D({
               maxWidth: "calc(100% - 100px)",
             }}>
               <span>↔ Перемещаем: {PLACE_LABELS[drag3d.type] || drag3d.type}</span>
-              <span style={{ opacity: 0.7, fontSize: 10 }}>отпустите для подтверждения</span>
-            </div>
-          )}
-
-          {/* Awaiting-confirm плашка после drag3d. Фантом зафиксирован,
-              можно тапнуть на цифру для точного ввода или нажать ✓ Поставить. */}
-          {drag3d?.awaitingConfirm && (
-            <div style={{
-              position: "absolute",
-              bottom: 24, left: "50%", transform: "translateX(-50%)",
-              display: "flex", alignItems: "center", gap: 8,
-              padding: "8px 12px",
-              borderRadius: 10,
-              background: "rgba(11,12,16,0.97)",
-              border: "1px solid rgba(34,197,94,0.5)",
-              boxShadow: "0 6px 20px rgba(0,0,0,0.6)",
-              zIndex: 14,
-              pointerEvents: "auto",
-            }}>
-              <span style={{
-                fontSize: 10, color: "#aaa", fontFamily: "'IBM Plex Mono',monospace",
-                textTransform: "uppercase", letterSpacing: "0.05em",
-              }}>
-                Тап на цифру → размер, или
-              </span>
-              <button
-                onClick={commitDrag3dPending}
-                style={{
-                  padding: "8px 16px", borderRadius: 6, fontSize: 13, fontWeight: 700,
-                  background: "#22c55e", color: "#000", border: "none",
-                  cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace",
-                }}
-              >✓ Поставить</button>
-              <button
-                onClick={cancelDrag3d}
-                style={{
-                  padding: "8px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600,
-                  background: "transparent", color: "#888",
-                  border: "1px solid #444",
-                  cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace",
-                }}
-              >✕</button>
+              <span style={{ opacity: 0.7, fontSize: 10 }}>отпусти = поставить · Space = точный ввод</span>
             </div>
           )}
 
@@ -3344,6 +3363,64 @@ function LockInputPopup({ title, initialValue, side, onCommit, onCancel, onToggl
 // Содержит минимальный набор полей для редактирования: координаты,
 // размеры, тип (для двери/панели), кнопку удаления.
 // В Сессии 2 будет расширен: добавление новых элементов через click-to-place.
+// DrawerHeightInput — отдельный input с локальным буфером для свободного редактирования.
+// Без буфера: пользователь стирает число → значение становится 0/NaN → updateEl
+// получает мусор → adjust ломает геометрию → пользователь теряет ящики/полку.
+// С буфером: можно стереть всё, набрать новое, commit на blur/Enter.
+function DrawerHeightInput({ index, value, onCommit }) {
+  const [buf, setBuf] = useState(String(value));
+  const inputRef = useRef(null);
+  useEffect(() => {
+    if (document.activeElement !== inputRef.current) {
+      setBuf(String(value));
+    }
+  }, [value]);
+  const commit = () => {
+    const v = parseInt(buf);
+    if (!Number.isFinite(v) || v < 50) {
+      setBuf(String(value));
+      return;
+    }
+    const clamped = Math.max(50, Math.min(500, v));
+    onCommit(clamped);
+    setBuf(String(clamped));
+  };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <span style={{ fontSize: 10, color: "#888", minWidth: 50,
+        fontFamily: "'IBM Plex Mono',monospace" }}>
+        Ящик {index + 1}:
+      </span>
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="numeric"
+        value={buf}
+        onChange={e => setBuf(e.target.value.replace(/[^\d]/g, ""))}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+            e.target.blur();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            setBuf(String(value));
+            e.target.blur();
+          }
+        }}
+        style={{
+          flex: 1, padding: "4px 8px", fontSize: 11,
+          background: "#0b0c10", color: "#fff",
+          border: "1px solid #333", borderRadius: 3,
+          fontFamily: "'IBM Plex Mono',monospace",
+          outline: "none",
+        }}
+      />
+    </div>
+  );
+}
+
 function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, D, isMobile }) {
   if (!selEl) return null;
 
@@ -3365,30 +3442,65 @@ function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, D, isMobile
   };
 
   // Компактное числовое поле
-  const NumField = ({ label, value, onChange, min, max, step = 1, color = "#60a5fa" }) => (
-    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <div style={{ fontSize: 9, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
-      <input
-        type="number"
-        value={Math.round(value ?? 0)}
-        onChange={e => {
-          const v = Number(e.target.value);
-          if (!Number.isFinite(v)) return;
-          const clamped = Math.max(min ?? -Infinity, Math.min(max ?? Infinity, v));
-          onChange(clamped);
-        }}
-        step={step}
-        style={{
-          width: "100%", padding: "6px 8px", borderRadius: 4,
-          background: "rgba(30,30,40,0.7)",
-          border: "1px solid rgba(60,60,70,0.6)",
-          color, fontSize: 12, fontWeight: 700,
-          fontFamily: "'IBM Plex Mono',monospace",
-          textAlign: "center",
-        }}
-      />
-    </div>
-  );
+  const NumField = ({ label, value, onChange, min, max, step = 1, color = "#60a5fa" }) => {
+    // Локальный буфер для свободного редактирования (можно стереть всё чтобы напечатать
+    // новое число). Реальное обновление элемента происходит на blur/Enter, а не на каждое
+    // нажатие — иначе стирание превращало значение в 0 и адзаст ломал элемент.
+    const [buf, setBuf] = useState(String(Math.round(value ?? 0)));
+    const inputRef = useRef(null);
+    // Синхронизируем буфер при внешнем изменении value (но не во время фокуса —
+    // иначе пользовательский набор сбивается).
+    useEffect(() => {
+      if (document.activeElement !== inputRef.current) {
+        setBuf(String(Math.round(value ?? 0)));
+      }
+    }, [value]);
+    const commit = () => {
+      const v = Number(buf);
+      if (!Number.isFinite(v)) {
+        // Невалидно — возвращаем последнее значение
+        setBuf(String(Math.round(value ?? 0)));
+        return;
+      }
+      const clamped = Math.max(min ?? -Infinity, Math.min(max ?? Infinity, v));
+      onChange(clamped);
+      setBuf(String(Math.round(clamped)));
+    };
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        <div style={{ fontSize: 9, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode="numeric"
+          value={buf}
+          onChange={e => setBuf(e.target.value.replace(/[^\d-]/g, ""))}
+          onBlur={commit}
+          onKeyDown={e => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit();
+              e.target.blur();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              setBuf(String(Math.round(value ?? 0)));
+              e.target.blur();
+            }
+          }}
+          step={step}
+          style={{
+            width: "100%", padding: "6px 8px", borderRadius: 4,
+            background: "rgba(30,30,40,0.7)",
+            border: "1px solid rgba(60,60,70,0.6)",
+            color, fontSize: 12, fontWeight: 700,
+            fontFamily: "'IBM Plex Mono',monospace",
+            textAlign: "center",
+            outline: "none",
+          }}
+        />
+      </div>
+    );
+  };
 
   return (
     <div style={baseStyle}>
@@ -3569,31 +3681,16 @@ function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, D, isMobile
                 const cnt = selEl.count ?? 3;
                 const heights = selEl.drawerHeights ?? Array(cnt).fill(Math.floor((selEl.h ?? 450) / cnt));
                 return heights.map((h, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontSize: 10, color: "#888", minWidth: 50,
-                      fontFamily: "'IBM Plex Mono',monospace" }}>
-                      Ящик {i + 1}:
-                    </span>
-                    <input
-                      type="number"
-                      value={h}
-                      min={50}
-                      max={500}
-                      onChange={e => {
-                        const newH = parseInt(e.target.value) || 50;
-                        const newHeights = [...heights];
-                        newHeights[i] = newH;
-                        updateEl(selEl.id, { drawerHeights: newHeights });
-                      }}
-                      style={{
-                        flex: 1, padding: "4px 8px", fontSize: 11,
-                        background: "#0b0c10", color: "#fff",
-                        border: "1px solid #333", borderRadius: 3,
-                        fontFamily: "'IBM Plex Mono',monospace",
-                        outline: "none",
-                      }}
-                    />
-                  </div>
+                  <DrawerHeightInput
+                    key={i}
+                    index={i}
+                    value={h}
+                    onCommit={(newH) => {
+                      const newHeights = [...heights];
+                      newHeights[i] = newH;
+                      updateEl(selEl.id, { drawerHeights: newHeights });
+                    }}
+                  />
                 ));
               })()}
             </div>
