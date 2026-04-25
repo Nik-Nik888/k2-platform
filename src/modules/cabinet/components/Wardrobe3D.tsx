@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import * as THREE from "three";
+import { computeTopLevelCols, computeDims } from "../logic/dims";
 
 /* ═══════════════════════════════════════════════════════════════
    Wardrobe3D — Realistic ЛДСП construction
@@ -568,10 +569,9 @@ export default function Wardrobe3D({
     // Смещения в метрах: насколько размерная линия отстоит от шкафа
     const OFF_NEAR = 0.05;  // ближняя линия (колонки/полки)
     const OFF_FAR = 0.13;   // дальняя (общие габариты)
-    // Z-координата передней грани
     const zFront = halfD;
 
-    const dims = [];
+    const dims: any[] = [];
 
     // ── Общая ширина (дальняя линия сверху) ──
     dims.push({
@@ -589,7 +589,7 @@ export default function Wardrobe3D({
       offset3d: { x: OFF_FAR, y: 0, z: 0 },
     });
 
-    // ── Глубина (справа-снизу, отводим вправо по X) ──
+    // ── Глубина ──
     dims.push({
       key: "total-d", text: `${D}`, axis: "d",
       p1: { x: halfW, y: -halfH, z:  halfD },
@@ -597,47 +597,45 @@ export default function Wardrobe3D({
       offset3d: { x: OFF_NEAR, y: -OFF_NEAR, z: 0 },
     });
 
-    // ── Ширины колонок (ближняя линия сверху) ──
-    const studs = elements
-      .filter(e => e.kind === "stud")
-      .map(e => ({ x: e.x, w: e.w ?? t }))
-      .sort((a, b) => a.x - b.x);
-    const vBoundaries = [0, ...studs.flatMap(s => [s.x, s.x + s.w]), iWmm];
-    const vBoundsUniq = Array.from(new Set(vBoundaries)).sort((a, b) => a - b);
-    for (let i = 0; i < vBoundsUniq.length - 1; i++) {
-      const x1mm = vBoundsUniq[i], x2mm = vBoundsUniq[i + 1];
-      const colW = x2mm - x1mm;
-      if (colW < 20) continue;
-      const x1 = (x1mm - iWmm / 2) * S;
-      const x2 = (x2mm - iWmm / 2) * S;
-      dims.push({
-        key: `col-${i}`, text: `${colW}`, axis: "h",
-        p1: { x: x1, y: halfH, z: zFront },
-        p2: { x: x2, y: halfH, z: zFront },
-        offset3d: { x: 0, y: OFF_NEAR, z: 0 },
-      });
-    }
+    // ── Используем ОБЩУЮ логику 2D (computeDims) для колонок и проёмов.
+    // computeDims понимает дедуп (одинаковые соседние сегменты — один размер),
+    // учитывает что полки реально перекрывают колонку, ящики/штанги создают
+    // breaks, минимум 25мм для отображения. Это убирает мусор и совпадает
+    // с тем что пользователь видит в 2D.
+    const cols = computeTopLevelCols(elements, iWmm, t);
+    const allDims = computeDims(elements, cols, iHmm, iWmm);
 
-    // ── Высоты проёмов (ближняя линия слева) ──
-    const shelves = elements
-      .filter(e => e.kind === "shelf")
-      .map(e => ({ y: e.y, h: e.h ?? t }))
-      .sort((a, b) => a.y - b.y);
-    const hBoundaries = [0, ...shelves.flatMap(s => [s.y, s.y + s.h]), iHmm];
-    const hBoundsUniq = Array.from(new Set(hBoundaries)).sort((a, b) => a - b);
-    for (let i = 0; i < hBoundsUniq.length - 1; i++) {
-      const y1mm = hBoundsUniq[i], y2mm = hBoundsUniq[i + 1];
-      const rowH = y2mm - y1mm;
-      if (rowH < 20) continue;
-      const y1 = (iHmm / 2 - y1mm) * S;
-      const y2 = (iHmm / 2 - y2mm) * S;
-      dims.push({
-        key: `row-${i}`, text: `${rowH}`, axis: "v",
-        p1: { x: -halfW, y: y1, z: zFront },
-        p2: { x: -halfW, y: y2, z: zFront },
-        offset3d: { x: -OFF_NEAR, y: 0, z: 0 },
-      });
-    }
+    // mm → 3D world coords (x по центру, y инвертирован)
+    const toX = (mm: number) => (mm - iWmm / 2) * S;
+    const toY = (mm: number) => (iHmm / 2 - mm) * S;
+
+    allDims.forEach((d, i) => {
+      if (d.t === "w") {
+        // Горизонтальная — ширина колонки (внутреннее расстояние между стойками/стенками)
+        const x1 = toX(d.x);
+        const x2 = toX(d.x + (d.w ?? 0));
+        dims.push({
+          key: `col-${i}`, text: `${Math.round(d.w ?? 0)}`, axis: "h",
+          p1: { x: x1, y: halfH, z: zFront },
+          p2: { x: x2, y: halfH, z: zFront },
+          offset3d: { x: 0, y: OFF_NEAR, z: 0 },
+        });
+      } else if (d.t === "h") {
+        // Вертикальная — высота сегмента в колонке.
+        // d.x = внутренний левый край колонки, d.topY = верхняя граница сегмента.
+        // Линия прижимается к левой стенке колонки (для каждой колонки своя).
+        const xCol = toX(d.x);
+        const y1 = toY(d.topY ?? 0);
+        const y2 = toY((d.topY ?? 0) + (d.h ?? 0));
+        dims.push({
+          key: `row-${i}`, text: `${Math.round(d.h ?? 0)}`, axis: "v",
+          p1: { x: xCol, y: y1, z: zFront },
+          p2: { x: xCol, y: y2, z: zFront },
+          // Левее ниши на OFF_NEAR (за стенку корпуса)
+          offset3d: { x: -OFF_NEAR, y: 0, z: 0 },
+        });
+      }
+    });
 
     return dims;
   })();
