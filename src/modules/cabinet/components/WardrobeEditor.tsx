@@ -65,7 +65,10 @@ export default function WardrobeEditor() {
   }>({ panelType: "insert" });
 
   // Mobile state — ВСЕ объявления вместе, чтобы минификатор не ломал порядок
-  const isMobile = useIsMobile(768);
+  // Breakpoint 1024 (а не 768) — на iPad портрет (768px) и лэндскейп (1024px)
+  // боковая панель свойств (320px) забирает почти половину canvas. Лучше переключать
+  // в мобильный layout (FAB снизу + bottom-sheet) когда экран меньше десктопа.
+  const isMobile = useIsMobile(1024);
   const [mobileDragMode, setMobileDragMode] = useState<string | null>(null);
   const [mobileSheet, setMobileSheet] = useState<null | 'tools' | 'props' | 'summary'>(null);
   const [userZoom, setUserZoom] = useState<number>(1);
