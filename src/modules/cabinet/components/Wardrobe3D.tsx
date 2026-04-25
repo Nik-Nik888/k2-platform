@@ -131,8 +131,9 @@ export default function Wardrobe3D({
   // Камера: сохраняем угол/зум между rebuild сцены, чтобы при добавлении элемента
   // камера не «прыгала» в дефолтное положение.
   const cameraRef = useRef({ rotY: 0.35, rotX: 0.12, zoom: 1 });
-  // Показывать ли общие размеры (габариты, между-стоечные/полочные)
-  const [showDims, setShowDims] = useState(true);
+  // Показывать ли общие размеры (габариты, между-стоечные/полочные).
+  // По умолчанию выключены — включаются по тапу на иконку 📏 в углу.
+  const [showDims, setShowDims] = useState(false);
   // FAB open/close state — floating "+" button, fan menu со всеми типами элементов
   const [fabOpen, setFabOpen] = useState(false);
   // На touch: после отпускания пальца в placeMode фантом фиксируется,
@@ -2840,6 +2841,7 @@ export default function Wardrobe3D({
             iW={iW}
             iH={iH}
             t={t}
+            D={corpus?.depth}
             isMobile={isMobile}
           />
         )}
@@ -3161,7 +3163,7 @@ function LockInputPopup({ title, initialValue, side, onCommit, onCancel, onToggl
 // Содержит минимальный набор полей для редактирования: координаты,
 // размеры, тип (для двери/панели), кнопку удаления.
 // В Сессии 2 будет расширен: добавление новых элементов через click-to-place.
-function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, isMobile }) {
+function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, D, isMobile }) {
   if (!selEl) return null;
 
   const baseStyle = isMobile ? {
@@ -3175,10 +3177,10 @@ function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, isMobile })
   } : {
     width: 320, minWidth: 320, flexShrink: 0,
     background: "rgba(11,12,16,0.98)",
-    borderLeft: "3px solid red", // TEMP DEBUG
+    borderLeft: "1px solid rgba(255,255,255,0.06)",
     padding: "16px 18px",
     overflowY: "auto",
-    zIndex: 50, // TEMP DEBUG
+    zIndex: 50,
   };
 
   // Компактное числовое поле
@@ -3419,12 +3421,12 @@ function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, isMobile })
               Сумма: {(selEl.drawerHeights ?? []).reduce((a, b) => a + b, 0) || selEl.h} мм
             </div>
           </div>
-          {/* Глубина блока — длина выдвижения */}
+          {/* Глубина блока — длина выдвижения ящика */}
           <NumField
             label="Глубина (мм)"
-            value={selEl.depth ?? Math.round((iW > 0 ? 600 : 600) * 0.72)}
+            value={selEl.depth ?? Math.round((D || 600) * 0.72)}
             min={200}
-            max={800}
+            max={Math.max(200, (D || 600) - 50)}
             onChange={v => updateEl(selEl.id, { depth: v })}
           />
           <div style={{ fontSize: 10, color: "#666" }}>

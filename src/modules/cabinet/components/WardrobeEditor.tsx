@@ -171,7 +171,19 @@ export default function WardrobeEditor() {
       let next = prev.map(e => {
         if (e.id !== id) return e;
         const m = { ...e, ...upd };
-        if (m.type === "drawers" && upd.count !== undefined) { const cnt = upd.count, old = m.drawerHeights || [], nh = []; for (let i = 0; i < cnt; i++) nh.push(old[i] || 150); m.drawerHeights = nh; m.h = nh.reduce((a, b) => a + b, 0); }
+        if (m.type === "drawers" && upd.count !== undefined) {
+          // Высота блока остаётся прежней (определяется проемом),
+          // drawerHeights распределяются РАВНОМЕРНО на новое количество.
+          const cnt = upd.count;
+          const totalH = m.h || (m.drawerHeights || []).reduce((a, b) => a + b, 0) || 450;
+          const per = Math.floor(totalH / cnt);
+          const nh = Array(cnt).fill(per);
+          // Корректировка остатка: разницу добавляем в последний ящик
+          const remainder = totalH - per * cnt;
+          if (cnt > 0) nh[cnt - 1] += remainder;
+          m.drawerHeights = nh;
+          m.h = totalH; // НЕ меняем h при смене кол-ва
+        }
         if (m.type === "drawers" && upd.drawerHeights) m.h = upd.drawerHeights.reduce((a, b) => a + b, 0);
         return m;
       });
