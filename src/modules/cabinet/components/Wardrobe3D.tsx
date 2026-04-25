@@ -205,7 +205,8 @@ export default function Wardrobe3D({
   }, [selEl?.id]);
 
   // Drag3d: скрываем меши элемента (вместо него показывается жёлтый фантом
-  // через zoneHighlight). При завершении drag — снова показываем.
+  // через zoneHighlight). При завершении drag — снова показываем меши и
+  // прячем фантом + цифры.
   useEffect(() => {
     const setVis = stateRef.current.setElementVisibility;
     if (!setVis) return;
@@ -219,6 +220,15 @@ export default function Wardrobe3D({
     return () => {
       if (closureId && stateRef.current.setElementVisibility) {
         stateRef.current.setElementVisibility(closureId, true);
+      }
+      // Чистим фантом и цифры если уходим из drag3d (id больше не активен)
+      if (closureId) {
+        stateRef.current.drag3dPending = null;
+        stateRef.current.drag3dLabelPositions = null;
+        const zh = stateRef.current.zoneHighlight;
+        if (zh) zh.visible = false;
+        if (ghostDimARef.current) ghostDimARef.current.style.display = "none";
+        if (ghostDimBRef.current) ghostDimBRef.current.style.display = "none";
       }
     };
   }, [drag3d?.id]);
@@ -293,6 +303,58 @@ export default function Wardrobe3D({
     setDrag3dInput(null);
     setDrag3d(null);
   };
+
+  // Коммит drag3d на текущей позиции фантома (когда пользователь нажимает ✓
+  // или подтверждает через popup без ввода числа). Применяет drag3dPending
+  // (последнюю позицию из moveDraggedElement3D) с учётом авто-подгонки ширины
+  // для drawers/insert-panel и manualW/H для door.
+  const commitDrag3dPending = useCallback(() => {
+    const dd = drag3d;
+    const pending = stateRef.current?.drag3dPending;
+    if (!dd || !pending || !updateEl) {
+      setDrag3d(null);
+      return;
+    }
+    const upd = {};
+    if (pending.next.x !== undefined) upd.x = pending.next.x;
+    if (pending.next.y !== undefined) upd.y = pending.next.y;
+    const orig = dd.origEl || {};
+    if (dd.type === "door") {
+      upd.manualW = true;
+      upd.manualH = true;
+      if (orig.w) upd.w = orig.w;
+      if (orig.h) upd.h = orig.h;
+    }
+    // Авто-подгонка ширины: drawers всегда, insert-panel только если был insert
+    const isInsertPanel = dd.type === "panel" && orig.panelType === "insert";
+    if (dd.type === "drawers" || isInsertPanel) {
+      const fdb = findDoorBounds;
+      const defaultH = dd.type === "drawers" ? 450 : 600;
+      const defaultW = dd.type === "drawers" ? 400 : 400;
+      const newX = upd.x ?? orig.x ?? 0;
+      const newY = upd.y ?? orig.y ?? 0;
+      const cyMm = newY + (orig.h || defaultH) / 2;
+      const cxMm = newX + (orig.w || defaultW) / 2;
+      if (fdb) {
+        const bounds = fdb(cxMm, cyMm);
+        if (bounds) {
+          const innerLeft = bounds.left.x + (bounds.left.isWall ? 0 : t);
+          const innerRight = bounds.right.x;
+          const innerW = Math.max(100, innerRight - innerLeft);
+          upd.x = innerLeft;
+          upd.w = innerW;
+        }
+      }
+    }
+    updateEl(pending.id, upd);
+    setDrag3d(null);
+  }, [drag3d, updateEl, t, findDoorBounds]);
+
+  // Отмена drag3d без коммита — фантом убирается, элемент остаётся на старом месте.
+  const cancelDrag3d = useCallback(() => {
+    setDrag3d(null);
+    setDrag3dInput(null);
+  }, []);
 
   // ═══ Edit-Z controls (Этап 5) ═══
   // Работает для выделенной панели insert или штанги.
@@ -1328,6 +1390,7 @@ export default function Wardrobe3D({
       };
       // Сохраняем updateOutline в stateRef, чтобы можно было дёргать при изменении selId снаружи
       stateRef.current.updateOutline = updateOutline;
+      stateRef.current.zoneHighlight = zoneHighlight;
       // Начальная подсветка (если selId уже задан)
       updateOutline(selId);
 
@@ -1936,60 +1999,23 @@ export default function Wardrobe3D({
           clearTimeout(stateRef.current.longPressTimer);
           stateRef.current.longPressTimer = null;
         }
-        // Завершение drag3d — применяем pending обновление (элемент переезжает)
-        // и скрываем жёлтый фантом, возвращаем видимость элемента.
+        // Завершение drag3d — НЕ коммитим сразу. Переводим в режим ожидания
+        // подтверждения: фантом остаётся видимым с цифрами, появляется плашка
+        // «✓ Поставить ✕». Тап на цифру → popup для точного ввода.
+        // Это аналогично pendingPlace при установке нового элемента.
         if (propsRef.current.drag3d) {
-          const pending = stateRef.current.drag3dPending;
-          if (pending && updateEl) {
-            const upd = {};
-            if (pending.next.x !== undefined) upd.x = pending.next.x;
-            if (pending.next.y !== undefined) upd.y = pending.next.y;
-            // Для двери: помечаем manualW/manualH чтобы adjust() не пересчитал
-            // позицию обратно из doorLeft/doorRight (которые соответствуют
-            // СТАРОМУ положению в нише). Это делает дверь «свободной».
-            const dragType = propsRef.current.drag3d?.type;
-            if (dragType === "door") {
-              upd.manualW = true;
-              upd.manualH = true;
-              // Также сохраняем текущие w/h как явные (они уже корректные)
-              const orig = propsRef.current.drag3d?.origEl;
-              if (orig?.w) upd.w = orig.w;
-              if (orig?.h) upd.h = orig.h;
-            }
-            // Для ящиков: после переноса в новый проем подгоняем ширину
-            // под расстояние между ближайшими стойками (как при placement).
-            // Для панели — только если она insert (вкладная). Накладные (overlay)
-            // сохраняют свои размеры — они перекрывают стойки и вписаны вручную.
-            const orig = propsRef.current.drag3d?.origEl || {};
-            const isInsertPanel = dragType === "panel" && (orig.panelType === "insert");
-            if (dragType === "drawers" || isInsertPanel) {
-              const fdb = propsRef.current.findDoorBounds;
-              const ct = propsRef.current.t;
-              const defaultH = dragType === "drawers" ? 450 : 600;
-              const defaultW = dragType === "drawers" ? 400 : 400;
-              const newX = upd.x ?? orig.x ?? 0;
-              const newY = upd.y ?? orig.y ?? 0;
-              const cyMm = newY + (orig.h || defaultH) / 2;
-              const cxMm = newX + (orig.w || defaultW) / 2;
-              if (fdb) {
-                const bounds = fdb(cxMm, cyMm);
-                if (bounds) {
-                  const innerLeft = bounds.left.x + (bounds.left.isWall ? 0 : ct);
-                  const innerRight = bounds.right.x;
-                  const innerW = Math.max(100, innerRight - innerLeft);
-                  upd.x = innerLeft;
-                  upd.w = innerW;
-                }
-              }
-            }
-            updateEl(pending.id, upd);
+          // pending обновление уже сохранено в stateRef.drag3dPending через
+          // moveDraggedElement3D. Просто переводим drag3d в awaitingConfirm.
+          if (stateRef.current.drag3dPending) {
+            setDrag3d(prev => prev ? { ...prev, awaitingConfirm: true } : prev);
+          } else {
+            // Если pending пустой (пользователь не двинул) — отменяем
+            stateRef.current.drag3dLabelPositions = null;
+            zoneHighlight.visible = false;
+            if (ghostDimARef.current) ghostDimARef.current.style.display = "none";
+            if (ghostDimBRef.current) ghostDimBRef.current.style.display = "none";
+            setDrag3d(null);
           }
-          stateRef.current.drag3dPending = null;
-          stateRef.current.drag3dLabelPositions = null;
-          zoneHighlight.visible = false;
-          if (ghostDimARef.current) ghostDimARef.current.style.display = "none";
-          if (ghostDimBRef.current) ghostDimBRef.current.style.display = "none";
-          setDrag3d(null);
           return;
         }
         const { placeMode: pm, placeInZone: piz, setPlaceMode: spm } = propsRef.current;
@@ -2641,7 +2667,7 @@ export default function Wardrobe3D({
 
           {/* Индикатор drag3d — когда пользователь тащит существующий элемент.
               Показывает тип и подсказку «отпустите для подтверждения». */}
-          {drag3d && (
+          {drag3d && !drag3d.awaitingConfirm && (
             <div style={{
               position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)",
               padding: "8px 16px", borderRadius: 6,
@@ -2656,6 +2682,47 @@ export default function Wardrobe3D({
             }}>
               <span>↔ Перемещаем: {PLACE_LABELS[drag3d.type] || drag3d.type}</span>
               <span style={{ opacity: 0.7, fontSize: 10 }}>отпустите для подтверждения</span>
+            </div>
+          )}
+
+          {/* Awaiting-confirm плашка после drag3d. Фантом зафиксирован,
+              можно тапнуть на цифру для точного ввода или нажать ✓ Поставить. */}
+          {drag3d?.awaitingConfirm && (
+            <div style={{
+              position: "absolute",
+              bottom: 24, left: "50%", transform: "translateX(-50%)",
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "8px 12px",
+              borderRadius: 10,
+              background: "rgba(11,12,16,0.97)",
+              border: "1px solid rgba(34,197,94,0.5)",
+              boxShadow: "0 6px 20px rgba(0,0,0,0.6)",
+              zIndex: 14,
+              pointerEvents: "auto",
+            }}>
+              <span style={{
+                fontSize: 10, color: "#aaa", fontFamily: "'IBM Plex Mono',monospace",
+                textTransform: "uppercase", letterSpacing: "0.05em",
+              }}>
+                Тап на цифру → размер, или
+              </span>
+              <button
+                onClick={commitDrag3dPending}
+                style={{
+                  padding: "8px 16px", borderRadius: 6, fontSize: 13, fontWeight: 700,
+                  background: "#22c55e", color: "#000", border: "none",
+                  cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace",
+                }}
+              >✓ Поставить</button>
+              <button
+                onClick={cancelDrag3d}
+                style={{
+                  padding: "8px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600,
+                  background: "transparent", color: "#888",
+                  border: "1px solid #444",
+                  cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace",
+                }}
+              >✕</button>
             </div>
           )}
 
