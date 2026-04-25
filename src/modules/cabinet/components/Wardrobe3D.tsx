@@ -1514,21 +1514,41 @@ export default function Wardrobe3D({
         const ghostB = ghostDimBRef.current;
         if (!ghostA || !ghostB) return;
         let textA = "", textB = "", posA3D = null, posB3D = null;
+        // Размеры показывают расстояние в МИЛЛИМЕТРАХ корпуса от ближайших стенок,
+        // а позиция badge на экране — это 3D координаты сцены.
+        // Конвертация: 3D x = (mm - cW/2) * S, 3D y = (cH/2 - mm) * S, z как есть.
         if (type === "stud") {
           // Расстояние слева и справа
           textA = `${Math.round(x1)}`;
           textB = `${Math.round(cW - x2)}`;
-          // Размещаем чуть выше середины стойки
-          const midY = (y1 + y2) / 2;
-          posA3D = { x: x1 / 2, y: midY, z: zPos + depthM / 2 };
-          posB3D = { x: (x2 + cW) / 2, y: midY, z: zPos + depthM / 2 };
+          const midYmm = (y1 + y2) / 2;
+          // posA = середина между левой стенкой и левой гранью элемента
+          posA3D = {
+            x: (x1 / 2 - cW / 2) * S,
+            y: (cH / 2 - midYmm) * S,
+            z: zPos + depthM / 2,
+          };
+          // posB = середина между правой гранью элемента и правой стенкой
+          posB3D = {
+            x: ((x2 + cW) / 2 - cW / 2) * S,
+            y: (cH / 2 - midYmm) * S,
+            z: zPos + depthM / 2,
+          };
         } else {
           // Для остальных — расстояния сверху и снизу
           textA = `${Math.round(y1)}`;
           textB = `${Math.round(cH - y2)}`;
-          const midX = (x1 + x2) / 2;
-          posA3D = { x: midX, y: y1 / 2, z: zPos + depthM / 2 };
-          posB3D = { x: midX, y: (y2 + cH) / 2, z: zPos + depthM / 2 };
+          const midXmm = (x1 + x2) / 2;
+          posA3D = {
+            x: (midXmm - cW / 2) * S,
+            y: (cH / 2 - y1 / 2) * S,
+            z: zPos + depthM / 2,
+          };
+          posB3D = {
+            x: (midXmm - cW / 2) * S,
+            y: (cH / 2 - (y2 + cH) / 2) * S,
+            z: zPos + depthM / 2,
+          };
         }
         // Проецируем на экран
         const projFn = stateRef.current.projectToScreen;
