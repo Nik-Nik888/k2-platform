@@ -108,18 +108,41 @@ export function adjust(els: any[], iW: number, iH: number, t: number): any[] {
     }
     if (el.type === "drawers" || el.type === "rod" || el.type === "door" || el.type === "panel") {
       const x = Math.max(0, Math.min(iW, el.x || 0));
-      const y = Math.max(0, Math.min(iH, el.y || 0));
       const w = Math.max(20, Math.min(iW - x, el.w || 100));
       // h клампим для door/drawers/panel (у rod высота 0)
-      if (el.type === "door" || el.type === "drawers" || el.type === "panel") {
+      if (el.type === "door" || el.type === "panel") {
+        const y = Math.max(0, Math.min(iH, el.y || 0));
         const h = Math.max(20, Math.min(iH - y, el.h || 100));
         return { ...el, x, y, w, h };
+      }
+      if (el.type === "drawers") {
+        // Сначала клампим высоту: ящики не должны выходить за корпус.
+        // h ограничен суммой drawerHeights (если есть) и iH.
+        const requestedH = el.h || (el.drawerHeights || []).reduce((a, b) => a + b, 0) || 100;
+        // y клампим так чтобы блок целиком помещался: y + h <= iH
+        let y = Math.max(0, el.y || 0);
+        const maxY = Math.max(0, iH - 20); // минимум 20мм высоты
+        if (y > maxY) y = maxY;
+        const h = Math.max(20, Math.min(iH - y, requestedH));
+        // Если h урезалось — пропорционально уменьшаем drawerHeights
+        let drawerHeights = el.drawerHeights;
+        if (drawerHeights?.length && h < requestedH - 1) {
+          const k = h / requestedH;
+          drawerHeights = drawerHeights.map(dh => Math.max(50, Math.round(dh * k)));
+          // Дочистка: сумма должна точно равняться h (округление могло сместить)
+          const sum = drawerHeights.reduce((a, b) => a + b, 0);
+          if (sum !== h && drawerHeights.length > 0) {
+            drawerHeights[drawerHeights.length - 1] += (h - sum);
+          }
+        }
+        return { ...el, x, y, w, h, ...(drawerHeights ? { drawerHeights } : {}) };
       }
       // rod: y — центр, клампим в [t, iH-t] чтобы держатели помещались
       if (el.type === "rod") {
         const yRod = Math.max(t, Math.min(iH - t, el.y || 0));
         return { ...el, x, y: yRod, w };
       }
+      const y = Math.max(0, Math.min(iH, el.y || 0));
       return { ...el, x, y, w };
     }
     return el;

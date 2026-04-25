@@ -1421,7 +1421,28 @@ export default function Wardrobe3D({
           const ny = Math.max(0, Math.min(cH - h, cy - h / 2));
           nextEl.x = nx; nextEl.y = ny; nextEl.w = w;
           x1 = nx; x2 = nx + w; y1 = ny; y2 = ny + h;
-        } else if (type === "door" || type === "panel") {
+        } else if (type === "panel") {
+          // Панель — авто-подгонка под нишу как ящики/полка.
+          // Insert-панель занимает ширину ниши между стойками.
+          const h = orig.h || 600;
+          const { findDoorBounds: fdb } = propsRef.current;
+          let nx, w;
+          if (fdb) {
+            const bounds = fdb(cx, cy);
+            const left = bounds?.left?.x ?? 0;
+            const right = bounds?.right?.x ?? cW;
+            const lWall = bounds?.left?.isWall ?? true;
+            nx = lWall ? left : left + ct;
+            w = Math.max(20, right - nx);
+          } else {
+            w = orig.w || 400;
+            nx = Math.max(0, Math.min(cW - w, cx - w / 2));
+          }
+          const ny = Math.max(0, Math.min(cH - h, cy - h / 2));
+          nextEl.x = nx; nextEl.y = ny; nextEl.w = w;
+          x1 = nx; x2 = nx + w; y1 = ny; y2 = ny + h;
+        } else if (type === "door") {
+          // Дверь — фиксированный размер (не авто), пользователь может вручную править.
           const w = orig.w || 400;
           const h = orig.h || 600;
           const nx = Math.max(0, Math.min(cW - w, cx - w / 2));
@@ -1894,18 +1915,19 @@ export default function Wardrobe3D({
             }
             // Для ящиков: после переноса в новый проем подгоняем ширину
             // под расстояние между ближайшими стойками (как при placement).
-            if (dragType === "drawers") {
+            if (dragType === "drawers" || dragType === "panel") {
               const fdb = propsRef.current.findDoorBounds;
               const ct = propsRef.current.t;
               const orig = propsRef.current.drag3d?.origEl || {};
+              const defaultH = dragType === "drawers" ? 450 : 600;
+              const defaultW = dragType === "drawers" ? 400 : 400;
               const newX = upd.x ?? orig.x ?? 0;
               const newY = upd.y ?? orig.y ?? 0;
-              const cyMm = newY + (orig.h || 450) / 2;
-              const cxMm = newX + (orig.w || 400) / 2;
+              const cyMm = newY + (orig.h || defaultH) / 2;
+              const cxMm = newX + (orig.w || defaultW) / 2;
               if (fdb) {
                 const bounds = fdb(cxMm, cyMm);
                 if (bounds) {
-                  // Левый край ящика: после левой стойки (если она есть, не стенка)
                   const innerLeft = bounds.left.x + (bounds.left.isWall ? 0 : ct);
                   const innerRight = bounds.right.x;
                   const innerW = Math.max(100, innerRight - innerLeft);
@@ -2334,59 +2356,9 @@ export default function Wardrobe3D({
           </div>
         </div>
 
-        {/* Toolbar — добавить элементы. На мобильном скрыт: его заменяет FAB ("+")
-            справа внизу canvas. На десктопе остаётся в шапке. */}
-        {onAddElement && !isMobile && (
-          <div style={{
-            display: "flex", alignItems: "center", gap: 4,
-            flex: "initial",
-          }}>
-            {[
-              { type: "shelf",   icon: "━", label: "Полка"  },
-              { type: "stud",    icon: "┃", label: "Стойка" },
-              { type: "drawers", icon: "☰", label: "Ящики"  },
-              { type: "rod",     icon: "⎯", label: "Штанга" },
-              { type: "door",    icon: "🚪", label: "Дверь"  },
-              { type: "panel",   icon: "▯", label: "Панель" },
-            ].map(it => (
-              <button
-                key={it.type}
-                onClick={() => onAddElement(it.type)}
-                style={{
-                  padding: "6px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600,
-                  cursor: "pointer", border: "1px solid rgba(217,119,6,0.3)",
-                  background: "rgba(217,119,6,0.08)", color: "#d97706",
-                  fontFamily: "'IBM Plex Mono',monospace",
-                  whiteSpace: "nowrap",
-                  display: "flex", alignItems: "center", gap: 4,
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = "rgba(217,119,6,0.2)"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "rgba(217,119,6,0.08)"; }}
-                title={`Добавить: ${it.label}`}
-              >
-                <span style={{ fontSize: 13 }}>{it.icon}</span>
-                <span>+ {it.label}</span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Кнопка 2D — на десктопе в шапке справа, на мобильном переехала в угол canvas (см. ниже) */}
-        {!isMobile && (
-          <button onClick={onClose} style={{
-            padding: "6px 16px", borderRadius: 6, fontSize: 12, fontWeight: 700,
-            cursor: "pointer",
-            border: "1px solid rgba(96,165,250,0.3)",
-            background: "rgba(96,165,250,0.08)",
-            color: "#60a5fa",
-            fontFamily: "'IBM Plex Mono',monospace",
-            transition: "all 0.15s",
-          }}
-            onMouseEnter={e => { e.target.style.background = "rgba(96,165,250,0.2)"; }}
-            onMouseLeave={e => { e.target.style.background = "rgba(96,165,250,0.08)"; }}
-            title="Переключиться на классический 2D-редактор"
-          >📐 2D</button>
-        )}
+        {/* Шапка теперь содержит только заголовок и описание шкафа.
+            Добавление элементов — через FAB ("+") справа внизу canvas (на всех устройствах).
+            Переключение на 2D — через кнопку в верхнем левом углу canvas рядом с «Размеры». */}
       </div>
 
       {/* BODY: 3D canvas + right panel (desktop) или bottom sheet (mobile) */}
@@ -2508,9 +2480,9 @@ export default function Wardrobe3D({
             }}
           >📏</button>
 
-          {/* Кнопка 2D-редактора — на мобильном переехала в верхний угол canvas
-              рядом с «Размеры», шапка стала компактнее (там FAB вместо 6 кнопок) */}
-          {isMobile && onClose && (
+          {/* Кнопка 2D-редактора — переключение в классический 2D-редактор.
+              Доступна на всех устройствах в верхнем левом углу canvas рядом с «Размеры». */}
+          {onClose && (
             <button
               onClick={onClose}
               title="Переключиться на классический 2D-редактор"
