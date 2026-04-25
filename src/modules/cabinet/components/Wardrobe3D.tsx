@@ -145,6 +145,10 @@ export default function Wardrobe3D({
   // следует за курсором/пальцем. Отпускание → updateEl с новой позицией.
   // Храним { id, type, origEl } чтобы помнить что таскаем.
   const [drag3d, setDrag3d] = useState(null);
+  // Если тапнули на цифру во время drag3d — открывается popup для точного ввода.
+  // { side: "A"|"B" } определяет от какой стенки считать. После Enter из popup
+  // элемент встаёт на введённое расстояние и drag завершается.
+  const [drag3dInput, setDrag3dInput] = useState(null);
 
   // ═══ Ghost-dim input state (Этап 1-3: стойка/полка/штанга при постановке) ═══
   // Когда пользователь активирует ввод цифры (Space) — она открывается в МОДАЛЬНОМ POPUP
@@ -244,6 +248,49 @@ export default function Wardrobe3D({
     setLockedDim(null);
     setLockedNiche(null);
     setLockedSnapshot(null);
+  };
+
+  // Точный ввод размера во время drag3d. side="A" → расстояние от верха/левой стенки,
+  // side="B" → от противоположной. Завершает drag и применяет позицию через updateEl.
+  const commitDrag3dInput = (val) => {
+    const parsed = parseFloat(val);
+    const dd = drag3d;
+    const inp = drag3dInput;
+    if (!Number.isFinite(parsed) || parsed < 0 || !dd || !inp || !updateEl) {
+      setDrag3dInput(null);
+      return;
+    }
+    const orig = dd.origEl || {};
+    const upd = {};
+    if (dd.type === "stud") {
+      // X: A = от левой стенки до левой грани стойки
+      const x = inp.side === "A" ? parsed : Math.max(0, iW - parsed - t);
+      upd.x = Math.max(0, Math.min(iW - t, x));
+    } else if (dd.type === "shelf") {
+      // Y: A = от верхней стенки до верхней грани полки → центр = parsed + t/2
+      const y = inp.side === "A" ? parsed + t / 2 : Math.max(0, iH - parsed - t / 2);
+      upd.y = Math.max(t / 2, Math.min(iH - t / 2, y));
+    } else if (dd.type === "rod") {
+      const y = inp.side === "A" ? parsed : Math.max(0, iH - parsed);
+      upd.y = Math.max(t, Math.min(iH - t, y));
+    } else if (dd.type === "drawers") {
+      const h = orig.h || 450;
+      const y = inp.side === "A" ? parsed : Math.max(0, iH - parsed - h);
+      upd.y = Math.max(0, Math.min(iH - h, y));
+    } else if (dd.type === "door" || dd.type === "panel") {
+      const h = orig.h || 600;
+      const y = inp.side === "A" ? parsed : Math.max(0, iH - parsed - h);
+      upd.y = Math.max(0, Math.min(iH - h, y));
+      if (dd.type === "door") {
+        upd.manualW = true;
+        upd.manualH = true;
+        if (orig.w) upd.w = orig.w;
+        if (orig.h) upd.h = orig.h;
+      }
+    }
+    updateEl(dd.id, upd);
+    setDrag3dInput(null);
+    setDrag3d(null);
   };
 
   // ═══ Edit-Z controls (Этап 5) ═══
@@ -1356,10 +1403,23 @@ export default function Wardrobe3D({
           y1 = ny - 12; y2 = ny + 12;
         } else if (type === "drawers") {
           const h = orig.h || 450;
-          const w = orig.w || 400;
+          // Автоширина по нише между стойками — ящики занимают всю ширину
+          // ниши в которую попал курсор (как полка). Если стоек нет — на всю ширину корпуса.
+          const { findDoorBounds: fdb } = propsRef.current;
+          let nx, w;
+          if (fdb) {
+            const bounds = fdb(cx, cy);
+            const left = bounds?.left?.x ?? 0;
+            const right = bounds?.right?.x ?? cW;
+            const lWall = bounds?.left?.isWall ?? true;
+            nx = lWall ? left : left + ct;       // если слева стойка — отступ на её толщину
+            w = Math.max(20, right - nx);
+          } else {
+            w = orig.w || 400;
+            nx = Math.max(0, Math.min(cW - w, cx - w / 2));
+          }
           const ny = Math.max(0, Math.min(cH - h, cy - h / 2));
-          const nx = Math.max(0, Math.min(cW - w, cx - w / 2));
-          nextEl.x = nx; nextEl.y = ny;
+          nextEl.x = nx; nextEl.y = ny; nextEl.w = w;
           x1 = nx; x2 = nx + w; y1 = ny; y2 = ny + h;
         } else if (type === "door" || type === "panel") {
           const w = orig.w || 400;
@@ -2387,23 +2447,29 @@ export default function Wardrobe3D({
               чтобы input не перерисовывался при движении сцены. */}
           <GhostDimBadge
             refEl={ghostDimARef}
-            isActive={lockedDim === "A"}
-            onClick={placeMode ? () => {
-              const niche = stateRef.current.lastNiche;
-              if (!niche) return;
-              setLockedNiche(niche);
-              setLockedDim("A");
-            } : undefined}
+            isActive={lockedDim === "A" || drag3dInput?.side === "A"}
+            onClick={
+              drag3d ? () => setDrag3dInput({ side: "A" }) :
+              placeMode ? () => {
+                const niche = stateRef.current.lastNiche;
+                if (!niche) return;
+                setLockedNiche(niche);
+                setLockedDim("A");
+              } : undefined
+            }
           />
           <GhostDimBadge
             refEl={ghostDimBRef}
-            isActive={lockedDim === "B"}
-            onClick={placeMode ? () => {
-              const niche = stateRef.current.lastNiche;
-              if (!niche) return;
-              setLockedNiche(niche);
-              setLockedDim("B");
-            } : undefined}
+            isActive={lockedDim === "B" || drag3dInput?.side === "B"}
+            onClick={
+              drag3d ? () => setDrag3dInput({ side: "B" }) :
+              placeMode ? () => {
+                const niche = stateRef.current.lastNiche;
+                if (!niche) return;
+                setLockedNiche(niche);
+                setLockedDim("B");
+              } : undefined
+            }
           />
           <GhostDimBadge
             refEl={editDimARef}
@@ -2679,6 +2745,33 @@ export default function Wardrobe3D({
               onCancel={cancelEdit}
               onToggle={toggleEditSide}
               hint={editDim === "A" ? "расстояние от передней грани" : "расстояние до задней стенки"}
+            />
+          )}
+          {/* Popup точного ввода размера во время drag3d.
+              Открывается тапом на жёлтую цифру у фантома. */}
+          {drag3dInput && drag3d && (
+            <LockInputPopup
+              key={`drag3d-${drag3dInput.side}`}
+              title={`Перемещение: ${PLACE_LABELS[drag3d.type] || drag3d.type}`}
+              side={drag3dInput.side}
+              initialValue={(drag3dInput.side === "A"
+                ? ghostDimARef.current?.textContent
+                : ghostDimBRef.current?.textContent) ?? ""}
+              maxValue={(() => {
+                const orig = drag3d.origEl || {};
+                if (drag3d.type === "stud") return Math.max(0, iW - t);
+                if (drag3d.type === "shelf") return Math.max(0, iH - t);
+                if (drag3d.type === "rod") return Math.max(0, iH);
+                if (drag3d.type === "drawers") return Math.max(0, iH - (orig.h || 450));
+                if (drag3d.type === "door" || drag3d.type === "panel") return Math.max(0, iH - (orig.h || 600));
+                return undefined;
+              })()}
+              onCommit={(val) => commitDrag3dInput(val)}
+              onCancel={() => setDrag3dInput(null)}
+              onToggle={() => setDrag3dInput(prev => ({ side: prev?.side === "A" ? "B" : "A" }))}
+              hint={drag3dInput.side === "A"
+                ? "расстояние от верхней/левой стенки"
+                : "расстояние от нижней/правой стенки"}
             />
           )}
 
