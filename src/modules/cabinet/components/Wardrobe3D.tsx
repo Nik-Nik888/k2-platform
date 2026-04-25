@@ -2604,19 +2604,24 @@ export default function Wardrobe3D({
             >📐 2D</button>
           )}
 
-          {/* Индикатор активного placeMode — поверх 3D, сверху */}
+          {/* Индикатор активного placeMode — поверх 3D, сверху.
+              pointerEvents: "none" на контейнере чтобы клики СКВОЗЬ плашку
+              падали на canvas (иначе пользователь не может поставить элемент
+              в верхней части шкафа — клик попадает в плашку). Только кнопка ✕
+              получает pointerEvents: "auto". */}
           {placeMode && (
             <div style={{
               position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)",
-              padding: "8px 16px", borderRadius: 6,
-              background: lockedDim ? "rgba(251,191,36,0.95)" : "rgba(34,197,94,0.92)",
+              padding: "6px 12px", borderRadius: 6,
+              background: lockedDim ? "rgba(251,191,36,0.85)" : "rgba(34,197,94,0.82)",
               color: "#000",
-              fontSize: 12, fontWeight: 700,
+              fontSize: 11, fontWeight: 700,
               fontFamily: "'IBM Plex Mono',monospace",
-              display: "flex", alignItems: "center", gap: 10,
+              display: "flex", alignItems: "center", gap: 8,
               boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
               zIndex: 10,
-              pointerEvents: "auto",
+              pointerEvents: "none",
+              maxWidth: "calc(100% - 100px)",
             }}>
               <span>+ {PLACE_LABELS[placeMode] || placeMode}</span>
               <span style={{ opacity: 0.7, fontSize: 10 }}>
@@ -2635,6 +2640,7 @@ export default function Wardrobe3D({
                   borderRadius: 4, padding: "2px 8px",
                   color: "#000", fontWeight: 700, fontSize: 12,
                   cursor: "pointer",
+                  pointerEvents: "auto",
                 }}
                 title="Отменить постановку"
               >✕</button>
@@ -2670,15 +2676,16 @@ export default function Wardrobe3D({
           {drag3d && !drag3d.awaitingConfirm && (
             <div style={{
               position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)",
-              padding: "8px 16px", borderRadius: 6,
-              background: "rgba(34,197,94,0.92)",
+              padding: "6px 12px", borderRadius: 6,
+              background: "rgba(34,197,94,0.82)",
               color: "#000",
-              fontSize: 12, fontWeight: 700,
+              fontSize: 11, fontWeight: 700,
               fontFamily: "'IBM Plex Mono',monospace",
-              display: "flex", alignItems: "center", gap: 10,
+              display: "flex", alignItems: "center", gap: 8,
               boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
               zIndex: 10,
-              pointerEvents: "auto",
+              pointerEvents: "none",
+              maxWidth: "calc(100% - 100px)",
             }}>
               <span>↔ Перемещаем: {PLACE_LABELS[drag3d.type] || drag3d.type}</span>
               <span style={{ opacity: 0.7, fontSize: 10 }}>отпустите для подтверждения</span>
@@ -2935,8 +2942,10 @@ export default function Wardrobe3D({
           )}
 
           {/* FAB — floating action button "+". Снизу-справа, раскрывается веером.
-              Скрыт когда активен placeMode или выделен элемент (чтобы не мешать их индикаторам). */}
-          {onAddElement && !placeMode && !selEl && (
+              Видим в любом режиме (placeMode, selEl) кроме drag3d, чтобы пользователь
+              мог переключаться между типами добавляемых элементов на лету,
+              не нажимая Esc/× для выхода из текущего режима. */}
+          {onAddElement && !drag3d && (
             <Fab
               open={fabOpen}
               onToggle={() => setFabOpen(v => !v)}
@@ -2975,13 +2984,66 @@ export default function Wardrobe3D({
 // Снизу-справа над canvas. Закрывается по клику на кнопку ещё раз,
 // по клику в пустое место (overlay) или после выбора типа.
 function Fab({ open, onToggle, onPick }) {
+  // SVG-иконки 24×24 чтобы у штанги/полки/панели были разные понятные силуэты,
+  // не как раньше где «━» и «⎯» выглядели одинаково.
+  const Icon = ({ type }) => {
+    const stroke = "#d97706";
+    if (type === "shelf") {
+      // Полка: горизонтальный прямоугольник
+      return <svg width="22" height="22" viewBox="0 0 24 24"><rect x="3" y="10" width="18" height="4" fill={stroke} /></svg>;
+    }
+    if (type === "stud") {
+      // Стойка: вертикальный прямоугольник
+      return <svg width="22" height="22" viewBox="0 0 24 24"><rect x="10" y="3" width="4" height="18" fill={stroke} /></svg>;
+    }
+    if (type === "rod") {
+      // Штанга: тонкая горизонтальная палка + 2 плечика снизу
+      return (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="3" y1="9" x2="21" y2="9" />
+          {/* Плечико 1 */}
+          <path d="M8 9 L6 16 L10 16 Z" fill={stroke} />
+          {/* Плечико 2 */}
+          <path d="M16 9 L14 16 L18 16 Z" fill={stroke} />
+        </svg>
+      );
+    }
+    if (type === "drawers") {
+      // Ящики: 3 горизонтальные линии с ручками-точками по центру
+      return (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.5">
+          <rect x="4" y="4" width="16" height="16" />
+          <line x1="4" y1="9" x2="20" y2="9" />
+          <line x1="4" y1="14" x2="20" y2="14" />
+          <circle cx="12" cy="6.5" r="0.8" fill={stroke} />
+          <circle cx="12" cy="11.5" r="0.8" fill={stroke} />
+          <circle cx="12" cy="17" r="0.8" fill={stroke} />
+        </svg>
+      );
+    }
+    if (type === "panel") {
+      // Панель: вертикальный прямоугольник средний
+      return <svg width="22" height="22" viewBox="0 0 24 24"><rect x="8" y="4" width="8" height="16" fill="none" stroke={stroke} strokeWidth="2" /></svg>;
+    }
+    if (type === "door") {
+      // Дверь: прямоугольник с ручкой-точкой справа
+      return (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2">
+          <rect x="5" y="3" width="14" height="18" />
+          <circle cx="16" cy="12" r="1" fill={stroke} />
+        </svg>
+      );
+    }
+    return null;
+  };
+
   const items = [
-    { type: "shelf",   icon: "━", label: "Полка"  },
-    { type: "stud",    icon: "┃", label: "Стойка" },
-    { type: "rod",     icon: "⎯", label: "Штанга" },
-    { type: "drawers", icon: "☰", label: "Ящики"  },
-    { type: "panel",   icon: "▯", label: "Панель" },
-    { type: "door",    icon: "🚪", label: "Дверь" },
+    { type: "shelf",   label: "Полка"  },
+    { type: "stud",    label: "Стойка" },
+    { type: "rod",     label: "Штанга" },
+    { type: "drawers", label: "Ящики"  },
+    { type: "panel",   label: "Панель" },
+    { type: "door",    label: "Дверь" },
   ];
   // Позиции иконок при open=true: веер вверх-влево от кнопки.
   // Радиус 130px, углы от -95° до -185° (полная четверть круга над кнопкой).
@@ -3036,7 +3098,7 @@ function Fab({ open, onToggle, onPick }) {
               zIndex: 12,
             }}
           >
-            {it.icon}
+            <Icon type={it.type} />
           </button>
         );
       })}
