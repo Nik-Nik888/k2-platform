@@ -140,6 +140,11 @@ export default function Wardrobe3D({
   // Это даёт пользователю шанс тапнуть на жёлтую цифру и ввести точный размер
   // вместо немедленной постановки. Хранит { clickX, clickY } или null.
   const [pendingPlace, setPendingPlace] = useState(null);
+  // Drag-n-drop существующего элемента в 3D. Long-press на выделенном элементе
+  // активирует режим — элемент прячется, вместо него жёлтый фантом который
+  // следует за курсором/пальцем. Отпускание → updateEl с новой позицией.
+  // Храним { id, type, origEl } чтобы помнить что таскаем.
+  const [drag3d, setDrag3d] = useState(null);
 
   // ═══ Ghost-dim input state (Этап 1-3: стойка/полка/штанга при постановке) ═══
   // Когда пользователь активирует ввод цифры (Space) — она открывается в МОДАЛЬНОМ POPUP
@@ -162,15 +167,15 @@ export default function Wardrobe3D({
     showDims,
     elements,
     lockedDim, lockedNiche, lockedSnapshot,
-    editDim, editSnapshot, selEl,
-    pendingPlace,
+    editDim, editSnapshot, selEl, selId,
+    pendingPlace, drag3d,
   });
   useEffect(() => {
     propsRef.current = {
       placeMode, setPlaceMode, findDoorBounds, placeInZone, iW, iH, t, showDims, elements,
       lockedDim, lockedNiche, lockedSnapshot,
-      editDim, editSnapshot, selEl,
-      pendingPlace,
+      editDim, editSnapshot, selEl, selId,
+      pendingPlace, drag3d,
     };
   });
 
@@ -193,6 +198,25 @@ export default function Wardrobe3D({
     setEditDim(null);
     setEditSnapshot(null);
   }, [selEl?.id]);
+
+  // Drag3d: скрываем меши элемента (вместо него показывается жёлтый фантом
+  // через zoneHighlight). При завершении drag — снова показываем.
+  useEffect(() => {
+    const setVis = stateRef.current.setElementVisibility;
+    if (!setVis) return;
+    if (drag3d?.id) {
+      setVis(drag3d.id, false);
+    }
+    // На очистку: когда drag3d становится null, показываем меши снова.
+    // Но id может уже быть новым если пользователь начал drag другого элемента,
+    // поэтому возвращаем видимость именно ТОМУ id из closure.
+    const closureId = drag3d?.id;
+    return () => {
+      if (closureId && stateRef.current.setElementVisibility) {
+        stateRef.current.setElementVisibility(closureId, true);
+      }
+    };
+  }, [drag3d?.id]);
 
   // ═══ Клавиатура для click-to-edit ═══
   // Space активирует ввод. Логика взаимодействия теперь через popup-компонент LockInputPopup.
@@ -1243,6 +1267,20 @@ export default function Wardrobe3D({
       // Начальная подсветка (если selId уже задан)
       updateOutline(selId);
 
+      // ── Helper: скрыть/показать меши элемента во время drag3d ──
+      // Когда пользователь тащит существующий элемент, сам он «пропадает»,
+      // а вместо него рисуется жёлтый фантом (через zoneHighlight как при placement).
+      // setVisible проходит по всем мешам элемента и включает/выключает visible.
+      const setElementVisibility = (id, visible) => {
+        const meshes = elementMeshes.get(id);
+        if (!meshes) return;
+        meshes.forEach(obj => {
+          obj.visible = visible;
+          obj.traverse?.(c => { c.visible = visible; });
+        });
+      };
+      stateRef.current.setElementVisibility = setElementVisibility;
+
       const onWheel = e => {
         e.preventDefault();
         zoom = Math.max(0.3, Math.min(3, zoom + e.deltaY * -0.0008));
@@ -1283,6 +1321,91 @@ export default function Wardrobe3D({
         zoneHighlight.visible = false;
         if (ghostDimARef.current) ghostDimARef.current.style.display = "none";
         if (ghostDimBRef.current) ghostDimBRef.current.style.display = "none";
+      };
+
+      // ── Helper: перемещение существующего элемента в 3D (drag-n-drop) ──
+      // Вызывается из onPointerMove когда drag3d активен. Рассчитывает новые
+      // координаты (с snap 10мм и clamp в рамки) и сохраняет в stateRef для
+      // последующего updateEl при отпускании (onPointerUp).
+      // Фантом отрисовывается через zoneHighlight — такой же жёлтый прямоугольник
+      // как при placement, но для уже существующего элемента.
+      const moveDraggedElement3D = (d3d, clickX, clickY) => {
+        const { iW: cW, iH: cH, t: ct } = propsRef.current;
+        const SNAP = 10;
+        const cx = Math.round(clickX / SNAP) * SNAP;
+        const cy = Math.round(clickY / SNAP) * SNAP;
+        const { type, origEl } = d3d;
+        const orig = origEl || {};
+        // Рассчитываем новое положение в терминах (x1, y1, x2, y2) фантома
+        let x1, y1, x2, y2;
+        let nextEl = { ...orig };
+        if (type === "stud") {
+          const nx = Math.max(0, Math.min(cW - ct, cx - ct / 2));
+          nextEl.x = nx;
+          x1 = nx; x2 = nx + ct;
+          y1 = orig.pTop || 0; y2 = orig.pBot || cH;
+        } else if (type === "shelf") {
+          const ny = Math.max(ct / 2, Math.min(cH - ct / 2, cy));
+          nextEl.y = ny;
+          x1 = orig.x || 0; x2 = x1 + (orig.w || cW);
+          y1 = ny - ct / 2; y2 = ny + ct / 2;
+        } else if (type === "rod") {
+          const ny = Math.max(ct, Math.min(cH - ct, cy));
+          nextEl.y = ny;
+          x1 = orig.x || 0; x2 = x1 + (orig.w || cW);
+          y1 = ny - 12; y2 = ny + 12;
+        } else if (type === "drawers") {
+          const h = orig.h || 450;
+          const w = orig.w || 400;
+          const ny = Math.max(0, Math.min(cH - h, cy - h / 2));
+          const nx = Math.max(0, Math.min(cW - w, cx - w / 2));
+          nextEl.x = nx; nextEl.y = ny;
+          x1 = nx; x2 = nx + w; y1 = ny; y2 = ny + h;
+        } else if (type === "door" || type === "panel") {
+          const w = orig.w || 400;
+          const h = orig.h || 600;
+          const nx = Math.max(0, Math.min(cW - w, cx - w / 2));
+          const ny = Math.max(0, Math.min(cH - h, cy - h / 2));
+          nextEl.x = nx; nextEl.y = ny;
+          x1 = nx; x2 = nx + w; y1 = ny; y2 = ny + h;
+        } else {
+          return;
+        }
+        // Сохраняем pending обновление — применится в onPointerUp
+        stateRef.current.drag3dPending = { id: d3d.id, next: nextEl };
+        // Обновляем фантом (жёлтый прямоугольник элемента на новой позиции)
+        showDrag3dPhantom(type, x1, y1, x2, y2);
+      };
+
+      // ── Helper: жёлтый фантом для drag3d (переиспользует zoneHighlight из placement) ──
+      const showDrag3dPhantom = (type, x1, y1, x2, y2) => {
+        const { iW: cW, iH: cH } = propsRef.current;
+        const w = x2 - x1, h = y2 - y1;
+        if (w <= 0 || h <= 0) { zoneHighlight.visible = false; return; }
+        const cxMm = (x1 + x2) / 2;
+        const cyMm = (y1 + y2) / 2;
+        const cx = (cxMm - cW / 2) * S;
+        const cy = (cH / 2 - cyMm) * S;
+        const wM = w * S;
+        const hM = h * S;
+        // Глубина и Z для каждого типа — как в updateZoneHighlight
+        let depthM, zPos;
+        if (type === "door" || type === "panel") {
+          depthM = 16 * S;
+          zPos = d / 2 + depthM / 2 + 0.001;
+        } else if (type === "rod") {
+          depthM = 24 * S;
+          zPos = 0;
+        } else {
+          // stud / shelf / drawers — глубина корпуса - 30мм зазор сзади
+          depthM = d - 30 * S;
+          zPos = 15 * S;
+        }
+        // Позиционируем и показываем zoneHighlight (мы переиспользуем его геометрию)
+        zoneHighlight.userData.fillMesh?.scale?.set(wM, hM, depthM);
+        zoneHighlight.userData.edges?.scale?.set(wM, hM, depthM);
+        zoneHighlight.position.set(cx, cy, zPos);
+        zoneHighlight.visible = true;
       };
       const updateZoneHighlight = (clientX, clientY) => {
         const { placeMode: pm, findDoorBounds: fdb, iW: cW, iH: cH, t: ct } = propsRef.current;
@@ -1539,11 +1662,58 @@ export default function Wardrobe3D({
         downY = e.clientY;
         downTime = Date.now();
         renderer.domElement.setPointerCapture(e.pointerId);
+
+        // ─── Long-press для drag-n-drop существующего элемента ───
+        // Если pointerdown на элементе, который уже выделен — через 500мс
+        // активируем режим перетаскивания. При движении до этого времени
+        // таймер отменяется (это был обычный drag для вращения сцены).
+        const { placeMode: pmd, selId: curSel, elements: els } = propsRef.current;
+        if (!pmd && curSel) {
+          // Raycaster на элементы
+          const rect = renderer.domElement.getBoundingClientRect();
+          ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+          ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+          raycaster.setFromCamera(ndc, camera);
+          const hits = raycaster.intersectObject(group, true);
+          const hit = hits.find(h => h.object?.userData?.elementId === curSel);
+          if (hit) {
+            // Запускаем таймер long-press
+            stateRef.current.longPressTimer = setTimeout(() => {
+              const srcEl = els.find(x => x.id === curSel);
+              if (!srcEl) return;
+              // Хаптик на тач
+              if (e.pointerType === "touch" && navigator.vibrate) navigator.vibrate(30);
+              setDrag3d({ id: curSel, type: srcEl.type, origEl: srcEl });
+              isDragging = false; // отключаем вращение во время drag элемента
+            }, 500);
+          }
+        }
       };
       const onPointerMove = e => {
-        const { placeMode: pm, pendingPlace: pp } = propsRef.current;
+        const { placeMode: pm, pendingPlace: pp, drag3d: d3d } = propsRef.current;
         // Если фантом зафиксирован (ждём ОК) — не двигаем
         if (pp) return;
+
+        // ─── Обработка drag-n-drop существующего элемента ───
+        // Если активен режим drag3d — двигаем элемент за курсором/пальцем.
+        if (d3d && d3d.id) {
+          const proj = screenToCabinetMm(e.clientX, e.clientY);
+          if (!proj) return;
+          moveDraggedElement3D(d3d, proj.clickX, proj.clickY);
+          return;
+        }
+
+        // Если идёт обычный drag и пользователь сдвинул палец — отменяем long-press timer
+        // (это был жест «покрутить» а не «долгое нажатие»).
+        if (stateRef.current.longPressTimer) {
+          const dxLP = e.clientX - downX;
+          const dyLP = e.clientY - downY;
+          if (Math.sqrt(dxLP * dxLP + dyLP * dyLP) >= CLICK_THRESHOLD_PX) {
+            clearTimeout(stateRef.current.longPressTimer);
+            stateRef.current.longPressTimer = null;
+          }
+        }
+
         // Если идёт drag (мышь зажата и движется) — крутим сцену.
         // Иначе (просто hover в placeMode) — обновляем подсветку зоны.
         if (isDragging) {
@@ -1595,6 +1765,27 @@ export default function Wardrobe3D({
         const wasTouch = e?.pointerType === "touch";
         const wasDragging = isDragging;
         isDragging = false;
+        // Отмена long-press таймера (если был но не успел сработать)
+        if (stateRef.current.longPressTimer) {
+          clearTimeout(stateRef.current.longPressTimer);
+          stateRef.current.longPressTimer = null;
+        }
+        // Завершение drag3d — применяем pending обновление (элемент переезжает)
+        // и скрываем жёлтый фантом, возвращаем видимость элемента.
+        if (propsRef.current.drag3d) {
+          const pending = stateRef.current.drag3dPending;
+          if (pending && updateEl) {
+            // Применяем только изменённые поля (x/y) — остальное остаётся в элементе
+            const upd = {};
+            if (pending.next.x !== undefined) upd.x = pending.next.x;
+            if (pending.next.y !== undefined) upd.y = pending.next.y;
+            updateEl(pending.id, upd);
+          }
+          stateRef.current.drag3dPending = null;
+          zoneHighlight.visible = false;
+          setDrag3d(null);
+          return;
+        }
         const { placeMode: pm, placeInZone: piz, setPlaceMode: spm } = propsRef.current;
         // Короткий клик (не drag)?
         const dx = (e?.clientX ?? 0) - downX;
@@ -1676,9 +1867,15 @@ export default function Wardrobe3D({
         // На телефоне в placeMode — одиночный палец двигает фантом (как мышь на ПК).
         // Без этого pointermove не срабатывает на тач-устройствах для одного пальца.
         if (e.touches.length === 1) {
-          const { placeMode: pm, lockedDim: lD } = propsRef.current;
+          const { placeMode: pm, lockedDim: lD, drag3d: d3d } = propsRef.current;
+          const t0 = e.touches[0];
+          // Drag3d активен → двигаем существующий элемент за пальцем
+          if (d3d?.id) {
+            const proj = screenToCabinetMm(t0.clientX, t0.clientY);
+            if (proj) moveDraggedElement3D(d3d, proj.clickX, proj.clickY);
+            return;
+          }
           if (pm && lD === null) {
-            const t0 = e.touches[0];
             stateRef.current.lastMouseX = t0.clientX;
             stateRef.current.lastMouseY = t0.clientY;
             updateZoneHighlight(t0.clientX, t0.clientY);
@@ -2215,6 +2412,26 @@ export default function Wardrobe3D({
                   ? `· вводим ${editDim === "A" ? "спереди" : "сзади"} · Space=сменить · Enter=OK · Esc=отмена`
                   : "· Space = редактировать Z"}
               </span>
+            </div>
+          )}
+
+          {/* Индикатор drag3d — когда пользователь тащит существующий элемент.
+              Показывает тип и подсказку «отпустите для подтверждения». */}
+          {drag3d && (
+            <div style={{
+              position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)",
+              padding: "8px 16px", borderRadius: 6,
+              background: "rgba(34,197,94,0.92)",
+              color: "#000",
+              fontSize: 12, fontWeight: 700,
+              fontFamily: "'IBM Plex Mono',monospace",
+              display: "flex", alignItems: "center", gap: 10,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+              zIndex: 10,
+              pointerEvents: "auto",
+            }}>
+              <span>↔ Перемещаем: {PLACE_LABELS[drag3d.type] || drag3d.type}</span>
+              <span style={{ opacity: 0.7, fontSize: 10 }}>отпустите для подтверждения</span>
             </div>
           )}
 
