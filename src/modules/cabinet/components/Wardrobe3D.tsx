@@ -1775,10 +1775,21 @@ export default function Wardrobe3D({
         if (propsRef.current.drag3d) {
           const pending = stateRef.current.drag3dPending;
           if (pending && updateEl) {
-            // Применяем только изменённые поля (x/y) — остальное остаётся в элементе
             const upd = {};
             if (pending.next.x !== undefined) upd.x = pending.next.x;
             if (pending.next.y !== undefined) upd.y = pending.next.y;
+            // Для двери: помечаем manualW/manualH чтобы adjust() не пересчитал
+            // позицию обратно из doorLeft/doorRight (которые соответствуют
+            // СТАРОМУ положению в нише). Это делает дверь «свободной».
+            const dragType = propsRef.current.drag3d?.type;
+            if (dragType === "door") {
+              upd.manualW = true;
+              upd.manualH = true;
+              // Также сохраняем текущие w/h как явные (они уже корректные)
+              const orig = propsRef.current.drag3d?.origEl;
+              if (orig?.w) upd.w = orig.w;
+              if (orig?.h) upd.h = orig.h;
+            }
             updateEl(pending.id, upd);
           }
           stateRef.current.drag3dPending = null;
@@ -1809,10 +1820,25 @@ export default function Wardrobe3D({
         }
         if (!isClick) return;
 
-        // Сначала всегда проверяем — попал ли клик ПО ЭЛЕМЕНТУ.
-        // Если да — выделяем (даже в placeMode!), и если был placeMode — сбрасываем его.
-        // Это решает проблему: после постановки стойки её нельзя было выделить,
-        // потому что placeMode оставался активным и клик считался постановкой.
+        // Логика клика:
+        // 1. Если placeMode АКТИВЕН → всегда ставим элемент в зоне (где жёлтый фантом),
+        //    даже если курсор попал на существующий элемент. Это критично — иначе
+        //    нельзя поставить панель в проем рядом со стойкой (клик попадал бы на стойку
+        //    и выделял её вместо постановки панели).
+        // 2. Если placeMode ВЫКЛЮЧЕН → проверяем попадание по элементу для выделения.
+        if (pm && piz) {
+          // ─── Режим постановки: проекция → placeInZone ───
+          // Используем последнюю позицию фантома (он уже посчитан updateZoneHighlight)
+          // или координаты клика как fallback.
+          const proj = screenToCabinetMm(e.clientX, e.clientY);
+          if (proj) {
+            piz(null, proj.clickX, proj.clickY);
+            hideZone();
+          }
+          return;
+        }
+
+        // placeMode выключен → обычное выделение существующего элемента
         const rect = renderer.domElement.getBoundingClientRect();
         ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -1821,21 +1847,8 @@ export default function Wardrobe3D({
         const hit = hits.find(h => h.object?.userData?.elementId);
 
         if (hit && onElementClick) {
-          // Клик попал на существующий элемент → выделяем
-          if (pm && spm) spm(null);   // выходим из placeMode
           hideZone();
           onElementClick(hit.object.userData.elementId);
-          return;
-        }
-
-        // Клик в пустое место
-        if (pm && piz) {
-          // ─── Режим постановки: проекция → placeInZone ───
-          const proj = screenToCabinetMm(e.clientX, e.clientY);
-          if (proj) {
-            piz(null, proj.clickX, proj.clickY);
-            hideZone();
-          }
           return;
         }
         // ─── Обычный режим: снимаем выделение ───
@@ -2337,22 +2350,27 @@ export default function Wardrobe3D({
             } : undefined}
           />
 
-          {/* Кнопка toggle размеров — справа внизу canvas */}
+          {/* Кнопка toggle размеров — компактная иконка-ярлычок в левом верхнем углу.
+              Оранжевая подсветка = размеры показываются, прозрачная = скрыты. */}
           <button
             onClick={() => setShowDims(v => !v)}
             title={showDims ? "Скрыть размеры" : "Показать размеры"}
             style={{
-              position: "absolute", bottom: 12, right: 12,
-              padding: "6px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600,
+              position: "absolute", top: 12, left: 12,
+              width: 36, height: 36, borderRadius: 6,
+              padding: 0,
               cursor: "pointer",
-              border: "1px solid " + (showDims ? "rgba(96,165,250,0.4)" : "rgba(100,100,110,0.3)"),
-              background: showDims ? "rgba(96,165,250,0.15)" : "rgba(30,30,40,0.8)",
-              color: showDims ? "#60a5fa" : "#888",
+              border: "1px solid " + (showDims ? "rgba(217,119,6,0.6)" : "rgba(100,100,110,0.4)"),
+              background: showDims ? "rgba(217,119,6,0.25)" : "rgba(30,30,40,0.7)",
+              color: showDims ? "#fbbf24" : "#888",
+              fontSize: 18, lineHeight: 1,
               fontFamily: "'IBM Plex Mono', monospace",
+              display: "flex", alignItems: "center", justifyContent: "center",
               zIndex: 9,
               pointerEvents: "auto",
+              transition: "all 150ms",
             }}
-          >📏 {showDims ? "Размеры" : "Размеры off"}</button>
+          >📏</button>
 
           {/* Индикатор активного placeMode — поверх 3D, сверху */}
           {placeMode && (
@@ -2664,10 +2682,11 @@ function Fab({ open, onToggle, onPick }) {
     { type: "door",    icon: "🚪", label: "Дверь" },
   ];
   // Позиции иконок при open=true: веер вверх-влево от кнопки.
-  // Радиус 90px, углы от -100° до -175° (против часовой, дугой над кнопкой).
+  // Радиус 130px, углы от -95° до -185° (полная четверть круга над кнопкой).
+  // Это даёт достаточно места между иконками 44px чтобы они не наезжали.
   const count = items.length;
-  const startA = -100; // градусы (-90 = прямо вверх, меньше — влево)
-  const endA = -175;
+  const startA = -95;
+  const endA = -185;
   return (
     <>
       {/* Прозрачный overlay для закрытия по клику вне — только когда открыт */}
@@ -2685,7 +2704,7 @@ function Fab({ open, onToggle, onPick }) {
       {items.map((it, i) => {
         const angle = startA + (endA - startA) * (i / (count - 1));
         const rad = (angle * Math.PI) / 180;
-        const r = 100;
+        const r = 130;
         const dx = Math.cos(rad) * r;
         const dy = Math.sin(rad) * r;
         return (
@@ -2820,14 +2839,15 @@ function LockInputPopup({ title, initialValue, side, onCommit, onCancel, onToggl
   return (
     <div style={{
       position: "absolute",
-      top: 60, left: "50%", transform: "translateX(-50%)",
-      minWidth: 280,
+      top: 8, left: "50%", transform: "translateX(-50%)",
+      maxWidth: "calc(100% - 16px)",
+      minWidth: 240,
       background: "rgba(11,12,16,0.98)",
       border: "1px solid rgba(251,191,36,0.5)",
       borderRadius: 8,
-      padding: "10px 14px",
+      padding: "8px 10px",
       boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
-      display: "flex", flexDirection: "column", gap: 6,
+      display: "flex", flexDirection: "column", gap: 5,
       zIndex: 30,
       pointerEvents: "auto",
     }}>
