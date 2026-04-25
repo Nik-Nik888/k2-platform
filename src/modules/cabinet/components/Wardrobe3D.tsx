@@ -1406,6 +1406,48 @@ export default function Wardrobe3D({
         zoneHighlight.userData.edges?.scale?.set(wM, hM, depthM);
         zoneHighlight.position.set(cx, cy, zPos);
         zoneHighlight.visible = true;
+
+        // Показываем цифры расстояний от стенок (как при placement).
+        // Для горизонтально движущихся (X) — расстояния слева/справа,
+        // для вертикально (Y) — сверху/снизу.
+        const ghostA = ghostDimARef.current;
+        const ghostB = ghostDimBRef.current;
+        if (!ghostA || !ghostB) return;
+        let textA = "", textB = "", posA3D = null, posB3D = null;
+        if (type === "stud") {
+          // Расстояние слева и справа
+          textA = `${Math.round(x1)}`;
+          textB = `${Math.round(cW - x2)}`;
+          // Размещаем чуть выше середины стойки
+          const midY = (y1 + y2) / 2;
+          posA3D = { x: x1 / 2, y: midY, z: zPos + depthM / 2 };
+          posB3D = { x: (x2 + cW) / 2, y: midY, z: zPos + depthM / 2 };
+        } else {
+          // Для остальных — расстояния сверху и снизу
+          textA = `${Math.round(y1)}`;
+          textB = `${Math.round(cH - y2)}`;
+          const midX = (x1 + x2) / 2;
+          posA3D = { x: midX, y: y1 / 2, z: zPos + depthM / 2 };
+          posB3D = { x: midX, y: (y2 + cH) / 2, z: zPos + depthM / 2 };
+        }
+        // Проецируем на экран
+        const projFn = stateRef.current.projectToScreen;
+        if (projFn && posA3D && posB3D) {
+          const pA = projFn(posA3D.x, posA3D.y, posA3D.z);
+          const pB = projFn(posB3D.x, posB3D.y, posB3D.z);
+          if (pA?.visible) {
+            ghostA.style.display = "";
+            ghostA.style.left = `${pA.px}px`;
+            ghostA.style.top = `${pA.py}px`;
+            if (!ghostA.querySelector("input")) ghostA.textContent = textA;
+          } else { ghostA.style.display = "none"; }
+          if (pB?.visible) {
+            ghostB.style.display = "";
+            ghostB.style.left = `${pB.px}px`;
+            ghostB.style.top = `${pB.py}px`;
+            if (!ghostB.querySelector("input")) ghostB.textContent = textB;
+          } else { ghostB.style.display = "none"; }
+        }
       };
       const updateZoneHighlight = (clientX, clientY) => {
         const { placeMode: pm, findDoorBounds: fdb, iW: cW, iH: cH, t: ct } = propsRef.current;
@@ -1790,10 +1832,34 @@ export default function Wardrobe3D({
               if (orig?.w) upd.w = orig.w;
               if (orig?.h) upd.h = orig.h;
             }
+            // Для ящиков: после переноса в новый проем подгоняем ширину
+            // под расстояние между ближайшими стойками (как при placement).
+            if (dragType === "drawers") {
+              const fdb = propsRef.current.findDoorBounds;
+              const ct = propsRef.current.t;
+              const orig = propsRef.current.drag3d?.origEl || {};
+              const newX = upd.x ?? orig.x ?? 0;
+              const newY = upd.y ?? orig.y ?? 0;
+              const cyMm = newY + (orig.h || 450) / 2;
+              const cxMm = newX + (orig.w || 400) / 2;
+              if (fdb) {
+                const bounds = fdb(cxMm, cyMm);
+                if (bounds) {
+                  // Левый край ящика: после левой стойки (если она есть, не стенка)
+                  const innerLeft = bounds.left.x + (bounds.left.isWall ? 0 : ct);
+                  const innerRight = bounds.right.x;
+                  const innerW = Math.max(100, innerRight - innerLeft);
+                  upd.x = innerLeft;
+                  upd.w = innerW;
+                }
+              }
+            }
             updateEl(pending.id, upd);
           }
           stateRef.current.drag3dPending = null;
           zoneHighlight.visible = false;
+          if (ghostDimARef.current) ghostDimARef.current.style.display = "none";
+          if (ghostDimBRef.current) ghostDimBRef.current.style.display = "none";
           setDrag3d(null);
           return;
         }
@@ -2208,11 +2274,12 @@ export default function Wardrobe3D({
           </div>
         </div>
 
-        {/* Toolbar — добавить элементы (открывает placeMode в 2D, затем клик в зону) */}
-        {onAddElement && (
+        {/* Toolbar — добавить элементы. На мобильном скрыт: его заменяет FAB ("+")
+            справа внизу canvas. На десктопе остаётся в шапке. */}
+        {onAddElement && !isMobile && (
           <div style={{
             display: "flex", alignItems: "center", gap: 4,
-            flex: isMobile ? "0 0 auto" : "initial",
+            flex: "initial",
           }}>
             {[
               { type: "shelf",   icon: "━", label: "Полка"  },
@@ -2238,25 +2305,28 @@ export default function Wardrobe3D({
                 title={`Добавить: ${it.label}`}
               >
                 <span style={{ fontSize: 13 }}>{it.icon}</span>
-                {!isMobile && <span>+ {it.label}</span>}
+                <span>+ {it.label}</span>
               </button>
             ))}
           </div>
         )}
 
-        <button onClick={onClose} style={{
-          padding: "6px 16px", borderRadius: 6, fontSize: 12, fontWeight: 700,
-          cursor: "pointer",
-          border: "1px solid rgba(96,165,250,0.3)",
-          background: "rgba(96,165,250,0.08)",
-          color: "#60a5fa",
-          fontFamily: "'IBM Plex Mono',monospace",
-          transition: "all 0.15s",
-        }}
-          onMouseEnter={e => { e.target.style.background = "rgba(96,165,250,0.2)"; }}
-          onMouseLeave={e => { e.target.style.background = "rgba(96,165,250,0.08)"; }}
-          title="Переключиться на классический 2D-редактор"
-        >📐 2D</button>
+        {/* Кнопка 2D — на десктопе в шапке справа, на мобильном переехала в угол canvas (см. ниже) */}
+        {!isMobile && (
+          <button onClick={onClose} style={{
+            padding: "6px 16px", borderRadius: 6, fontSize: 12, fontWeight: 700,
+            cursor: "pointer",
+            border: "1px solid rgba(96,165,250,0.3)",
+            background: "rgba(96,165,250,0.08)",
+            color: "#60a5fa",
+            fontFamily: "'IBM Plex Mono',monospace",
+            transition: "all 0.15s",
+          }}
+            onMouseEnter={e => { e.target.style.background = "rgba(96,165,250,0.2)"; }}
+            onMouseLeave={e => { e.target.style.background = "rgba(96,165,250,0.08)"; }}
+            title="Переключиться на классический 2D-редактор"
+          >📐 2D</button>
+        )}
       </div>
 
       {/* BODY: 3D canvas + right panel (desktop) или bottom sheet (mobile) */}
@@ -2371,6 +2441,30 @@ export default function Wardrobe3D({
               transition: "all 150ms",
             }}
           >📏</button>
+
+          {/* Кнопка 2D-редактора — на мобильном переехала в верхний угол canvas
+              рядом с «Размеры», шапка стала компактнее (там FAB вместо 6 кнопок) */}
+          {isMobile && onClose && (
+            <button
+              onClick={onClose}
+              title="Переключиться на классический 2D-редактор"
+              style={{
+                position: "absolute", top: 12, left: 56,
+                width: 48, height: 36, borderRadius: 6,
+                padding: 0,
+                cursor: "pointer",
+                border: "1px solid rgba(96,165,250,0.4)",
+                background: "rgba(96,165,250,0.15)",
+                color: "#60a5fa",
+                fontSize: 11, fontWeight: 700,
+                fontFamily: "'IBM Plex Mono', monospace",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                gap: 3,
+                zIndex: 9,
+                pointerEvents: "auto",
+              }}
+            >📐 2D</button>
+          )}
 
           {/* Индикатор активного placeMode — поверх 3D, сверху */}
           {placeMode && (
@@ -2649,8 +2743,9 @@ export default function Wardrobe3D({
         </div>
 
         {/* Панель свойств — появляется при выделении элемента.
-            В placeMode скрыта чтобы не загораживать подсветку зоны постановки. */}
-        {selEl && !placeMode && (
+            В placeMode скрыта чтобы не загораживать подсветку зоны постановки.
+            При drag3d — тоже скрыта, иначе закрывает шкаф и не видно куда тащить. */}
+        {selEl && !placeMode && !drag3d && (
           <PropsPanel3D
             selEl={selEl}
             updateEl={updateEl}
