@@ -218,14 +218,16 @@ function placeDrawers(p: {
   if (innerW < 100 || maxH < 100) {
     return null;
   }
-  const h = Math.min(450, maxH);
+  // По умолчанию ящики занимают ВСЮ доступную высоту проема (а не только 450мм).
+  // Если нужно меньше — пользователь подгоняет в PropsPanel или drag-3d.
+  const h = maxH;
   const h1 = Math.floor(h / 3);
   const h2 = Math.floor(h / 3);
   const h3 = h - h1 - h2;
   return {
     element: {
       id, type: "drawers",
-      x: innerLeft, y: botY - h, w: innerW, h,
+      x: innerLeft, y: topY, w: innerW, h,
       count: 3, guideType: "roller",
       drawerHeights: [h1, h2, h3],
       _order: order,

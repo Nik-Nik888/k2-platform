@@ -1514,25 +1514,27 @@ export default function Wardrobe3D({
         const ghostB = ghostDimBRef.current;
         if (!ghostA || !ghostB) return;
         let textA = "", textB = "", posA3D = null, posB3D = null;
-        // Размеры показывают расстояние в МИЛЛИМЕТРАХ корпуса от ближайших стенок,
-        // а позиция badge на экране — это 3D координаты сцены.
-        // Конвертация: 3D x = (mm - cW/2) * S, 3D y = (cH/2 - mm) * S, z как есть.
+        // Размеры показывают расстояние в МИЛЛИМЕТРАХ корпуса от ближайших стенок.
+        // Позицию badge на экране проецируем из 3D world coords:
+        // - x = (mm - cW/2) × S
+        // - y = (cH/2 - mm) × S
+        // - z = передняя грань корпуса + небольшой зазор. Это даёт стабильную проекцию
+        //   независимо от depthM/zPos конкретного типа элемента (избегаем точек за камерой).
+        const labelZ = d / 2 + 5 * S;
         if (type === "stud") {
           // Расстояние слева и справа
           textA = `${Math.round(x1)}`;
           textB = `${Math.round(cW - x2)}`;
           const midYmm = (y1 + y2) / 2;
-          // posA = середина между левой стенкой и левой гранью элемента
           posA3D = {
             x: (x1 / 2 - cW / 2) * S,
             y: (cH / 2 - midYmm) * S,
-            z: zPos + depthM / 2,
+            z: labelZ,
           };
-          // posB = середина между правой гранью элемента и правой стенкой
           posB3D = {
             x: ((x2 + cW) / 2 - cW / 2) * S,
             y: (cH / 2 - midYmm) * S,
-            z: zPos + depthM / 2,
+            z: labelZ,
           };
         } else {
           // Для остальных — расстояния сверху и снизу
@@ -1542,16 +1544,18 @@ export default function Wardrobe3D({
           posA3D = {
             x: (midXmm - cW / 2) * S,
             y: (cH / 2 - y1 / 2) * S,
-            z: zPos + depthM / 2,
+            z: labelZ,
           };
           posB3D = {
             x: (midXmm - cW / 2) * S,
             y: (cH / 2 - (y2 + cH) / 2) * S,
-            z: zPos + depthM / 2,
+            z: labelZ,
           };
         }
         // Проецируем на экран
         const projFn = stateRef.current.projectToScreen;
+        // Сохраняем 3D позиции для анимации (animate-loop перепроецирует при вращении)
+        stateRef.current.drag3dLabelPositions = { A: posA3D, B: posB3D };
         if (projFn && posA3D && posB3D) {
           const pA = projFn(posA3D.x, posA3D.y, posA3D.z);
           const pB = projFn(posB3D.x, posB3D.y, posB3D.z);
@@ -1981,6 +1985,7 @@ export default function Wardrobe3D({
             updateEl(pending.id, upd);
           }
           stateRef.current.drag3dPending = null;
+          stateRef.current.drag3dLabelPositions = null;
           zoneHighlight.visible = false;
           if (ghostDimARef.current) ghostDimARef.current.style.display = "none";
           if (ghostDimBRef.current) ghostDimBRef.current.style.display = "none";
@@ -2276,6 +2281,33 @@ export default function Wardrobe3D({
         if (dimFrameSkip === 0) {
           updateDimLabels();
           updateEditDimLabels();
+          // Перепроецирование цифр drag3d при вращении сцены — позиции 3D
+          // фиксированы в drag3dPositions, но screen координата меняется.
+          const dragPos = stateRef.current.drag3dLabelPositions;
+          if (dragPos && propsRef.current.drag3d) {
+            const ghostA = ghostDimARef.current;
+            const ghostB = ghostDimBRef.current;
+            if (ghostA && dragPos.A) {
+              const pA = projectToScreen(dragPos.A.x, dragPos.A.y, dragPos.A.z);
+              if (pA?.visible) {
+                ghostA.style.display = "";
+                ghostA.style.left = `${pA.px}px`;
+                ghostA.style.top = `${pA.py}px`;
+              } else {
+                ghostA.style.display = "none";
+              }
+            }
+            if (ghostB && dragPos.B) {
+              const pB = projectToScreen(dragPos.B.x, dragPos.B.y, dragPos.B.z);
+              if (pB?.visible) {
+                ghostB.style.display = "";
+                ghostB.style.left = `${pB.px}px`;
+                ghostB.style.top = `${pB.py}px`;
+              } else {
+                ghostB.style.display = "none";
+              }
+            }
+          }
         }
       };
       animate();

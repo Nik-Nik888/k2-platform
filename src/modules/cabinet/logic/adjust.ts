@@ -245,8 +245,22 @@ export function adjust(els: any[], iW: number, iH: number, t: number): any[] {
             if (shTop >= elMidY && shTop < botBound) botBound = shTop;
           });
           const availH = botBound - topBound;
+          const elY = el.y || 0;
+          const elBot = elY + elH;
+          // Если ящики УЖЕ помещаются в [topBound..botBound] — не пересчитываем drawerHeights.
+          // Это критично: пользователь правит высоту ящика, нам не нужно её обнулять
+          // при каждом adjust(). Пересчёт срабатывает только если ящики реально вылезли.
+          if (elY >= topBound - 1 && elBot <= botBound + 1) {
+            return {
+              ...el,
+              x: innerLeft, w: innerW,
+              y: elY, h: elH,
+              drawerHeights: el.drawerHeights,
+            };
+          }
+          // Только если ящики выходят за границы — клампим и пересчитываем drawerHeights
           const newH = Math.max(60, Math.min(elH, availH));
-          let newY = el.y || 0;
+          let newY = elY;
           if (newY < topBound) newY = topBound;
           if (newY + newH > botBound) newY = botBound - newH;
           const oldTotal = elH;
