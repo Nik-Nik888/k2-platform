@@ -299,7 +299,8 @@ export default function Wardrobe3D({
   // B = значение сзади (до задней стенки)
   const editableZ = selEl && (
     (selEl.type === "panel" && selEl.panelType === "insert") ||
-    selEl.type === "rod"
+    selEl.type === "rod" ||
+    selEl.type === "drawers"
   );
 
   const toggleEditSide = () => {
@@ -329,6 +330,16 @@ export default function Wardrobe3D({
       return;
     }
     const { depth: D } = corpus;
+
+    // Для ящиков значение в input — это ГЛУБИНА ящика (метабокса), не позиция.
+    // Кламп в [200, D - 50] — стандартные глубины ящиков.
+    if (selEl.type === "drawers") {
+      const newDepth = Math.max(200, Math.min(D - 50, parsed));
+      updateEl(selEl.id, { depth: newDepth });
+      cancelEdit();
+      return;
+    }
+
     // Толщина элемента по Z
     let objT;
     if (selEl.type === "panel") {
@@ -925,7 +936,12 @@ export default function Wardrobe3D({
         const DRAWER_SIDE_T = 12 * S;  // 12mm drawer side thickness
         const DRAWER_BOTTOM_T = 3 * S;  // 3mm ХДФ bottom
         const FACADE_GAP = 4 * S;       // 4mm gap between facade panels
-        const DRAWER_DEPTH = d * 0.72;  // drawer box depth
+        // Глубина ящика — пользователь может задать через el.depth (мм).
+        // По умолчанию 72% от глубины корпуса (стандарт для метабокса/тандембокса).
+        const drawerDepthMm = (typeof el.depth === "number" && el.depth > 0)
+          ? el.depth
+          : (corpus.depth || 600) * 0.72;
+        const DRAWER_DEPTH = drawerDepthMm * S;
 
         for (let i = 0; i < cnt; i++) {
           const dh = heights[i] || 150;
@@ -1422,12 +1438,13 @@ export default function Wardrobe3D({
           nextEl.x = nx; nextEl.y = ny; nextEl.w = w;
           x1 = nx; x2 = nx + w; y1 = ny; y2 = ny + h;
         } else if (type === "panel") {
-          // Панель — авто-подгонка под нишу как ящики/полка.
-          // Insert-панель занимает ширину ниши между стойками.
+          // Панель — авто-подгонка под нишу только для insert (вкладной).
+          // Накладная (overlay) сохраняет свою ширину — она перекрывает стойки.
           const h = orig.h || 600;
+          const isInsert = orig.panelType === "insert";
           const { findDoorBounds: fdb } = propsRef.current;
           let nx, w;
-          if (fdb) {
+          if (isInsert && fdb) {
             const bounds = fdb(cx, cy);
             const left = bounds?.left?.x ?? 0;
             const right = bounds?.right?.x ?? cW;
@@ -1435,6 +1452,7 @@ export default function Wardrobe3D({
             nx = lWall ? left : left + ct;
             w = Math.max(20, right - nx);
           } else {
+            // Overlay или нет fdb — сохраняем оригинальную ширину
             w = orig.w || 400;
             nx = Math.max(0, Math.min(cW - w, cx - w / 2));
           }
@@ -1915,10 +1933,13 @@ export default function Wardrobe3D({
             }
             // Для ящиков: после переноса в новый проем подгоняем ширину
             // под расстояние между ближайшими стойками (как при placement).
-            if (dragType === "drawers" || dragType === "panel") {
+            // Для панели — только если она insert (вкладная). Накладные (overlay)
+            // сохраняют свои размеры — они перекрывают стойки и вписаны вручную.
+            const orig = propsRef.current.drag3d?.origEl || {};
+            const isInsertPanel = dragType === "panel" && (orig.panelType === "insert");
+            if (dragType === "drawers" || isInsertPanel) {
               const fdb = propsRef.current.findDoorBounds;
               const ct = propsRef.current.t;
-              const orig = propsRef.current.drag3d?.origEl || {};
               const defaultH = dragType === "drawers" ? 450 : 600;
               const defaultW = dragType === "drawers" ? 400 : 400;
               const newX = upd.x ?? orig.x ?? 0;
@@ -3353,6 +3374,58 @@ function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, isMobile })
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <NumField label="Кол-во" value={selEl.count ?? 3} min={1} max={10}
             onChange={v => updateEl(selEl.id, { count: v })}
+          />
+          {/* Высоты отдельных ящиков. Сумма должна равняться h блока. */}
+          <div>
+            <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase",
+              letterSpacing: "0.05em", marginBottom: 6, fontFamily: "'IBM Plex Mono',monospace" }}>
+              Высоты ящиков (мм)
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {(() => {
+                const cnt = selEl.count ?? 3;
+                const heights = selEl.drawerHeights ?? Array(cnt).fill(Math.floor((selEl.h ?? 450) / cnt));
+                return heights.map((h, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 10, color: "#888", minWidth: 50,
+                      fontFamily: "'IBM Plex Mono',monospace" }}>
+                      Ящик {i + 1}:
+                    </span>
+                    <input
+                      type="number"
+                      value={h}
+                      min={50}
+                      max={500}
+                      onChange={e => {
+                        const newH = parseInt(e.target.value) || 50;
+                        const newHeights = [...heights];
+                        newHeights[i] = newH;
+                        updateEl(selEl.id, { drawerHeights: newHeights });
+                      }}
+                      style={{
+                        flex: 1, padding: "4px 8px", fontSize: 11,
+                        background: "#0b0c10", color: "#fff",
+                        border: "1px solid #333", borderRadius: 3,
+                        fontFamily: "'IBM Plex Mono',monospace",
+                        outline: "none",
+                      }}
+                    />
+                  </div>
+                ));
+              })()}
+            </div>
+            <div style={{ fontSize: 9, color: "#555", marginTop: 4,
+              fontFamily: "'IBM Plex Mono',monospace" }}>
+              Сумма: {(selEl.drawerHeights ?? []).reduce((a, b) => a + b, 0) || selEl.h} мм
+            </div>
+          </div>
+          {/* Глубина блока — длина выдвижения */}
+          <NumField
+            label="Глубина (мм)"
+            value={selEl.depth ?? Math.round((iW > 0 ? 600 : 600) * 0.72)}
+            min={200}
+            max={800}
+            onChange={v => updateEl(selEl.id, { depth: v })}
           />
           <div style={{ fontSize: 10, color: "#666" }}>
             Проём: {Math.round(selEl.x ?? 0)}..{Math.round((selEl.x ?? 0) + (selEl.w ?? iW))} × {Math.round(selEl.pTop ?? 0)}..{Math.round(selEl.pBot ?? iH)}
