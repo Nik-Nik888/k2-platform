@@ -888,6 +888,7 @@ export default function WardrobeEditor() {
 
       {show3d && <Wardrobe3D
         corpus={corpus}
+        setCorpus={setCorpus}
         elements={elements}
         corpusTexture={corpusTexInfo}
         facadeTexture={facadeTexInfo}

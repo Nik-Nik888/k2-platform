@@ -94,7 +94,7 @@ function createLDSPPanel(pw, ph, pd, mat, edgeMat, edgeBand = {}, grainDir = "h"
 }
 
 export default function Wardrobe3D({
-  corpus, elements, corpusTexture, facadeTexture,
+  corpus, setCorpus, elements, corpusTexture, facadeTexture,
   showDoors = true, showCorpus = true,
   onClose,
   // Интерактивный режим
@@ -150,6 +150,8 @@ export default function Wardrobe3D({
   // { side: "A"|"B" } определяет от какой стенки считать. После Enter из popup
   // элемент встаёт на введённое расстояние и drag завершается.
   const [drag3dInput, setDrag3dInput] = useState(null);
+  // Какой размер корпуса сейчас редактируется ("width" | "height" | "depth" | null)
+  const [corpusEditDim, setCorpusEditDim] = useState(null);
 
   // ═══ Ghost-dim input state (Этап 1-3: стойка/полка/штанга при постановке) ═══
   // Когда пользователь активирует ввод цифры (Space) — она открывается в МОДАЛЬНОМ POPUP
@@ -2924,17 +2926,35 @@ export default function Wardrobe3D({
             }}
             width="100%" height="100%"
           >
-            {dimsData.map(d => (
-              <g key={d.key} data-dim-key={d.key} style={{ display: "none" }}>
-                {/* Выносные линии (extension lines) — от точки шкафа до размерной линии */}
-                <line data-ext="1" stroke="#94a3b8" strokeWidth="1" opacity="0.7" />
-                <line data-ext="2" stroke="#94a3b8" strokeWidth="1" opacity="0.7" />
-                {/* Размерная линия с рисками */}
-                <line data-dim-line="1" stroke="#cbd5e1" strokeWidth="1.3" markerStart="url(#dim-tick)" markerEnd="url(#dim-tick)" />
-                {/* Текст (число) поверх линии */}
-                <text data-dim-text="1" fill="#e2e8f0" fontSize="13" fontFamily="'IBM Plex Mono', monospace" fontWeight="700" textAnchor="middle" dominantBaseline="central" stroke="#08090c" strokeWidth="3" paintOrder="stroke" />
-              </g>
-            ))}
+            {dimsData.map(d => {
+              // Общие габариты корпуса (W/H/D) — кликабельные для редактирования.
+              // Тап на цифру → popup с input → setCorpus({ ширина/высота/глубина })
+              const isCorpusDim = d.key === "total-w" || d.key === "total-h" || d.key === "total-d";
+              return (
+                <g key={d.key} data-dim-key={d.key} style={{ display: "none" }}>
+                  <line data-ext="1" stroke="#94a3b8" strokeWidth="1" opacity="0.7" />
+                  <line data-ext="2" stroke="#94a3b8" strokeWidth="1" opacity="0.7" />
+                  <line data-dim-line="1" stroke="#cbd5e1" strokeWidth="1.3" markerStart="url(#dim-tick)" markerEnd="url(#dim-tick)" />
+                  <text
+                    data-dim-text="1"
+                    fill={isCorpusDim ? "#fbbf24" : "#e2e8f0"}
+                    fontSize="13"
+                    fontFamily="'IBM Plex Mono', monospace"
+                    fontWeight="700"
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    stroke="#08090c"
+                    strokeWidth="3"
+                    paintOrder="stroke"
+                    style={isCorpusDim && setCorpus ? { cursor: "pointer", pointerEvents: "auto" } : undefined}
+                    onClick={isCorpusDim && setCorpus ? (() => {
+                      const dim = d.key === "total-w" ? "width" : d.key === "total-h" ? "height" : "depth";
+                      setCorpusEditDim(dim);
+                    }) : undefined}
+                  />
+                </g>
+              );
+            })}
             {/* Snap-индикатор: жёлтые линии когда фантом прилип к соседу.
                 Обновляются в animate-loop через updateSnapIndicator. */}
             <line data-snap-line="x" stroke="#fbbf24" strokeWidth="1" strokeDasharray="4,3" opacity="0.85" style={{ display: "none" }} />
@@ -3291,6 +3311,33 @@ export default function Wardrobe3D({
               hint={drag3dInput.side === "A"
                 ? "расстояние от верхней/левой стенки"
                 : "расстояние от нижней/правой стенки"}
+            />
+          )}
+
+          {/* Popup для редактирования общих габаритов корпуса (W/H/D).
+              Тап на жёлтую цифру 1200/2100/600 → этот popup. */}
+          {corpusEditDim && setCorpus && (
+            <LockInputPopup
+              key={`corpus-${corpusEditDim}`}
+              title={
+                corpusEditDim === "width" ? "Ширина шкафа"
+                : corpusEditDim === "height" ? "Высота шкафа"
+                : "Глубина шкафа"
+              }
+              side="A"
+              initialValue={String(corpus[corpusEditDim] ?? 0)}
+              maxValue={5000}
+              onCommit={(val) => {
+                const v = parseFloat(val);
+                if (Number.isFinite(v) && v >= 100) {
+                  // Минимум 100мм, максимум 5000мм
+                  const clamped = Math.max(100, Math.min(5000, Math.round(v)));
+                  setCorpus(c => ({ ...c, [corpusEditDim]: clamped }));
+                }
+                setCorpusEditDim(null);
+              }}
+              onCancel={() => setCorpusEditDim(null)}
+              hint="мм"
             />
           )}
 
