@@ -1420,7 +1420,17 @@ export default function Wardrobe3D({
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    mountRef.current.innerHTML = "";
+    // Anti-flicker: НЕ очищаем mount через innerHTML="". Запоминаем старые
+    // canvas — они остаются видимыми (preserveDrawingBuffer хранит последний
+    // кадр) пока новый build не отрендерит первый кадр. После первого render
+    // в animate-loop старые canvas удаляются.
+    // Новый canvas позиционируем absolute поверх старых.
+    const oldCanvases = Array.from(mountRef.current.querySelectorAll("canvas"));
+    renderer.domElement.style.position = "absolute";
+    renderer.domElement.style.top = "0";
+    renderer.domElement.style.left = "0";
+    renderer.domElement.style.width = "100%";
+    renderer.domElement.style.height = "100%";
     mountRef.current.appendChild(renderer.domElement);
 
     // ═══ ZONE HIGHLIGHT — полный силуэт будущего элемента в 3D ═══
@@ -2726,6 +2736,14 @@ export default function Wardrobe3D({
         );
         camera.lookAt(0, 0, 0);
         renderer.render(scene, camera);
+        // Anti-flicker: после первого рендера новой сцены удаляем старые canvas.
+        // Это даёт плавный переход без чёрного промежутка.
+        if (oldCanvases.length > 0) {
+          for (const c of oldCanvases) {
+            try { c.parentNode?.removeChild(c); } catch {}
+          }
+          oldCanvases.length = 0;
+        }
         // Обновляем подписи (throttle через frame skip)
         dimFrameSkip = (dimFrameSkip + 1) % 2;
         if (dimFrameSkip === 0) {
@@ -2950,10 +2968,9 @@ export default function Wardrobe3D({
         // после нескольких переключений упирается в лимит (обычно 16 контекстов).
         renderer.forceContextLoss?.();
 
-        // Убираем canvas из DOM, чтобы React не хранил ссылку на старый элемент.
-        if (renderer.domElement?.parentNode) {
-          renderer.domElement.parentNode.removeChild(renderer.domElement);
-        }
+        // Anti-flicker: НЕ удаляем canvas из DOM здесь. Он останется видимым
+        // (preserveDrawingBuffer хранит последний кадр) пока новый build не
+        // отрендерит первый кадр и не удалит старые canvas сам через oldCanvases.
       };
     });
 
@@ -3025,6 +3042,7 @@ export default function Wardrobe3D({
         <div style={{ flex: 1, position: "relative", minHeight: 0, minWidth: 0 }}>
           <div ref={mountRef} style={{
             width: "100%", height: "100%",
+            position: "relative",  // нужно для absolute canvas (anti-flicker)
             cursor: placeMode ? "crosshair" : "grab",
           }} />
 
@@ -4217,10 +4235,13 @@ function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, D, isMobile
         }}>
           {PLACE_LABELS[selEl.type] || selEl.type}
         </div>
-        <button onClick={onClose} style={{
-          background: "none", border: "none", color: "#666",
-          fontSize: 16, cursor: "pointer", padding: "2px 8px",
-        }} title="Снять выделение">✕</button>
+        {/* ✕ скрываем внутри modal — у modal есть свой ✕ в заголовке */}
+        {!inModal && (
+          <button onClick={onClose} style={{
+            background: "none", border: "none", color: "#666",
+            fontSize: 16, cursor: "pointer", padding: "2px 8px",
+          }} title="Снять выделение">✕</button>
+        )}
       </div>
 
       {/* SHELF */}
@@ -4418,17 +4439,20 @@ function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, D, isMobile
         </div>
       )}
 
-      {/* Delete button */}
-      <button
-        onClick={delSel}
-        style={{
-          marginTop: 20, width: "100%", padding: "10px 0",
-          background: "rgba(239,68,68,0.1)", color: "#ef4444",
-          border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4,
-          fontSize: 12, fontWeight: 700, cursor: "pointer",
-          fontFamily: "'IBM Plex Mono',monospace",
-        }}
-      >🗑 Удалить</button>
+      {/* Delete button — скрываем когда panel внутри modal: там есть свои
+          нижние кнопки Удалить/Дублировать в footer modal'а. */}
+      {!inModal && (
+        <button
+          onClick={delSel}
+          style={{
+            marginTop: 20, width: "100%", padding: "10px 0",
+            background: "rgba(239,68,68,0.1)", color: "#ef4444",
+            border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4,
+            fontSize: 12, fontWeight: 700, cursor: "pointer",
+            fontFamily: "'IBM Plex Mono',monospace",
+          }}
+        >🗑 Удалить</button>
+      )}
     </div>
   );
 }
