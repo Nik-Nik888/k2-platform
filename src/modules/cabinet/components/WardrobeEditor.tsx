@@ -573,21 +573,28 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
   } = useMobileTouch(userZoom, setUserZoom, setDrag);
 
   // ═══ Auto-save ═══
-  // Сохраняем шкаф в Supabase через 1.5с после последнего изменения.
+  // Сохраняем шкаф в Supabase через 5с после последнего изменения.
   // Первое сохранение создаёт запись (createCabinet), последующие — updateCabinet.
-  // Состояние отображается в шапке (idle/saving/saved/error).
+  // Индикатор «сохранено ✓» показываем только если сохранение длилось >300мс
+  // (быстрые сохранения не моргают индикатором).
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipFirstSaveRef = useRef(true);
   useEffect(() => {
-    // Первый рендер — initial state, не сохраняем (это либо пустой draft,
-    // либо уже загруженные данные из БД).
     if (skipFirstSaveRef.current) {
       skipFirstSaveRef.current = false;
       return;
     }
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
-      setSaveState("saving");
+      const startMs = Date.now();
+      // setSaveState("saving") НЕ вызываем сразу — иначе "saving" моргнёт даже
+      // при быстрых сохранениях. Покажем "saving" только если сохранение
+      // длится дольше 300мс.
+      let savingShown = false;
+      const showSavingTimer = setTimeout(() => {
+        savingShown = true;
+        setSaveState("saving");
+      }, 300);
       try {
         if (currentCabinetId) {
           await updateCabinet(currentCabinetId, {
@@ -599,7 +606,6 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
             client_id: clientId,
           });
         } else {
-          // Первое сохранение — создаём
           const row = await createCabinet({
             name: cabinetName,
             corpus,
@@ -611,14 +617,21 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
           setCurrentCabinetId(row.id);
           if (onCreated) onCreated(row.id);
         }
-        setSaveState("saved");
-        // Через 2с возвращаем в idle, чтобы плашка не висела вечно
-        setTimeout(() => setSaveState(s => s === "saved" ? "idle" : s), 2000);
+        clearTimeout(showSavingTimer);
+        // Показываем "сохранено" только если "saving" уже было показано
+        // или сохранение длилось дольше 300мс.
+        if (savingShown || Date.now() - startMs > 300) {
+          setSaveState("saved");
+          setTimeout(() => setSaveState(s => s === "saved" ? "idle" : s), 1500);
+        } else {
+          setSaveState("idle");
+        }
       } catch (err) {
+        clearTimeout(showSavingTimer);
         console.error("Cabinet save failed:", err);
         setSaveState("error");
       }
-    }, 1500);
+    }, 5000);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
