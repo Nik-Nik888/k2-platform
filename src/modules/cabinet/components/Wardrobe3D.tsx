@@ -226,6 +226,7 @@ export default function Wardrobe3D({
       if (closureId) {
         stateRef.current.drag3dPending = null;
         stateRef.current.drag3dLabelPositions = null;
+        stateRef.current.activeSnap = null;
         const zh = stateRef.current.zoneHighlight;
         if (zh) zh.visible = false;
         if (ghostDimARef.current) ghostDimARef.current.style.display = "none";
@@ -1478,13 +1479,144 @@ export default function Wardrobe3D({
       // последующего updateEl при отпускании (onPointerUp).
       // Фантом отрисовывается через zoneHighlight — такой же жёлтый прямоугольник
       // как при placement, но для уже существующего элемента.
+      // ── Snap к соседним элементам ──
+      // Собирает значения координат соседей которые могут «притянуть» фантом.
+      // Возвращает { value, snapTo } — value: финальная координата, snapTo: target
+      // или null если не притянулось. SNAP_MAGNET = 15мм — расстояние срабатывания.
+      const SNAP_MAGNET = 15;
+      const applySnap = (value: number, targets: number[]): { value: number, snapTo: number | null } => {
+        if (!targets.length) return { value, snapTo: null };
+        let best = null;
+        let bestDist = SNAP_MAGNET;
+        for (const t of targets) {
+          const d = Math.abs(value - t);
+          if (d < bestDist) {
+            bestDist = d;
+            best = t;
+          }
+        }
+        return best !== null ? { value: best, snapTo: best } : { value, snapTo: null };
+      };
+
+      // Сбор snap-targets для drag элемента draggedId.
+      // Для X (стойка/дверь/панель/ящики): собираем x-границы всех других стоек,
+      // двери, панели, ящиков + центры между ними.
+      // Для Y (полка/штанга/ящики/дверь/панель): собираем y-границы полок,
+      // штанг, ящиков (верх/низ блока).
+      const collectSnapTargets = (draggedId: string, axis: "x" | "y") => {
+        const { elements: els, t: ct, iW: cW, iH: cH } = propsRef.current;
+        const targets: number[] = [];
+        // Стенки корпуса всегда — целевые границы
+        if (axis === "x") {
+          targets.push(0, cW);
+        } else {
+          targets.push(0, cH);
+        }
+        for (const el of els) {
+          if (!el || el.id === draggedId) continue;
+          if (axis === "x") {
+            // Стойки — обе грани и центр
+            if (el.type === "stud") {
+              const sx = el.x ?? 0;
+              targets.push(sx, sx + ct, sx + ct / 2);
+            }
+            // Двери/панели/ящики — обе грани (левая/правая)
+            if (el.type === "door" || el.type === "panel" || el.type === "drawers") {
+              const ex = el.x ?? 0;
+              const ew = el.w ?? 0;
+              targets.push(ex, ex + ew);
+            }
+          } else {
+            // Полки — y центра + верх/низ полки (учитывая толщину t)
+            if (el.type === "shelf") {
+              const sy = el.y ?? 0;
+              targets.push(sy, sy - ct / 2, sy + ct / 2);
+            }
+            // Штанга — центр
+            if (el.type === "rod") {
+              targets.push(el.y ?? 0);
+            }
+            // Ящики/двери/панели — верх/низ блока
+            if (el.type === "drawers" || el.type === "door" || el.type === "panel") {
+              const ey = el.y ?? 0;
+              const eh = el.h ?? 0;
+              targets.push(ey, ey + eh);
+            }
+            // Ящики — внутренние границы между ящиками (для прилипания
+            // полки на уровень разделителя в соседнем блоке)
+            if (el.type === "drawers" && el.drawerHeights) {
+              let y = el.y ?? 0;
+              for (const h of el.drawerHeights) {
+                y += h;
+                targets.push(y);
+              }
+            }
+          }
+        }
+        return targets;
+      };
+
       const moveDraggedElement3D = (d3d, clickX, clickY) => {
         const { iW: cW, iH: cH, t: ct } = propsRef.current;
         const SNAP = 10;
-        const cx = Math.round(clickX / SNAP) * SNAP;
-        const cy = Math.round(clickY / SNAP) * SNAP;
+        let cx = Math.round(clickX / SNAP) * SNAP;
+        let cy = Math.round(clickY / SNAP) * SNAP;
         const { type, origEl } = d3d;
         const orig = origEl || {};
+        // Применяем snap к соседям. Сохраняем активные snap-цели для визуала
+        // (тонкая жёлтая линия от фантома к target).
+        const activeSnap: { x: number | null, y: number | null } = { x: null, y: null };
+        // Рассчитываем КЛЮЧЕВЫЕ координаты (грани/центр элемента) и снапим их к target'ам.
+        // Для стойки snap-цель = центр стойки (cx уже центр в мм). Для полки
+        // snap = y-середина полки. Для ящиков/двери — левый/верхний край.
+        if (type === "stud") {
+          // Snap по центру стойки к границам других стоек / стенкам / центрам ниш
+          const targets = collectSnapTargets(d3d.id, "x");
+          const r = applySnap(cx, targets);
+          cx = r.value;
+          activeSnap.x = r.snapTo;
+        } else if (type === "shelf" || type === "rod") {
+          const targets = collectSnapTargets(d3d.id, "y");
+          const r = applySnap(cy, targets);
+          cy = r.value;
+          activeSnap.y = r.snapTo;
+        } else if (type === "drawers" || type === "door" || type === "panel") {
+          // Для блоков с w/h snap по обеим осям. Снапим ЛЕВУЮ грань (cx - w/2)
+          // к target'ам — это даёт прилипание встык к стойкам и соседям.
+          const w = orig.w || (type === "drawers" ? 400 : 400);
+          const h = orig.h || (type === "drawers" ? 450 : 600);
+          const tX = collectSnapTargets(d3d.id, "x");
+          const leftEdge = cx - w / 2;
+          const rX = applySnap(leftEdge, tX);
+          if (rX.snapTo !== null) {
+            cx = rX.value + w / 2; // двигаем так чтобы левая грань = snap
+            activeSnap.x = rX.snapTo;
+          } else {
+            // Пробуем правую грань
+            const rightEdge = cx + w / 2;
+            const rR = applySnap(rightEdge, tX);
+            if (rR.snapTo !== null) {
+              cx = rR.value - w / 2;
+              activeSnap.x = rR.snapTo;
+            }
+          }
+          const tY = collectSnapTargets(d3d.id, "y");
+          const topEdge = cy - h / 2;
+          const rY = applySnap(topEdge, tY);
+          if (rY.snapTo !== null) {
+            cy = rY.value + h / 2;
+            activeSnap.y = rY.snapTo;
+          } else {
+            const bottomEdge = cy + h / 2;
+            const rB = applySnap(bottomEdge, tY);
+            if (rB.snapTo !== null) {
+              cy = rB.value - h / 2;
+              activeSnap.y = rB.snapTo;
+            }
+          }
+        }
+        // Сохраняем snap-цели для рендера индикатора (жёлтая линия)
+        stateRef.current.activeSnap = activeSnap;
         // Рассчитываем новое положение в терминах (x1, y1, x2, y2) фантома
         let x1, y1, x2, y2;
         let nextEl = { ...orig };
@@ -2392,6 +2524,58 @@ export default function Wardrobe3D({
               }
             }
           }
+          // Snap-индикатор — жёлтые пунктирные линии показывающие к чему прилип фантом.
+          // Рисуем линию на передней грани шкафа через всю ширину/высоту корпуса.
+          const snapLineX = dimsOverlayRef.current?.querySelector('[data-snap-line="x"]');
+          const snapLineY = dimsOverlayRef.current?.querySelector('[data-snap-line="y"]');
+          const activeSnap = stateRef.current.activeSnap;
+          if (propsRef.current.drag3d && activeSnap) {
+            const cWmm = propsRef.current.iW;
+            const cHmm = propsRef.current.iH;
+            const Sloc = 1 / 1000;
+            const halfD = d / 2 + 5 * Sloc; // передняя грань корпуса + 5мм
+            // Snap по X — вертикальная линия через высоту корпуса
+            if (snapLineX && activeSnap.x !== null) {
+              const xWorld = (activeSnap.x - cWmm / 2) * Sloc;
+              const top3D = { x: xWorld, y: cHmm / 2 * Sloc, z: halfD };
+              const bot3D = { x: xWorld, y: -cHmm / 2 * Sloc, z: halfD };
+              const pT = projectToScreen(top3D.x, top3D.y, top3D.z);
+              const pB = projectToScreen(bot3D.x, bot3D.y, bot3D.z);
+              if (pT?.visible && pB?.visible) {
+                snapLineX.setAttribute("x1", pT.px);
+                snapLineX.setAttribute("y1", pT.py);
+                snapLineX.setAttribute("x2", pB.px);
+                snapLineX.setAttribute("y2", pB.py);
+                snapLineX.style.display = "";
+              } else {
+                snapLineX.style.display = "none";
+              }
+            } else if (snapLineX) {
+              snapLineX.style.display = "none";
+            }
+            // Snap по Y — горизонтальная линия через ширину корпуса
+            if (snapLineY && activeSnap.y !== null) {
+              const yWorld = (cHmm / 2 - activeSnap.y) * Sloc;
+              const left3D = { x: -cWmm / 2 * Sloc, y: yWorld, z: halfD };
+              const right3D = { x: cWmm / 2 * Sloc, y: yWorld, z: halfD };
+              const pL = projectToScreen(left3D.x, left3D.y, left3D.z);
+              const pR = projectToScreen(right3D.x, right3D.y, right3D.z);
+              if (pL?.visible && pR?.visible) {
+                snapLineY.setAttribute("x1", pL.px);
+                snapLineY.setAttribute("y1", pL.py);
+                snapLineY.setAttribute("x2", pR.px);
+                snapLineY.setAttribute("y2", pR.py);
+                snapLineY.style.display = "";
+              } else {
+                snapLineY.style.display = "none";
+              }
+            } else if (snapLineY) {
+              snapLineY.style.display = "none";
+            }
+          } else {
+            if (snapLineX) snapLineX.style.display = "none";
+            if (snapLineY) snapLineY.style.display = "none";
+          }
         }
       };
       animate();
@@ -2557,6 +2741,10 @@ export default function Wardrobe3D({
                 <text data-dim-text="1" fill="#e2e8f0" fontSize="13" fontFamily="'IBM Plex Mono', monospace" fontWeight="700" textAnchor="middle" dominantBaseline="central" stroke="#08090c" strokeWidth="3" paintOrder="stroke" />
               </g>
             ))}
+            {/* Snap-индикатор: жёлтые линии когда фантом прилип к соседу.
+                Обновляются в animate-loop через updateSnapIndicator. */}
+            <line data-snap-line="x" stroke="#fbbf24" strokeWidth="1" strokeDasharray="4,3" opacity="0.85" style={{ display: "none" }} />
+            <line data-snap-line="y" stroke="#fbbf24" strokeWidth="1" strokeDasharray="4,3" opacity="0.85" style={{ display: "none" }} />
             {/* Markers для рисок */}
             <defs>
               <marker id="dim-tick" viewBox="-5 -5 10 10" refX="0" refY="0" markerWidth="8" markerHeight="8" orient="auto">
