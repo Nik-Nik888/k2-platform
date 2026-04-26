@@ -141,6 +141,12 @@ export default function Wardrobe3D({
   const [showDims, setShowDims] = useState(false);
   // FAB open/close state — floating "+" button, fan menu со всеми типами элементов
   const [fabOpen, setFabOpen] = useState(false);
+  // Modal со свойствами выделенной детали. По умолчанию закрыт — показывается
+  // только маленький ⚙️ значок рядом с деталью. Тап на ⚙️ → modal открывается.
+  const [propsModalOpen, setPropsModalOpen] = useState(false);
+  // Ref на ⚙️ значок свойств — обновляем его позицию в animate-loop через
+  // projectToScreen, чтобы следовал за выделенной деталью при вращении сцены.
+  const gearBadgeRef = useRef<HTMLButtonElement | null>(null);
   // На touch: после отпускания пальца в placeMode фантом фиксируется,
   // показывается плашка с кнопкой ОК для подтверждения постановки.
   // Это даёт пользователю шанс тапнуть на жёлтую цифру и ввести точный размер
@@ -209,6 +215,8 @@ export default function Wardrobe3D({
   useEffect(() => {
     setEditDim(null);
     setEditSnapshot(null);
+    // Закрываем modal свойств — иначе свойства бывшей детали остались бы открытыми
+    setPropsModalOpen(false);
   }, [selEl?.id]);
 
   // Drag3d: скрываем меши элемента (вместо него показывается жёлтый фантом
@@ -2833,6 +2841,53 @@ export default function Wardrobe3D({
             if (snapLineX) snapLineX.style.display = "none";
             if (snapLineY) snapLineY.style.display = "none";
           }
+
+          // Обновляем позицию ⚙️ ярлычка свойств — он следует за выделенной деталью.
+          // Берём центр меша selEl, проецируем в screen, ставим над деталью.
+          const gearEl = gearBadgeRef.current;
+          const curSelId = propsRef.current.selId;
+          if (gearEl) {
+            if (curSelId && !propsRef.current.placeMode && !propsRef.current.drag3d) {
+              const meshes = elementMeshes.get(curSelId);
+              if (meshes && meshes.length > 0) {
+                // Bounding box по всем мешам элемента
+                const bbox = new THREE.Box3();
+                for (const m of meshes) {
+                  if (m.geometry) {
+                    if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+                    const mb = m.geometry.boundingBox.clone();
+                    mb.applyMatrix4(m.matrixWorld);
+                    bbox.union(mb);
+                  }
+                }
+                if (!bbox.isEmpty()) {
+                  // Центр сверху bbox: x — центр, y — top, z — front
+                  const cx = (bbox.min.x + bbox.max.x) / 2;
+                  const cyTop = bbox.max.y;
+                  const cyMid = (bbox.min.y + bbox.max.y) / 2;
+                  const czFront = bbox.max.z;
+                  // Проецируем точку «над передним верхом» в screen
+                  // Сначала пробуем сверху, если за пределами — справа от середины
+                  let p = projectToScreen(cx, cyTop, czFront);
+                  if (!p?.visible) p = projectToScreen(cx, cyMid, czFront);
+                  if (p?.visible) {
+                    gearEl.style.display = "";
+                    // Смещение чуть выше детали (-24px) чтоб не перекрывала
+                    gearEl.style.left = `${p.px}px`;
+                    gearEl.style.top = `${Math.max(20, p.py - 24)}px`;
+                  } else {
+                    gearEl.style.display = "none";
+                  }
+                } else {
+                  gearEl.style.display = "none";
+                }
+              } else {
+                gearEl.style.display = "none";
+              }
+            } else {
+              gearEl.style.display = "none";
+            }
+          }
         }
       };
       animate();
@@ -3298,11 +3353,11 @@ export default function Wardrobe3D({
             </div>
           )}
 
-          {/* Контекстное меню выделенного элемента — быстрые действия.
-              Показывается когда есть выделение И нет placeMode.
-              Плавающая плашка снизу-по-центру над canvas.
-              Не мешает PropsPanel (справа/снизу) и индикатору edit-Z (сверху). */}
-          {selEl && !placeMode && (
+          {/* Контекстное меню выделенного элемента — только кнопка «Глубина» для panel/rod.
+              Удаление/дублирование убраны — теперь они в modal-свойствах через ⚙️ ярлычок.
+              Глубина оставлена как быстрый шорткат — частое действие при редактировании
+              insert-панели и штанги. */}
+          {selEl && !placeMode && editableZ && (
             <div style={{
               position: "absolute",
               bottom: 24, left: "50%",
@@ -3311,76 +3366,31 @@ export default function Wardrobe3D({
               padding: "6px 8px",
               borderRadius: 8,
               background: "rgba(11,12,16,0.95)",
-              border: "1px solid rgba(96,165,250,0.35)",
+              border: "1px solid rgba(251,191,36,0.35)",
               boxShadow: "0 4px 14px rgba(0,0,0,0.5)",
               zIndex: 11,
               pointerEvents: "auto",
             }}>
-              {/* Удалить */}
-              {delSel && (
-                <button
-                  onClick={() => delSel()}
-                  title="Удалить элемент"
-                  style={{
-                    padding: "6px 10px", borderRadius: 5,
-                    border: "1px solid rgba(239,68,68,0.4)",
-                    background: "rgba(239,68,68,0.12)",
-                    color: "#f87171",
-                    fontSize: 11, fontWeight: 700,
-                    fontFamily: "'IBM Plex Mono',monospace",
-                    cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: 4,
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.25)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(239,68,68,0.12)"; }}
-                >
-                  🗑 Удалить
-                </button>
-              )}
-              {/* Дублировать */}
-              {onDuplicate && (
-                <button
-                  onClick={() => onDuplicate(selEl.id)}
-                  title="Создать копию рядом"
-                  style={{
-                    padding: "6px 10px", borderRadius: 5,
-                    border: "1px solid rgba(96,165,250,0.4)",
-                    background: "rgba(96,165,250,0.12)",
-                    color: "#93c5fd",
-                    fontSize: 11, fontWeight: 700,
-                    fontFamily: "'IBM Plex Mono',monospace",
-                    cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: 4,
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(96,165,250,0.25)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(96,165,250,0.12)"; }}
-                >
-                  📋 Дублировать
-                </button>
-              )}
-              {/* Глубина — только для insert-панели и штанги. Активирует edit-Z (A). */}
-              {editableZ && (
-                <button
-                  onClick={() => {
-                    setEditDim("A");
-                  }}
-                  title="Редактировать глубину (Z)"
-                  style={{
-                    padding: "6px 10px", borderRadius: 5,
-                    border: "1px solid rgba(251,191,36,0.4)",
-                    background: "rgba(251,191,36,0.12)",
-                    color: "#fcd34d",
-                    fontSize: 11, fontWeight: 700,
-                    fontFamily: "'IBM Plex Mono',monospace",
-                    cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: 4,
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(251,191,36,0.25)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(251,191,36,0.12)"; }}
-                >
-                  📏 Глубина
-                </button>
-              )}
+              <button
+                onClick={() => {
+                  setEditDim("A");
+                }}
+                title="Редактировать глубину (Z)"
+                style={{
+                  padding: "6px 10px", borderRadius: 5,
+                  border: "1px solid rgba(251,191,36,0.4)",
+                  background: "rgba(251,191,36,0.12)",
+                  color: "#fcd34d",
+                  fontSize: 11, fontWeight: 700,
+                  fontFamily: "'IBM Plex Mono',monospace",
+                  cursor: "pointer",
+                  display: "flex", alignItems: "center", gap: 4,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(251,191,36,0.25)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "rgba(251,191,36,0.12)"; }}
+              >
+                📏 Глубина
+              </button>
             </div>
           )}
 
@@ -3549,21 +3559,141 @@ export default function Wardrobe3D({
           )}
         </div>
 
-        {/* Панель свойств — появляется при выделении элемента.
-            В placeMode скрыта чтобы не загораживать подсветку зоны постановки.
-            При drag3d — тоже скрыта, иначе закрывает шкаф и не видно куда тащить. */}
-        {selEl && !placeMode && !drag3d && (
-          <PropsPanel3D
-            selEl={selEl}
-            updateEl={updateEl}
-            delSel={delSel}
-            onClose={() => onElementClick?.(null)}
-            iW={iW}
-            iH={iH}
-            t={t}
-            D={corpus?.depth}
-            isMobile={isMobile}
-          />
+        {/* ⚙️ ярлычок свойств — следует за выделенной деталью.
+            Позиция обновляется в animate-loop через projectToScreen.
+            При тапе — открывается modal со всеми свойствами + кнопками
+            удалить/дублировать. Без открытого modal никаких всегда-видимых
+            панелей нет — есть только этот маленький значок. */}
+        {selEl && !placeMode && !drag3d && !propsModalOpen && (
+          <button
+            ref={gearBadgeRef}
+            onClick={() => setPropsModalOpen(true)}
+            title="Свойства детали"
+            style={{
+              position: "absolute",
+              left: 0, top: 0,  // позиция ставится в animate
+              transform: "translate(-50%, -50%)",
+              width: 36, height: 36,
+              borderRadius: "50%",
+              padding: 0,
+              cursor: "pointer",
+              border: "1px solid rgba(217,119,6,0.6)",
+              background: "rgba(11,12,16,0.9)",
+              color: "#d97706",
+              fontSize: 16, lineHeight: 1,
+              fontFamily: "'IBM Plex Mono',monospace",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              zIndex: 11,
+              pointerEvents: "auto",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.5)",
+            }}
+          >⚙</button>
+        )}
+
+        {/* Modal со свойствами выделенной детали — открывается тапом на ⚙️.
+            Содержит ВСЕ настройки детали + кнопки удалить и дублировать. */}
+        {selEl && propsModalOpen && (
+          <div
+            onClick={() => setPropsModalOpen(false)}
+            style={{
+              position: "absolute", inset: 0,
+              background: "rgba(0,0,0,0.5)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              zIndex: 50,
+              pointerEvents: "auto",
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "rgba(11,12,16,0.98)",
+                border: "1px solid rgba(50,50,60,0.7)",
+                borderRadius: 8,
+                width: isMobile ? "92%" : 360,
+                maxHeight: "85%",
+                overflow: "auto",
+                boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+                position: "relative",
+              }}
+            >
+              {/* Заголовок modal с кнопкой ✕ */}
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "12px 16px",
+                borderBottom: "1px solid rgba(50,50,60,0.5)",
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#d1d5db" }}>
+                  Свойства детали
+                </div>
+                <button
+                  onClick={() => setPropsModalOpen(false)}
+                  title="Закрыть"
+                  style={{
+                    width: 28, height: 28, borderRadius: 4,
+                    background: "transparent", color: "#888",
+                    border: "1px solid #333", cursor: "pointer",
+                    fontFamily: "inherit", fontSize: 14,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}
+                >✕</button>
+              </div>
+
+              {/* Содержимое — обычная PropsPanel3D без своей обёртки */}
+              <PropsPanel3D
+                selEl={selEl}
+                updateEl={updateEl}
+                delSel={() => { delSel?.(); setPropsModalOpen(false); }}
+                onClose={() => setPropsModalOpen(false)}
+                iW={iW}
+                iH={iH}
+                t={t}
+                D={corpus?.depth}
+                isMobile={isMobile}
+                inModal={true}
+              />
+
+              {/* Кнопки действий — Удалить и Дублировать */}
+              <div style={{
+                display: "flex", gap: 8,
+                padding: "12px 16px",
+                borderTop: "1px solid rgba(50,50,60,0.5)",
+                background: "rgba(8,9,12,0.5)",
+              }}>
+                {onDuplicate && (
+                  <button
+                    onClick={() => { onDuplicate(selEl.id); setPropsModalOpen(false); }}
+                    style={{
+                      flex: 1,
+                      padding: "8px 10px", borderRadius: 6,
+                      border: "1px solid rgba(96,165,250,0.4)",
+                      background: "rgba(96,165,250,0.12)",
+                      color: "#93c5fd",
+                      fontSize: 12, fontWeight: 700,
+                      fontFamily: "'IBM Plex Mono',monospace",
+                      cursor: "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                    }}
+                  >📋 Дублировать</button>
+                )}
+                {delSel && (
+                  <button
+                    onClick={() => { delSel(); setPropsModalOpen(false); }}
+                    style={{
+                      flex: 1,
+                      padding: "8px 10px", borderRadius: 6,
+                      border: "1px solid rgba(239,68,68,0.4)",
+                      background: "rgba(239,68,68,0.12)",
+                      color: "#f87171",
+                      fontSize: 12, fontWeight: 700,
+                      fontFamily: "'IBM Plex Mono',monospace",
+                      cursor: "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                    }}
+                  >🗑 Удалить</button>
+                )}
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -3994,10 +4124,16 @@ function DrawerHeightInput({ index, value, onCommit }) {
   );
 }
 
-function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, D, isMobile }) {
+function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, D, isMobile, inModal = false }) {
   if (!selEl) return null;
 
-  const baseStyle = isMobile ? {
+  const baseStyle = inModal ? {
+    // Внутри modal: panel наполняет контейнер, стили обёртки задаёт modal
+    width: "100%",
+    background: "transparent",
+    padding: "16px 18px",
+    overflowY: "auto",
+  } : (isMobile ? {
     position: "absolute", bottom: 0, left: 0, right: 0,
     maxHeight: "50%", overflowY: "auto",
     background: "rgba(11,12,16,0.98)",
@@ -4012,7 +4148,7 @@ function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, D, isMobile
     padding: "16px 18px",
     overflowY: "auto",
     zIndex: 50,
-  };
+  });
 
   // Компактное числовое поле
   const NumField = ({ label, value, onChange, min, max, step = 1, color = "#60a5fa" }) => {
