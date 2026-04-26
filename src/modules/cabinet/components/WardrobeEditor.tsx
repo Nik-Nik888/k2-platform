@@ -585,6 +585,11 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
   // Сбрасывается после успешного сохранения, ставится в true при изменении
   // corpus/elements/name/textures.
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  // Save prompt modal — показывается при попытке перейти в список шкафов
+  // с несохранёнными изменениями. pendingNavigation хранит callback который
+  // выполнится после выбора пользователя (либо после сохранения, либо сразу).
+  const [savePromptOpen, setSavePromptOpen] = useState(false);
+  const pendingNavigationRef = useRef<(() => void) | null>(null);
   const skipFirstSaveRef = useRef(true);
   useEffect(() => {
     if (skipFirstSaveRef.current) {
@@ -652,6 +657,40 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [hasUnsavedChanges, handleSave]);
+
+  // requestNavigation — общий хелпер для безопасного перехода. Если есть
+  // несохранённые изменения — показываем save-prompt модал с тремя кнопками:
+  // «Сохранить и перейти», «Не сохранять» и «Отмена». Если изменений нет —
+  // переходим сразу.
+  const requestNavigation = useCallback((next: () => void) => {
+    if (!hasUnsavedChanges) {
+      next();
+      return;
+    }
+    pendingNavigationRef.current = next;
+    setSavePromptOpen(true);
+  }, [hasUnsavedChanges]);
+
+  const handleSavePromptSave = useCallback(async () => {
+    await handleSave();
+    setSavePromptOpen(false);
+    const next = pendingNavigationRef.current;
+    pendingNavigationRef.current = null;
+    if (next) next();
+  }, [handleSave]);
+
+  const handleSavePromptDiscard = useCallback(() => {
+    setSavePromptOpen(false);
+    setHasUnsavedChanges(false);  // помечаем как «потеряно», чтобы beforeunload не срабатывал
+    const next = pendingNavigationRef.current;
+    pendingNavigationRef.current = null;
+    if (next) next();
+  }, []);
+
+  const handleSavePromptCancel = useCallback(() => {
+    setSavePromptOpen(false);
+    pendingNavigationRef.current = null;
+  }, []);
 
   const canvas = (
 <svg ref={svgRef} width={svgW} height={svgH} viewBox={`-70 -16 ${corpus.width * SC + 140} ${corpus.height * SC + 60}`} style={{ cursor: placeMode ? "crosshair" : "default", filter: "drop-shadow(0 4px 20px rgba(0,0,0,0.5))" }} onClick={onSvgClick}>
@@ -738,6 +777,71 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
       onTouchEnd={onUp}
       onTouchCancel={onUp}
     >
+      {/* Save prompt modal — показывается при попытке перейти к списку шкафов
+          с несохранёнными изменениями. Три варианта: сохранить, не сохранять, отмена. */}
+      {savePromptOpen && (
+        <div
+          onClick={handleSavePromptCancel}
+          style={{
+            position: "fixed", inset: 0,
+            background: "rgba(0,0,0,0.7)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#14151c",
+              border: "1px solid #333",
+              borderRadius: 8,
+              padding: 24,
+              maxWidth: 400,
+              width: "90%",
+              boxShadow: "0 10px 40px rgba(0,0,0,0.6)",
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8, color: "#d1d5db" }}>
+              Сохранить изменения?
+            </div>
+            <div style={{ fontSize: 12, color: "#888", marginBottom: 20, lineHeight: 1.5 }}>
+              В проекте есть несохранённые изменения. Что сделать перед переходом?
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button
+                onClick={handleSavePromptCancel}
+                style={{
+                  padding: "8px 14px", borderRadius: 6,
+                  background: "transparent", color: "#888",
+                  border: "1px solid #444", cursor: "pointer",
+                  fontFamily: "inherit", fontSize: 12,
+                }}
+              >Отмена</button>
+              <button
+                onClick={handleSavePromptDiscard}
+                style={{
+                  padding: "8px 14px", borderRadius: 6,
+                  background: "transparent", color: "#ef4444",
+                  border: "1px solid rgba(239,68,68,0.4)", cursor: "pointer",
+                  fontFamily: "inherit", fontSize: 12,
+                }}
+              >Не сохранять</button>
+              <button
+                onClick={handleSavePromptSave}
+                disabled={saveState === "saving"}
+                style={{
+                  padding: "8px 14px", borderRadius: 6,
+                  background: "#d97706", color: "#000",
+                  border: "none", cursor: saveState === "saving" ? "default" : "pointer",
+                  fontFamily: "inherit", fontSize: 12, fontWeight: 700,
+                  opacity: saveState === "saving" ? 0.6 : 1,
+                }}
+              >{saveState === "saving" ? "Сохраняю…" : "Сохранить"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* HEADER */}
       <Header
         corpus={corpus}
@@ -1006,8 +1110,7 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
         onSave={handleSave}
         saveState={saveState}
         onShowList={() => {
-          if (hasUnsavedChanges && !window.confirm("Есть несохранённые изменения. Перейти к списку без сохранения?")) return;
-          navigate("/cabinet/list");
+          requestNavigation(() => navigate("/cabinet/list"));
         }}
         // Правая панель свойств для выделенного элемента рендерится ВНУТРИ Wardrobe3D
         // (поверх 3D, на десктопе — sidebar 320px справа, на мобильном — bottom sheet).

@@ -1412,7 +1412,18 @@ export default function Wardrobe3D({
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    mountRef.current.innerHTML = "";
+    // Anti-flicker: НЕ очищаем mount сразу через innerHTML="". Вместо этого
+    // запоминаем существующие canvas (если есть) — они останутся видимыми пока
+    // новый build не отрендерил первый кадр. Затем удалим их.
+    // preserveDrawingBuffer:true (выше) даёт сохранение последнего кадра.
+    const oldCanvases = Array.from(mountRef.current.querySelectorAll("canvas"));
+    // Новый canvas позиционируем поверх старых через absolute. mountRef
+    // имеет position:relative (см. JSX внизу).
+    renderer.domElement.style.position = "absolute";
+    renderer.domElement.style.top = "0";
+    renderer.domElement.style.left = "0";
+    renderer.domElement.style.width = "100%";
+    renderer.domElement.style.height = "100%";
     mountRef.current.appendChild(renderer.domElement);
 
     // ═══ ZONE HIGHLIGHT — полный силуэт будущего элемента в 3D ═══
@@ -2718,6 +2729,16 @@ export default function Wardrobe3D({
         );
         camera.lookAt(0, 0, 0);
         renderer.render(scene, camera);
+        // Anti-flicker: после первого рендера нового canvas удаляем старые.
+        // Это убирает чёрное мерцание между уничтожением старой сцены и
+        // появлением новой. До этого момента старые canvas видны (через
+        // preserveDrawingBuffer).
+        if (oldCanvases.length > 0) {
+          for (const c of oldCanvases) {
+            try { c.parentNode?.removeChild(c); } catch {}
+          }
+          oldCanvases.length = 0;
+        }
         // Обновляем подписи (throttle через frame skip)
         dimFrameSkip = (dimFrameSkip + 1) % 2;
         if (dimFrameSkip === 0) {
@@ -2877,10 +2898,10 @@ export default function Wardrobe3D({
         // после нескольких переключений упирается в лимит (обычно 16 контекстов).
         renderer.forceContextLoss?.();
 
-        // Убираем canvas из DOM, чтобы React не хранил ссылку на старый элемент.
-        if (renderer.domElement?.parentNode) {
-          renderer.domElement.parentNode.removeChild(renderer.domElement);
-        }
+        // Anti-flicker: НЕ удаляем canvas из DOM здесь. Canvas (с последним
+        // кадром, благодаря preserveDrawingBuffer) останется видимым пока
+        // новый build не отрендерит первый кадр и не удалит его сам через
+        // oldCanvases (см. animate-loop). Это устраняет чёрное мерцание.
       };
     });
 
@@ -2952,6 +2973,7 @@ export default function Wardrobe3D({
         <div style={{ flex: 1, position: "relative", minHeight: 0, minWidth: 0 }}>
           <div ref={mountRef} style={{
             width: "100%", height: "100%",
+            position: "relative",  // нужно для absolute canvas (anti-flicker)
             cursor: placeMode ? "crosshair" : "grab",
           }} />
 
@@ -3168,7 +3190,8 @@ export default function Wardrobe3D({
             {onShowList && (
               <button
                 onClick={() => {
-                  if (hasUnsavedChanges && !window.confirm("Есть несохранённые изменения. Перейти к списку без сохранения?")) return;
+                  // Решение о сохранении/отмене принимает родитель — он покажет
+                  // красивый модал с тремя кнопками. Здесь просто вызываем callback.
                   onShowList();
                 }}
                 title="Все мои шкафы"
