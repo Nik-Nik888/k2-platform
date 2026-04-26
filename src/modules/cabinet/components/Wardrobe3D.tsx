@@ -582,14 +582,6 @@ export default function Wardrobe3D({
       offset3d: { x: 0, y:  OFF_FAR, z: 0 },
     });
 
-    // ── Общая высота (справа снаружи) ──
-    dims.push({
-      key: "total-h", text: `${H}`, axis: "v",
-      p1: { x: halfW, y:  halfH, z: zFront },
-      p2: { x: halfW, y: -halfH, z: zFront },
-      offset3d: { x: OFF_FAR, y: 0, z: 0 },
-    });
-
     // ── Глубина ──
     dims.push({
       key: "total-d", text: `${D}`, axis: "d",
@@ -597,6 +589,10 @@ export default function Wardrobe3D({
       p2: { x: halfW, y: -halfH, z: -halfD },
       offset3d: { x: OFF_NEAR, y: -OFF_NEAR, z: 0 },
     });
+
+    // Общая высота HE дублируется отдельно — её показывают вертикальные сегменты
+    // в самой левой колонке (если в ней нет полок — это сразу 2100). Раньше я
+    // рисовал `total-h` справа и она дублировала эту цифру.
 
     // ── Используем ОБЩУЮ логику 2D (computeDims) для колонок и проёмов.
     // computeDims понимает дедуп (одинаковые соседние сегменты — один размер),
@@ -647,39 +643,35 @@ export default function Wardrobe3D({
       }
     });
 
-    // ── Толщины стоек по верхнему ярусу (отдельная цепочка) ──
-    // Полная цепочка X от левой стенки до правой — показывает 16 для каждой
-    // стойки/стенки и ширину ниши между ними. Размещается на ОТДЕЛЬНОЙ линии
-    // выше колонок, чтобы не путаться с шириной ниш.
-    const studs = elements.filter((e: any) => e.type === "stud").sort((a: any, b: any) => (a.x ?? 0) - (b.x ?? 0));
-    if (studs.length > 0) {
-      // Чейн: левая стенка (16) → niche → стойка (16) → niche → стойка (16) → ... → правая стенка (16)
-      const OFF_MID = 0.09;  // между OFF_NEAR (0.05) и OFF_FAR (0.13)
-      // Левая стенка корпуса
-      dims.push({
-        key: `studchain-leftwall`, text: `${t}`, axis: "h",
-        p1: { x: -halfW, y: halfH, z: zFront },
-        p2: { x: toX(t), y: halfH, z: zFront },
-        offset3d: { x: 0, y: OFF_MID, z: 0 },
-      });
-      // Стойки
-      studs.forEach((s: any, idx: number) => {
-        const sx = s.x ?? 0;
+    // ── Толщины полок сбоку колонки (как просил пользователь) ──
+    // Для каждой колонки находим полки которые её перекрывают и рисуем толщину 16
+    // между сегментами высот. Это даёт визуализацию "сегмент 569 / полка 16 / сегмент 769"
+    // вместо "569 → 769" с непонятным разрывом. Привязка к той же x-координате что и
+    // высоты сегментов в этой колонке.
+    cols.forEach((col, ci) => {
+      // Полки которые реально перекрывают эту колонку
+      const colShelves = elements
+        .filter((e: any) => e.type === "shelf")
+        .filter((sh: any) => {
+          const shL = sh.x ?? 0;
+          const shR = shL + (sh.w ?? iWmm);
+          return shR > col.sl + 1 && shL < col.sl + col.sw - 1;
+        })
+        .sort((a: any, b: any) => (a.y ?? 0) - (b.y ?? 0));
+      // Для каждой полки — риска толщины
+      const xCol = toX(col.sl);
+      colShelves.forEach((sh: any, idx: number) => {
+        const yMid = sh.y ?? 0;
+        const yTop = yMid - t / 2;
+        const yBot = yMid + t / 2;
         dims.push({
-          key: `studchain-${idx}`, text: `${t}`, axis: "h",
-          p1: { x: toX(sx), y: halfH, z: zFront },
-          p2: { x: toX(sx + t), y: halfH, z: zFront },
-          offset3d: { x: 0, y: OFF_MID, z: 0 },
+          key: `shelfT-${ci}-${idx}`, text: `${t}`, axis: "v",
+          p1: { x: xCol, y: toY(yTop), z: zFront },
+          p2: { x: xCol, y: toY(yBot), z: zFront },
+          offset3d: { x: -OFF_NEAR, y: 0, z: 0 },
         });
       });
-      // Правая стенка
-      dims.push({
-        key: `studchain-rightwall`, text: `${t}`, axis: "h",
-        p1: { x: toX(iWmm - t), y: halfH, z: zFront },
-        p2: { x: halfW, y: halfH, z: zFront },
-        offset3d: { x: 0, y: OFF_MID, z: 0 },
-      });
-    }
+    });
 
     return dims;
   })();
