@@ -52,6 +52,9 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
   const [cabinetName, setCabinetName] = useState<string>(initial?.name ?? "Без названия");
   const [currentCabinetId, setCurrentCabinetId] = useState<string | null>(cabinetId ?? null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  // Modal со свойствами выделенной детали. Открывается тапом на ⚙️ ярлычок
+  // рядом с деталью в 3D. Заменяет всегда-видимую правую панель на десктопе.
+  const [propsModalOpen, setPropsModalOpen] = useState(false);
   const [clientId, setClientId] = useState<string | null>(initial?.client_id ?? null);
   const [selId, setSelId] = useState(null);
   const [drag, setDrag] = useState(null);
@@ -984,9 +987,13 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
         onClose={() => setShow3d(false)}
         selId={selId}
         onElementClick={(id) => {
-          // Клик выделяет элемент. Остаёмся в 3D — правка через панель свойств справа.
           setSelId(id);
+          // При смене выделения modal закрываем — иначе свойства бывшей детали
+          // остаются открытыми поверх новой выделенной.
+          setPropsModalOpen(false);
         }}
+        propsModalOpen={propsModalOpen}
+        setPropsModalOpen={setPropsModalOpen}
         // Правая панель свойств для выделенного элемента рендерится ВНУТРИ Wardrobe3D
         // (поверх 3D, на десктопе — sidebar 320px справа, на мобильном — bottom sheet).
         selEl={selEl}

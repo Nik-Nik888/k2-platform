@@ -115,6 +115,10 @@ export default function Wardrobe3D({
   setPlaceMode = null,      // (mode: string|null) => void
   findDoorBounds = null,    // (clickX, clickY) => { left, right, top, bottom } — для подсветки зоны
   placeInZone = null,       // (zone, clickX, clickY) => void — постановка элемента
+  // Modal со свойствами выделенной детали. По умолчанию false — показывается только
+  // маленький ярлычок ⚙️ рядом с деталью. Тап на ярлычок → setPropsModalOpen(true).
+  propsModalOpen = false,
+  setPropsModalOpen = null,
 }) {
   const mountRef = useRef(null);
   const stateRef = useRef({});
@@ -3475,21 +3479,74 @@ export default function Wardrobe3D({
           )}
         </div>
 
-        {/* Панель свойств — появляется при выделении элемента.
-            В placeMode скрыта чтобы не загораживать подсветку зоны постановки.
-            При drag3d — тоже скрыта, иначе закрывает шкаф и не видно куда тащить. */}
-        {selEl && !placeMode && !drag3d && (
-          <PropsPanel3D
-            selEl={selEl}
-            updateEl={updateEl}
-            delSel={delSel}
-            onClose={() => onElementClick?.(null)}
-            iW={iW}
-            iH={iH}
-            t={t}
-            D={corpus?.depth}
-            isMobile={isMobile}
-          />
+        {/* Если выделена деталь — показываем маленький ⚙️ ярлычок в верхнем
+            правом углу canvas. Это даёт возможность работать с деталью без
+            всегда-видимой панели свойств: двигать, ресайзить через popup,
+            а модальное окно свойств открывается только при необходимости. */}
+        {selEl && !placeMode && !drag3d && !propsModalOpen && (
+          <button
+            onClick={() => setPropsModalOpen?.(true)}
+            title="Свойства детали"
+            style={{
+              position: "absolute",
+              top: isMobile ? 60 : 56,
+              right: 12,
+              width: 44, height: 44,
+              borderRadius: 8,
+              padding: 0,
+              cursor: "pointer",
+              border: "1px solid rgba(217,119,6,0.5)",
+              background: "rgba(217,119,6,0.18)",
+              color: "#d97706",
+              fontSize: 20, lineHeight: 1,
+              fontFamily: "'IBM Plex Mono',monospace",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              zIndex: 11,
+              pointerEvents: "auto",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+            }}
+          >⚙</button>
+        )}
+
+        {/* Modal-окно свойств — открывается только по нажатию на ⚙️. Заменяет
+            автоматически висящую панель справа/снизу. */}
+        {selEl && propsModalOpen && (
+          <div
+            onClick={() => setPropsModalOpen?.(false)}
+            style={{
+              position: "absolute", inset: 0,
+              background: "rgba(0,0,0,0.5)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              zIndex: 50,
+              pointerEvents: "auto",
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "rgba(11,12,16,0.98)",
+                border: "1px solid rgba(50,50,60,0.6)",
+                borderRadius: 8,
+                width: isMobile ? "92%" : 360,
+                maxHeight: "85%",
+                overflow: "auto",
+                boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+              }}
+            >
+              <PropsPanel3D
+                selEl={selEl}
+                updateEl={updateEl}
+                delSel={() => { delSel?.(); setPropsModalOpen?.(false); }}
+                onClose={() => setPropsModalOpen?.(false)}
+                iW={iW}
+                iH={iH}
+                t={t}
+                D={corpus?.depth}
+                isMobile={isMobile}
+                inModal={true}
+              />
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -3920,10 +3977,16 @@ function DrawerHeightInput({ index, value, onCommit }) {
   );
 }
 
-function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, D, isMobile }) {
+function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, D, isMobile, inModal = false }) {
   if (!selEl) return null;
 
-  const baseStyle = isMobile ? {
+  const baseStyle = inModal ? {
+    // Внутри modal: panel наполняет контейнер, стили обёртки задаёт modal
+    width: "100%",
+    background: "transparent",
+    padding: "16px 18px",
+    overflowY: "auto",
+  } : (isMobile ? {
     position: "absolute", bottom: 0, left: 0, right: 0,
     maxHeight: "50%", overflowY: "auto",
     background: "rgba(11,12,16,0.98)",
@@ -3938,7 +4001,7 @@ function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, D, isMobile
     padding: "16px 18px",
     overflowY: "auto",
     zIndex: 50,
-  };
+  });
 
   // Компактное числовое поле
   const NumField = ({ label, value, onChange, min, max, step = 1, color = "#60a5fa" }) => {
