@@ -1576,14 +1576,31 @@ export default function Wardrobe3D({
         // - грань → грань (встык)
         // Не смешиваем «центр к грани» — иначе полка прилипает со смещением t/2.
         if (type === "stud") {
-          // Стойка: ось стойки = cx (центр в мм). Снапим к центрам других стоек
-          // и к граням (можно встык к стенке корпуса). Все вместе — applySnap
-          // выберет ближайшее.
-          const { edges, centers } = collectSnapTargets(d3d.id, "x");
-          // Центр-к-центру + центр-к-грани (для прилипания вплотную к стенке)
-          const r = applySnap(cx, [...centers, ...edges]);
-          cx = r.value;
-          activeSnap.x = r.snapTo;
+          // Стойка: левая грань = cx - t/2, правая = cx + t/2, центр = cx.
+          // Snap по семантике: центр-к-центру и грань-к-грани раздельно.
+          const { centers, edges } = collectSnapTargets(d3d.id, "x");
+          // 1) Центр стойки → центру соседней стойки
+          const rC = applySnap(cx, centers);
+          if (rC.snapTo !== null) {
+            cx = rC.value;
+            activeSnap.x = rC.snapTo;
+          } else {
+            // 2) Левая грань → грани соседа (встык справа от соседа)
+            const leftEdge = cx - ct / 2;
+            const rL = applySnap(leftEdge, edges);
+            if (rL.snapTo !== null) {
+              cx = rL.value + ct / 2;
+              activeSnap.x = rL.snapTo;
+            } else {
+              // 3) Правая грань → грани соседа (встык слева от соседа)
+              const rightEdge = cx + ct / 2;
+              const rR = applySnap(rightEdge, edges);
+              if (rR.snapTo !== null) {
+                cx = rR.value - ct / 2;
+                activeSnap.x = rR.snapTo;
+              }
+            }
+          }
         } else if (type === "shelf") {
           // Полка: y = центр полки. Снапим:
           // 1) центр-к-центру другой полки/штанги
