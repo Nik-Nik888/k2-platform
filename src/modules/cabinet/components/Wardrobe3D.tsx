@@ -612,35 +612,26 @@ export default function Wardrobe3D({
 
     allDims.forEach((d, i) => {
       if (d.t === "w") {
-        // Горизонтальная ширина колонки. Чтобы риски размера ВИЗУАЛЬНО СОВПАДАЛИ
-        // с рисками толщины стойки (которая идёт от внешней грани до внешней),
-        // показываем расстояние от ВНЕШНЕЙ ГРАНИ левой стойки до ВНЕШНЕЙ ГРАНИ
-        // правой. Берём этот диапазон из computeTopLevelCols: col.left → col.right.
-        // d.x = col.sl (внутренний край), col.left = d.x - t (если слева есть стойка).
-        // Используем индекс si чтобы достать оригинальный col.
-        const col = cols[d.si ?? -1];
-        const left = col?.left ?? d.x;
-        const right = col?.right ?? (d.x + (d.w ?? 0));
-        const fullW = right - left;
-        const x1 = toX(left);
-        const x2 = toX(right);
+        // Каждая колонка — от ВНУТРЕННЕГО левого края (после стойки если есть)
+        // до правого. Это даёт чистую ширину ниши между стойками — пользователь
+        // видит реально полезную ширину для размещения.
+        const x1 = toX(d.x);
+        const x2 = toX(d.x + (d.w ?? 0));
         dims.push({
-          key: `col-${i}`, text: `${Math.round(fullW)}`, axis: "h",
+          key: `col-${i}`, text: `${Math.round(d.w ?? 0)}`, axis: "h",
           p1: { x: x1, y: halfH, z: zFront },
           p2: { x: x2, y: halfH, z: zFront },
           offset3d: { x: 0, y: OFF_NEAR, z: 0 },
         });
       } else if (d.t === "h") {
-        // Вертикальная — высота сегмента в колонке. computeDims считает h
-        // как расстояние МЕЖДУ ЦЕНТРАМИ полок (полка — это y центра).
-        // Хотим визуально привязать риски к внешним граням полок: верхняя
-        // граница сегмента = topY + t/2 (низ верхней полки), нижняя = topY + h - t/2
-        // (верх нижней полки). Если topY = 0 (потолок) или y = iH (пол) —
-        // оставляем как есть, это внешние грани корпуса.
+        // Вертикальная — высота сегмента в колонке.
+        // computeDims считает h между центрами полок. Привязываем визуально
+        // к внешним граням полок: yTop = topY + t/2 (низ верхней полки),
+        // yBot = topY + h - t/2. Если граница = потолок/пол — оставляем как есть.
         const topYRaw = d.topY ?? 0;
         const segH = d.h ?? 0;
-        const isTopWall = topYRaw <= 1;          // верхняя граница = потолок корпуса
-        const isBotWall = topYRaw + segH >= iHmm - 1; // нижняя граница = пол корпуса
+        const isTopWall = topYRaw <= 1;
+        const isBotWall = topYRaw + segH >= iHmm - 1;
         const yTop = isTopWall ? topYRaw : topYRaw + t / 2;
         const yBot = isBotWall ? topYRaw + segH : topYRaw + segH - t / 2;
         const visH = yBot - yTop;
@@ -655,6 +646,40 @@ export default function Wardrobe3D({
         });
       }
     });
+
+    // ── Толщины стоек по верхнему ярусу (отдельная цепочка) ──
+    // Полная цепочка X от левой стенки до правой — показывает 16 для каждой
+    // стойки/стенки и ширину ниши между ними. Размещается на ОТДЕЛЬНОЙ линии
+    // выше колонок, чтобы не путаться с шириной ниш.
+    const studs = elements.filter((e: any) => e.type === "stud").sort((a: any, b: any) => (a.x ?? 0) - (b.x ?? 0));
+    if (studs.length > 0) {
+      // Чейн: левая стенка (16) → niche → стойка (16) → niche → стойка (16) → ... → правая стенка (16)
+      const OFF_MID = 0.09;  // между OFF_NEAR (0.05) и OFF_FAR (0.13)
+      // Левая стенка корпуса
+      dims.push({
+        key: `studchain-leftwall`, text: `${t}`, axis: "h",
+        p1: { x: -halfW, y: halfH, z: zFront },
+        p2: { x: toX(t), y: halfH, z: zFront },
+        offset3d: { x: 0, y: OFF_MID, z: 0 },
+      });
+      // Стойки
+      studs.forEach((s: any, idx: number) => {
+        const sx = s.x ?? 0;
+        dims.push({
+          key: `studchain-${idx}`, text: `${t}`, axis: "h",
+          p1: { x: toX(sx), y: halfH, z: zFront },
+          p2: { x: toX(sx + t), y: halfH, z: zFront },
+          offset3d: { x: 0, y: OFF_MID, z: 0 },
+        });
+      });
+      // Правая стенка
+      dims.push({
+        key: `studchain-rightwall`, text: `${t}`, axis: "h",
+        p1: { x: toX(iWmm - t), y: halfH, z: zFront },
+        p2: { x: halfW, y: halfH, z: zFront },
+        offset3d: { x: 0, y: OFF_MID, z: 0 },
+      });
+    }
 
     return dims;
   })();
@@ -2640,9 +2665,9 @@ export default function Wardrobe3D({
           // Перепроецирование цифр drag3d при вращении сцены — позиции 3D
           // фиксированы в drag3dPositions, но screen координата меняется.
           const dragPos = stateRef.current.drag3dLabelPositions;
+          const ghostA = ghostDimARef.current;
+          const ghostB = ghostDimBRef.current;
           if (dragPos && propsRef.current.drag3d) {
-            const ghostA = ghostDimARef.current;
-            const ghostB = ghostDimBRef.current;
             if (ghostA && dragPos.A) {
               const pA = projectToScreen(dragPos.A.x, dragPos.A.y, dragPos.A.z);
               if (pA?.visible) {
@@ -2662,6 +2687,15 @@ export default function Wardrobe3D({
               } else {
                 ghostB.style.display = "none";
               }
+            }
+          } else {
+            // Нет активного drag3d — прячем призрачные подписи. Иначе после
+            // удаления элемента они зависают на экране до следующего drag.
+            if (ghostA && ghostA.style.display !== "none" && !propsRef.current.placeMode) {
+              ghostA.style.display = "none";
+            }
+            if (ghostB && ghostB.style.display !== "none" && !propsRef.current.placeMode) {
+              ghostB.style.display = "none";
             }
           }
           // Snap-индикатор — жёлтые пунктирные линии показывающие к чему прилип фантом.
