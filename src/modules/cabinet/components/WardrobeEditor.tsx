@@ -54,9 +54,6 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
   const [cabinetName, setCabinetName] = useState<string>(initial?.name ?? "Без названия");
   const [currentCabinetId, setCurrentCabinetId] = useState<string | null>(cabinetId ?? null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  // Modal со свойствами выделенной детали. Открывается тапом на ⚙️ ярлычок
-  // рядом с деталью в 3D. Заменяет всегда-видимую правую панель на десктопе.
-  const [propsModalOpen, setPropsModalOpen] = useState(false);
   const [clientId, setClientId] = useState<string | null>(initial?.client_id ?? null);
   const [selId, setSelId] = useState(null);
   const [drag, setDrag] = useState(null);
@@ -1004,18 +1001,14 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
         selId={selId}
         onElementClick={(id) => {
           setSelId(id);
-          // При смене выделения modal закрываем — иначе свойства бывшей детали
-          // остаются открытыми поверх новой выделенной.
-          setPropsModalOpen(false);
         }}
-        propsModalOpen={propsModalOpen}
-        setPropsModalOpen={setPropsModalOpen}
-        cabinetName={cabinetName}
-        setCabinetName={setCabinetName}
-        saveState={saveState}
         hasUnsavedChanges={hasUnsavedChanges}
         onSave={handleSave}
-        onShowList={() => navigate("/cabinet/list")}
+        saveState={saveState}
+        onShowList={() => {
+          if (hasUnsavedChanges && !window.confirm("Есть несохранённые изменения. Перейти к списку без сохранения?")) return;
+          navigate("/cabinet/list");
+        }}
         // Правая панель свойств для выделенного элемента рендерится ВНУТРИ Wardrobe3D
         // (поверх 3D, на десктопе — sidebar 320px справа, на мобильном — bottom sheet).
         selEl={selEl}

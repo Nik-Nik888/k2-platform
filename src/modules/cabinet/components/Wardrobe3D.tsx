@@ -115,17 +115,11 @@ export default function Wardrobe3D({
   setPlaceMode = null,      // (mode: string|null) => void
   findDoorBounds = null,    // (clickX, clickY) => { left, right, top, bottom } — для подсветки зоны
   placeInZone = null,       // (zone, clickX, clickY) => void — постановка элемента
-  // Modal со свойствами выделенной детали. По умолчанию false — показывается только
-  // маленький ярлычок ⚙️ рядом с деталью. Тап на ярлычок → setPropsModalOpen(true).
-  propsModalOpen = false,
-  setPropsModalOpen = null,
-  // Шапка 3D-режима — имя шкафа, индикатор сохранения, кнопка списка
-  cabinetName = undefined,
-  setCabinetName = null,
-  saveState = "idle",
-  onShowList = null,
+  // Manual save UI (кнопки в углу canvas)
   hasUnsavedChanges = false,
   onSave = null,
+  saveState = "idle",
+  onShowList = null,
 }) {
   const mountRef = useRef(null);
   const stateRef = useRef({});
@@ -1418,17 +1412,7 @@ export default function Wardrobe3D({
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    // Anti-flicker: НЕ очищаем mount сразу. Сохраняем старые canvas-элементы
-    // и удаляем их после того как новый отрендерил первый кадр. Это убирает
-    // чёрное мерцание между уничтожением старой сцены и появлением новой.
-    const oldCanvases = Array.from(mountRef.current.querySelectorAll("canvas"));
-    // Новый canvas позиционируем поверх старого (absolute), чтобы при готовности
-    // он плавно скрыл предыдущий. mountRef имеет position:relative.
-    renderer.domElement.style.position = "absolute";
-    renderer.domElement.style.top = "0";
-    renderer.domElement.style.left = "0";
-    renderer.domElement.style.width = "100%";
-    renderer.domElement.style.height = "100%";
+    mountRef.current.innerHTML = "";
     mountRef.current.appendChild(renderer.domElement);
 
     // ═══ ZONE HIGHLIGHT — полный силуэт будущего элемента в 3D ═══
@@ -1473,7 +1457,6 @@ export default function Wardrobe3D({
   useEffect(() => {
     if (!mountRef.current) return;
     let cancelled = false;
-    let localAnimId: number | null = null;
 
     build().then(({ scene, camera, renderer, dist, elementMeshes, group, placeProjPlane, zoneHighlight, S, d, cTex, fTex }) => {
       if (cancelled) return;
@@ -2720,9 +2703,7 @@ export default function Wardrobe3D({
       stateRef.current.updateEditDimLabels = updateEditDimLabels;
 
       const animate = () => {
-        if (cancelled) return;
-        localAnimId = requestAnimationFrame(animate);
-        stateRef.current.animId = localAnimId;
+        stateRef.current.animId = requestAnimationFrame(animate);
         if (!isDragging) {} // no auto-rotation — manual only
         // Сохраняем текущее положение камеры в ref — чтобы при следующем rebuild
         // (добавление элемента, смена текстуры и т.д.) восстановить угол/зум.
@@ -2737,13 +2718,6 @@ export default function Wardrobe3D({
         );
         camera.lookAt(0, 0, 0);
         renderer.render(scene, camera);
-        // После первого рендера убираем старые canvas (anti-flicker).
-        if (oldCanvases.length > 0) {
-          for (const c of oldCanvases) {
-            try { c.parentNode?.removeChild(c); } catch {}
-          }
-          oldCanvases.length = 0;
-        }
         // Обновляем подписи (throttle через frame skip)
         dimFrameSkip = (dimFrameSkip + 1) % 2;
         if (dimFrameSkip === 0) {
@@ -2898,24 +2872,20 @@ export default function Wardrobe3D({
 
         // Освобождаем сам renderer и его WebGL context.
         renderer.dispose();
+        // forceContextLoss явно говорит драйверу GPU "забудь этот context".
+        // Без этого, несмотря на dispose(), браузер держит контекст в пуле и
+        // после нескольких переключений упирается в лимит (обычно 16 контекстов).
         renderer.forceContextLoss?.();
 
-        // Anti-flicker: НЕ удаляем canvas из DOM здесь. Он останется видимым
-        // (последний кадр сохранён через preserveDrawingBuffer) пока новый
-        // build не отрендерит первый кадр и не уберёт старый canvas сам.
-        // Это убирает чёрное мерцание при изменении elements.
+        // Убираем canvas из DOM, чтобы React не хранил ссылку на старый элемент.
+        if (renderer.domElement?.parentNode) {
+          renderer.domElement.parentNode.removeChild(renderer.domElement);
+        }
       };
     });
 
     return () => {
       cancelled = true;
-      // Останавливаем animate-loop старого build'a — иначе при rebuild старый
-      // rAF продолжает работать на удалённом renderer'e и борется за GPU
-      // с новым build'ом, что вызывает подёргивание сцены.
-      if (localAnimId !== null) {
-        cancelAnimationFrame(localAnimId);
-        localAnimId = null;
-      }
       stateRef.current.cleanup?.();
     };
   }, [build]);
@@ -2950,100 +2920,23 @@ export default function Wardrobe3D({
             boxShadow: "0 2px 8px rgba(96,165,250,0.3)",
           }}>3D</div>
           <div>
-            {/* Имя шкафа — редактируемое поле (тап и печатай). Подчёркнуто пунктиром
-                чтобы было ясно что можно править. На мобильном уже. */}
-            {setCabinetName && cabinetName !== undefined ? (
-              <input
-                type="text"
-                value={cabinetName}
-                onChange={e => setCabinetName(e.target.value)}
-                onFocus={e => e.target.select()}
-                placeholder="Без названия"
-                style={{
-                  background: "transparent", border: "none",
-                  borderBottom: "1px dashed rgba(217,119,6,0.5)",
-                  outline: "none",
-                  fontSize: 13, fontWeight: 700, color: "#d1d5db",
-                  padding: "1px 4px", margin: 0,
-                  width: isMobile ? 140 : 200,
-                  fontFamily: "'IBM Plex Mono',monospace",
-                  cursor: "text",
-                }}
-              />
-            ) : (
-              <div style={{
-                fontSize: 13, fontWeight: 700, color: "#d1d5db",
-                fontFamily: "'IBM Plex Mono',monospace",
-              }}>3D Редактор · ЛДСП</div>
-            )}
+            <div style={{
+              fontSize: 13, fontWeight: 700, color: "#d1d5db",
+              fontFamily: "'IBM Plex Mono',monospace",
+            }}>3D Редактор · ЛДСП</div>
             <div style={{
               fontSize: 10, color: "#444",
               fontFamily: "'IBM Plex Mono',monospace",
             }}>
-              {corpus.width}×{corpus.height}×{corpus.depth} мм
-              {hasUnsavedChanges && <span style={{ marginLeft: 6, color: "#d97706" }}>· не сохранено</span>}
+              {corpus.width}×{corpus.height}×{corpus.depth} мм · Кромка · Петли · ДВП
+              <span style={{ marginLeft: 8, color: "#555" }}>Палец = вращение · 2 пальца = зум · клик = выделить</span>
             </div>
           </div>
         </div>
 
-        {/* Кнопки справа: Сохранить + Шкафы. Сохранить подсвечивается оранжевым
-            если есть несохранённые изменения, серый если всё сохранено. */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {onSave && (
-            <button
-              onClick={onSave}
-              disabled={!hasUnsavedChanges || saveState === "saving"}
-              title={hasUnsavedChanges ? "Сохранить проект (Ctrl/Cmd+S)" : "Всё сохранено"}
-              style={{
-                padding: isMobile ? "6px 10px" : "6px 14px",
-                borderRadius: 4, fontSize: isMobile ? 14 : 11, fontWeight: 700,
-                background: hasUnsavedChanges
-                  ? "rgba(217,119,6,0.18)"
-                  : "rgba(50,50,60,0.3)",
-                color: hasUnsavedChanges ? "#d97706" : "#666",
-                border: hasUnsavedChanges
-                  ? "1px solid rgba(217,119,6,0.5)"
-                  : "1px solid rgba(80,80,90,0.4)",
-                cursor: hasUnsavedChanges ? "pointer" : "default",
-                fontFamily: "'IBM Plex Mono',monospace",
-                display: "flex", alignItems: "center", gap: 4,
-                opacity: saveState === "saving" ? 0.6 : 1,
-                position: "relative",
-              }}
-            >
-              {saveState === "saving" ? "⏳" : "💾"}
-              {!isMobile && <span>{saveState === "saving" ? "Сохраняю…" : "Сохранить"}</span>}
-              {hasUnsavedChanges && saveState !== "saving" && (
-                <span style={{
-                  position: "absolute", top: -3, right: -3,
-                  width: 8, height: 8, borderRadius: "50%",
-                  background: "#d97706",
-                  boxShadow: "0 0 4px rgba(217,119,6,0.6)",
-                }} />
-              )}
-            </button>
-          )}
-
-          {onShowList && (
-            <button
-              onClick={() => {
-                if (hasUnsavedChanges) {
-                  if (!window.confirm("Есть несохранённые изменения. Перейти к списку без сохранения?")) return;
-                }
-                onShowList();
-              }}
-              title="Все мои шкафы"
-              style={{
-                padding: isMobile ? "6px 10px" : "6px 14px",
-                borderRadius: 4, fontSize: isMobile ? 14 : 11, fontWeight: 700,
-                background: "rgba(96,165,250,0.12)", color: "#60a5fa",
-                border: "1px solid rgba(96,165,250,0.3)",
-                cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace",
-                display: "flex", alignItems: "center", gap: 4,
-              }}
-            >📁{!isMobile && " Шкафы"}</button>
-          )}
-        </div>
+        {/* Шапка теперь содержит только заголовок и описание шкафа.
+            Добавление элементов — через FAB ("+") справа внизу canvas (на всех устройствах).
+            Переключение на 2D — через кнопку в верхнем левом углу canvas рядом с «Размеры». */}
       </div>
 
       {/* BODY: 3D canvas + right panel (desktop) или bottom sheet (mobile) */}
@@ -3059,7 +2952,6 @@ export default function Wardrobe3D({
         <div style={{ flex: 1, position: "relative", minHeight: 0, minWidth: 0 }}>
           <div ref={mountRef} style={{
             width: "100%", height: "100%",
-            position: "relative",  // нужен для absolute canvas (anti-flicker)
             cursor: placeMode ? "crosshair" : "grab",
           }} />
 
@@ -3234,6 +3126,67 @@ export default function Wardrobe3D({
             }}
           >📷</button>
 
+          {/* Кнопки save + шкафы в правом верхнем углу canvas. Над FAB (+) которая снизу.
+              Save подсвечивается оранжевым если есть несохранённые изменения. */}
+          <div style={{
+            position: "absolute", top: 12, right: 12,
+            display: "flex", gap: 6,
+            zIndex: 9,
+          }}>
+            {onSave && (
+              <button
+                onClick={onSave}
+                disabled={!hasUnsavedChanges || saveState === "saving"}
+                title={hasUnsavedChanges ? "Сохранить (Ctrl/Cmd+S)" : "Всё сохранено"}
+                style={{
+                  padding: "6px 12px", borderRadius: 6,
+                  fontSize: isMobile ? 14 : 11, fontWeight: 700,
+                  height: 36,
+                  background: hasUnsavedChanges ? "rgba(217,119,6,0.18)" : "rgba(50,50,60,0.3)",
+                  color: hasUnsavedChanges ? "#d97706" : "#666",
+                  border: hasUnsavedChanges ? "1px solid rgba(217,119,6,0.5)" : "1px solid rgba(80,80,90,0.4)",
+                  cursor: hasUnsavedChanges ? "pointer" : "default",
+                  fontFamily: "'IBM Plex Mono',monospace",
+                  display: "flex", alignItems: "center", gap: 4,
+                  opacity: saveState === "saving" ? 0.6 : 1,
+                  position: "relative",
+                  pointerEvents: "auto",
+                }}
+              >
+                {saveState === "saving" ? "⏳" : "💾"}
+                {!isMobile && <span>{saveState === "saving" ? "Сохраняю" : "Сохранить"}</span>}
+                {hasUnsavedChanges && saveState !== "saving" && (
+                  <span style={{
+                    position: "absolute", top: -3, right: -3,
+                    width: 8, height: 8, borderRadius: "50%",
+                    background: "#d97706",
+                    boxShadow: "0 0 4px rgba(217,119,6,0.6)",
+                  }} />
+                )}
+              </button>
+            )}
+            {onShowList && (
+              <button
+                onClick={() => {
+                  if (hasUnsavedChanges && !window.confirm("Есть несохранённые изменения. Перейти к списку без сохранения?")) return;
+                  onShowList();
+                }}
+                title="Все мои шкафы"
+                style={{
+                  padding: "6px 12px", borderRadius: 6,
+                  fontSize: isMobile ? 14 : 11, fontWeight: 700,
+                  height: 36,
+                  background: "rgba(96,165,250,0.15)", color: "#60a5fa",
+                  border: "1px solid rgba(96,165,250,0.3)",
+                  cursor: "pointer",
+                  fontFamily: "'IBM Plex Mono',monospace",
+                  display: "flex", alignItems: "center", gap: 4,
+                  pointerEvents: "auto",
+                }}
+              >📁{!isMobile && " Шкафы"}</button>
+            )}
+          </div>
+
           {/* Индикатор активного placeMode — поверх 3D, сверху.
               pointerEvents: "none" на контейнере чтобы клики СКВОЗЬ плашку
               падали на canvas (иначе пользователь не может поставить элемент
@@ -3322,11 +3275,11 @@ export default function Wardrobe3D({
             </div>
           )}
 
-          {/* Контекстное меню выделенного элемента — только кнопка «Глубина» для panel/rod.
-              Удаление/дублирование убраны — теперь они в modal-свойствах через ⚙️ ярлычок.
-              Глубина оставлена как быстрый шорткат — это частое действие при редактировании
-              insert-панели и штанги. */}
-          {selEl && !placeMode && editableZ && (
+          {/* Контекстное меню выделенного элемента — быстрые действия.
+              Показывается когда есть выделение И нет placeMode.
+              Плавающая плашка снизу-по-центру над canvas.
+              Не мешает PropsPanel (справа/снизу) и индикатору edit-Z (сверху). */}
+          {selEl && !placeMode && (
             <div style={{
               position: "absolute",
               bottom: 24, left: "50%",
@@ -3340,26 +3293,71 @@ export default function Wardrobe3D({
               zIndex: 11,
               pointerEvents: "auto",
             }}>
-              <button
-                onClick={() => {
-                  setEditDim("A");
-                }}
-                title="Редактировать глубину (Z)"
-                style={{
-                  padding: "6px 10px", borderRadius: 5,
-                  border: "1px solid rgba(251,191,36,0.4)",
-                  background: "rgba(251,191,36,0.12)",
-                  color: "#fcd34d",
-                  fontSize: 11, fontWeight: 700,
-                  fontFamily: "'IBM Plex Mono',monospace",
-                  cursor: "pointer",
-                  display: "flex", alignItems: "center", gap: 4,
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = "rgba(251,191,36,0.25)"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "rgba(251,191,36,0.12)"; }}
-              >
-                📏 Глубина
-              </button>
+              {/* Удалить */}
+              {delSel && (
+                <button
+                  onClick={() => delSel()}
+                  title="Удалить элемент"
+                  style={{
+                    padding: "6px 10px", borderRadius: 5,
+                    border: "1px solid rgba(239,68,68,0.4)",
+                    background: "rgba(239,68,68,0.12)",
+                    color: "#f87171",
+                    fontSize: 11, fontWeight: 700,
+                    fontFamily: "'IBM Plex Mono',monospace",
+                    cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 4,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.25)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(239,68,68,0.12)"; }}
+                >
+                  🗑 Удалить
+                </button>
+              )}
+              {/* Дублировать */}
+              {onDuplicate && (
+                <button
+                  onClick={() => onDuplicate(selEl.id)}
+                  title="Создать копию рядом"
+                  style={{
+                    padding: "6px 10px", borderRadius: 5,
+                    border: "1px solid rgba(96,165,250,0.4)",
+                    background: "rgba(96,165,250,0.12)",
+                    color: "#93c5fd",
+                    fontSize: 11, fontWeight: 700,
+                    fontFamily: "'IBM Plex Mono',monospace",
+                    cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 4,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(96,165,250,0.25)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(96,165,250,0.12)"; }}
+                >
+                  📋 Дублировать
+                </button>
+              )}
+              {/* Глубина — только для insert-панели и штанги. Активирует edit-Z (A). */}
+              {editableZ && (
+                <button
+                  onClick={() => {
+                    setEditDim("A");
+                  }}
+                  title="Редактировать глубину (Z)"
+                  style={{
+                    padding: "6px 10px", borderRadius: 5,
+                    border: "1px solid rgba(251,191,36,0.4)",
+                    background: "rgba(251,191,36,0.12)",
+                    color: "#fcd34d",
+                    fontSize: 11, fontWeight: 700,
+                    fontFamily: "'IBM Plex Mono',monospace",
+                    cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 4,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(251,191,36,0.25)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(251,191,36,0.12)"; }}
+                >
+                  📏 Глубина
+                </button>
+              )}
             </div>
           )}
 
@@ -3528,73 +3526,21 @@ export default function Wardrobe3D({
           )}
         </div>
 
-        {/* Если выделена деталь — показываем ⚙️ ярлычок СНИЗУ-СПРАВА над FAB.
-            Так он не загораживает шкаф и не дублирует кнопку 2D в верхнем углу.
-            FAB на bottom:24 (40-44px), ⚙️ ставим выше на gap 12 = bottom 24+44+12 = 80. */}
-        {selEl && !placeMode && !drag3d && !propsModalOpen && (
-          <button
-            onClick={() => setPropsModalOpen?.(true)}
-            title="Свойства детали"
-            style={{
-              position: "absolute",
-              bottom: 80,
-              right: 24,
-              width: 44, height: 44,
-              borderRadius: "50%",
-              padding: 0,
-              cursor: "pointer",
-              border: "1px solid rgba(217,119,6,0.5)",
-              background: "rgba(217,119,6,0.18)",
-              color: "#d97706",
-              fontSize: 20, lineHeight: 1,
-              fontFamily: "'IBM Plex Mono',monospace",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              zIndex: 11,
-              pointerEvents: "auto",
-              boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
-            }}
-          >⚙</button>
-        )}
-
-        {/* Modal-окно свойств — открывается только по нажатию на ⚙️. Заменяет
-            автоматически висящую панель справа/снизу. */}
-        {selEl && propsModalOpen && (
-          <div
-            onClick={() => setPropsModalOpen?.(false)}
-            style={{
-              position: "absolute", inset: 0,
-              background: "rgba(0,0,0,0.5)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              zIndex: 50,
-              pointerEvents: "auto",
-            }}
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                background: "rgba(11,12,16,0.98)",
-                border: "1px solid rgba(50,50,60,0.6)",
-                borderRadius: 8,
-                width: isMobile ? "92%" : 360,
-                maxHeight: "85%",
-                overflow: "auto",
-                boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
-              }}
-            >
-              <PropsPanel3D
-                selEl={selEl}
-                updateEl={updateEl}
-                delSel={() => { delSel?.(); setPropsModalOpen?.(false); }}
-                onClose={() => setPropsModalOpen?.(false)}
-                iW={iW}
-                iH={iH}
-                t={t}
-                D={corpus?.depth}
-                isMobile={isMobile}
-                inModal={true}
-              />
-            </div>
-          </div>
+        {/* Панель свойств — появляется при выделении элемента.
+            В placeMode скрыта чтобы не загораживать подсветку зоны постановки.
+            При drag3d — тоже скрыта, иначе закрывает шкаф и не видно куда тащить. */}
+        {selEl && !placeMode && !drag3d && (
+          <PropsPanel3D
+            selEl={selEl}
+            updateEl={updateEl}
+            delSel={delSel}
+            onClose={() => onElementClick?.(null)}
+            iW={iW}
+            iH={iH}
+            t={t}
+            D={corpus?.depth}
+            isMobile={isMobile}
+          />
         )}
       </div>
     </div>
@@ -4025,16 +3971,10 @@ function DrawerHeightInput({ index, value, onCommit }) {
   );
 }
 
-function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, D, isMobile, inModal = false }) {
+function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, D, isMobile }) {
   if (!selEl) return null;
 
-  const baseStyle = inModal ? {
-    // Внутри modal: panel наполняет контейнер, стили обёртки задаёт modal
-    width: "100%",
-    background: "transparent",
-    padding: "16px 18px",
-    overflowY: "auto",
-  } : (isMobile ? {
+  const baseStyle = isMobile ? {
     position: "absolute", bottom: 0, left: 0, right: 0,
     maxHeight: "50%", overflowY: "auto",
     background: "rgba(11,12,16,0.98)",
@@ -4049,7 +3989,7 @@ function PropsPanel3D({ selEl, updateEl, delSel, onClose, iW, iH, t, D, isMobile
     padding: "16px 18px",
     overflowY: "auto",
     zIndex: 50,
-  });
+  };
 
   // Компактное числовое поле
   const NumField = ({ label, value, onChange, min, max, step = 1, color = "#60a5fa" }) => {
