@@ -1,6 +1,5 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import * as THREE from "three";
-import { computeTopLevelCols, computeDims } from "../logic/dims";
 
 /* ═══════════════════════════════════════════════════════════════
    Wardrobe3D — Realistic ЛДСП construction
@@ -567,22 +566,32 @@ export default function Wardrobe3D({
     const halfW = (showCorpus ? W - 2 * t : W) * S / 2;
     const halfH = (showCorpus ? H - 2 * t : H) * S / 2;
     const halfD = D * S / 2;
-    // Смещения в метрах: насколько размерная линия отстоит от шкафа
-    const OFF_NEAR = 0.05;  // ближняя линия (колонки/полки)
-    const OFF_FAR = 0.13;   // дальняя (общие габариты)
+    const OFF_NEAR = 0.05;
+    const OFF_FAR = 0.13;
     const zFront = halfD;
 
     const dims: any[] = [];
 
-    // ── Общая ширина (дальняя линия сверху) ──
+    // mm → 3D world coords
+    const toX = (mm: number) => (mm - iWmm / 2) * S;
+    const toY = (mm: number) => (iHmm / 2 - mm) * S;
+
+    // ── Общие габариты корпуса ──
+    // Ширина — сверху, дальняя линия
     dims.push({
       key: "total-w", text: `${W}`, axis: "h",
       p1: { x: -halfW, y: halfH, z: zFront },
       p2: { x:  halfW, y: halfH, z: zFront },
-      offset3d: { x: 0, y:  OFF_FAR, z: 0 },
+      offset3d: { x: 0, y: OFF_FAR, z: 0 },
     });
-
-    // ── Глубина ──
+    // Высота — справа СНАРУЖИ
+    dims.push({
+      key: "total-h", text: `${H}`, axis: "v",
+      p1: { x: halfW, y:  halfH, z: zFront },
+      p2: { x: halfW, y: -halfH, z: zFront },
+      offset3d: { x: OFF_FAR, y: 0, z: 0 },
+    });
+    // Глубина
     dims.push({
       key: "total-d", text: `${D}`, axis: "d",
       p1: { x: halfW, y: -halfH, z:  halfD },
@@ -590,86 +599,104 @@ export default function Wardrobe3D({
       offset3d: { x: OFF_NEAR, y: -OFF_NEAR, z: 0 },
     });
 
-    // Общая высота HE дублируется отдельно — её показывают вертикальные сегменты
-    // в самой левой колонке (если в ней нет полок — это сразу 2100). Раньше я
-    // рисовал `total-h` справа и она дублировала эту цифру.
+    // ── Размеры по УРОВНЯМ ──
+    // Уровень = горизонтальная полоса между двумя соседними полками (или
+    // между потолком и первой полкой, последней полкой и полом). В каждом
+    // уровне находим стойки которые в нём присутствуют (их Y-диапазон
+    // перекрывает уровень) и показываем ширину ниш МЕЖДУ ВНЕШНИМИ ГРАНЯМИ
+    // соседних стоек / стенок корпуса.
+    //
+    // Это даёт пользователю «по уму»: на каждом уровне отдельный набор
+    // ширин ниш с учётом стоек именно этого уровня. Стойка которая делит
+    // только средний уровень — не попадает в верхний/нижний.
 
-    // ── Используем ОБЩУЮ логику 2D (computeDims) для колонок и проёмов.
-    // computeDims понимает дедуп (одинаковые соседние сегменты — один размер),
-    // учитывает что полки реально перекрывают колонку, ящики/штанги создают
-    // breaks, минимум 25мм для отображения. Это убирает мусор и совпадает
-    // с тем что пользователь видит в 2D.
-    const cols = computeTopLevelCols(elements, iWmm, t);
-    const allDims = computeDims(elements, cols, iHmm, iWmm);
+    // Все полки отсортированы по Y (по центру)
+    const shelves = elements
+      .filter((e: any) => e.type === "shelf")
+      .sort((a: any, b: any) => (a.y ?? 0) - (b.y ?? 0));
+    // Y-границы уровней. Каждая полка занимает [y - t/2 .. y + t/2].
+    // Сегменты: [0 .. shelf1.top], [shelf1.bot .. shelf2.top], ..., [shelfN.bot .. iH]
+    const levels: { top: number, bot: number }[] = [];
+    let prevBot = 0;
+    for (const sh of shelves) {
+      const shTop = (sh.y ?? 0) - t / 2;
+      const shBot = (sh.y ?? 0) + t / 2;
+      if (shTop - prevBot > 25) {
+        levels.push({ top: prevBot, bot: shTop });
+      }
+      prevBot = shBot;
+    }
+    if (iHmm - prevBot > 25) {
+      levels.push({ top: prevBot, bot: iHmm });
+    }
 
-    // mm → 3D world coords (x по центру, y инвертирован)
-    const toX = (mm: number) => (mm - iWmm / 2) * S;
-    const toY = (mm: number) => (iHmm / 2 - mm) * S;
+    // Для каждого уровня — ширины ниш и (на самой левой колонке) высота уровня
+    levels.forEach((lvl, li) => {
+      const yMid = (lvl.top + lvl.bot) / 2;
+      // Стойки которые присутствуют в этом уровне: их вертикальный диапазон
+      // [pTop..pBot] перекрывает [lvl.top..lvl.bot] на ≥10мм
+      const studsInLvl = elements
+        .filter((e: any) => e.type === "stud")
+        .filter((s: any) => {
+          const pTop = s.pTop ?? 0;
+          const pBot = s.pBot ?? iHmm;
+          const overlap = Math.min(pBot, lvl.bot) - Math.max(pTop, lvl.top);
+          return overlap > 10;
+        })
+        .sort((a: any, b: any) => (a.x ?? 0) - (b.x ?? 0));
 
-    allDims.forEach((d, i) => {
-      if (d.t === "w") {
-        // Каждая колонка — от ВНУТРЕННЕГО левого края (после стойки если есть)
-        // до правого. Это даёт чистую ширину ниши между стойками — пользователь
-        // видит реально полезную ширину для размещения.
-        const x1 = toX(d.x);
-        const x2 = toX(d.x + (d.w ?? 0));
-        dims.push({
-          key: `col-${i}`, text: `${Math.round(d.w ?? 0)}`, axis: "h",
-          p1: { x: x1, y: halfH, z: zFront },
-          p2: { x: x2, y: halfH, z: zFront },
-          offset3d: { x: 0, y: OFF_NEAR, z: 0 },
-        });
-      } else if (d.t === "h") {
-        // Вертикальная — высота сегмента в колонке.
-        // computeDims считает h между центрами полок. Привязываем визуально
-        // к внешним граням полок: yTop = topY + t/2 (низ верхней полки),
-        // yBot = topY + h - t/2. Если граница = потолок/пол — оставляем как есть.
-        const topYRaw = d.topY ?? 0;
-        const segH = d.h ?? 0;
-        const isTopWall = topYRaw <= 1;
-        const isBotWall = topYRaw + segH >= iHmm - 1;
-        const yTop = isTopWall ? topYRaw : topYRaw + t / 2;
-        const yBot = isBotWall ? topYRaw + segH : topYRaw + segH - t / 2;
-        const visH = yBot - yTop;
-        const xCol = toX(d.x);
-        const y1 = toY(yTop);
-        const y2 = toY(yBot);
-        dims.push({
-          key: `row-${i}`, text: `${Math.round(visH)}`, axis: "v",
-          p1: { x: xCol, y: y1, z: zFront },
-          p2: { x: xCol, y: y2, z: zFront },
-          offset3d: { x: -OFF_NEAR, y: 0, z: 0 },
+      // X-границы ниш в этом уровне: левая стенка → [стойка] → ... → правая стенка
+      // Считаем ВНУТРЕННИЕ грани (после толщины стойки/стенки).
+      const niches: { left: number, right: number }[] = [];
+      let cursorL = 0; // внутренний левый край (правая грань левой стенки = 0 если корпус уже включает стенки в iW; в нашем случае iW = внутренняя ширина)
+      for (const s of studsInLvl) {
+        const sx = s.x ?? 0;
+        // Ниша от cursorL до sx (левой грани стойки)
+        if (sx - cursorL > 25) niches.push({ left: cursorL, right: sx });
+        cursorL = sx + t; // правее стойки
+      }
+      // Последняя ниша до правой стенки
+      if (iWmm - cursorL > 25) niches.push({ left: cursorL, right: iWmm });
+
+      // Y для линии размеров. На САМОМ ВЕРХНЕМ уровне ставим линию НАД корпусом,
+      // на остальных — внутри уровня под потолком уровня (на верхней грани полки).
+      const isTopLevel = li === 0;
+      let dimY: number;
+      let dimOffset: number;
+      if (isTopLevel) {
+        // Над корпусом — на той же линии что и total-w, но ближе (OFF_NEAR)
+        dimY = halfH;
+        dimOffset = OFF_NEAR;
+      } else {
+        // Внутри: чуть выше верхней полки (внутри уровня)
+        dimY = toY(lvl.top);
+        dimOffset = -OFF_NEAR; // вверх внутри уровня = в направлении потолка уровня
+      }
+      // Если в уровне только одна ниша и она = вся ширина iW — общая ширина уже
+      // показана через total-w, поэтому дублировать не надо. Пропускаем.
+      const onlyOneFull = niches.length === 1 && niches[0].right - niches[0].left >= iWmm - 5;
+      if (!onlyOneFull || !isTopLevel) {
+        niches.forEach((n, ni) => {
+          dims.push({
+            key: `lvl-${li}-niche-${ni}`,
+            text: `${Math.round(n.right - n.left)}`,
+            axis: "h",
+            p1: { x: toX(n.left), y: isTopLevel ? halfH : toY(lvl.top), z: zFront },
+            p2: { x: toX(n.right), y: isTopLevel ? halfH : toY(lvl.top), z: zFront },
+            offset3d: { x: 0, y: dimOffset, z: 0 },
+          });
         });
       }
-    });
 
-    // ── Толщины полок сбоку колонки (как просил пользователь) ──
-    // Для каждой колонки находим полки которые её перекрывают и рисуем толщину 16
-    // между сегментами высот. Это даёт визуализацию "сегмент 569 / полка 16 / сегмент 769"
-    // вместо "569 → 769" с непонятным разрывом. Привязка к той же x-координате что и
-    // высоты сегментов в этой колонке.
-    cols.forEach((col, ci) => {
-      // Полки которые реально перекрывают эту колонку
-      const colShelves = elements
-        .filter((e: any) => e.type === "shelf")
-        .filter((sh: any) => {
-          const shL = sh.x ?? 0;
-          const shR = shL + (sh.w ?? iWmm);
-          return shR > col.sl + 1 && shL < col.sl + col.sw - 1;
-        })
-        .sort((a: any, b: any) => (a.y ?? 0) - (b.y ?? 0));
-      // Для каждой полки — риска толщины
-      const xCol = toX(col.sl);
-      colShelves.forEach((sh: any, idx: number) => {
-        const yMid = sh.y ?? 0;
-        const yTop = yMid - t / 2;
-        const yBot = yMid + t / 2;
-        dims.push({
-          key: `shelfT-${ci}-${idx}`, text: `${t}`, axis: "v",
-          p1: { x: xCol, y: toY(yTop), z: zFront },
-          p2: { x: xCol, y: toY(yBot), z: zFront },
-          offset3d: { x: -OFF_NEAR, y: 0, z: 0 },
-        });
+      // Высота уровня — слева СНАРУЖИ корпуса
+      const lvlH = lvl.bot - lvl.top;
+      dims.push({
+        key: `lvl-${li}-h`,
+        text: `${Math.round(lvlH)}`,
+        axis: "v",
+        p1: { x: -halfW, y: toY(lvl.top), z: zFront },
+        p2: { x: -halfW, y: toY(lvl.bot), z: zFront },
+        offset3d: { x: -OFF_NEAR, y: 0, z: 0 },
       });
     });
 
