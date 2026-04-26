@@ -612,27 +612,45 @@ export default function Wardrobe3D({
 
     allDims.forEach((d, i) => {
       if (d.t === "w") {
-        // Горизонтальная — ширина колонки (внутреннее расстояние между стойками/стенками)
-        const x1 = toX(d.x);
-        const x2 = toX(d.x + (d.w ?? 0));
+        // Горизонтальная ширина колонки. Чтобы риски размера ВИЗУАЛЬНО СОВПАДАЛИ
+        // с рисками толщины стойки (которая идёт от внешней грани до внешней),
+        // показываем расстояние от ВНЕШНЕЙ ГРАНИ левой стойки до ВНЕШНЕЙ ГРАНИ
+        // правой. Берём этот диапазон из computeTopLevelCols: col.left → col.right.
+        // d.x = col.sl (внутренний край), col.left = d.x - t (если слева есть стойка).
+        // Используем индекс si чтобы достать оригинальный col.
+        const col = cols[d.si ?? -1];
+        const left = col?.left ?? d.x;
+        const right = col?.right ?? (d.x + (d.w ?? 0));
+        const fullW = right - left;
+        const x1 = toX(left);
+        const x2 = toX(right);
         dims.push({
-          key: `col-${i}`, text: `${Math.round(d.w ?? 0)}`, axis: "h",
+          key: `col-${i}`, text: `${Math.round(fullW)}`, axis: "h",
           p1: { x: x1, y: halfH, z: zFront },
           p2: { x: x2, y: halfH, z: zFront },
           offset3d: { x: 0, y: OFF_NEAR, z: 0 },
         });
       } else if (d.t === "h") {
-        // Вертикальная — высота сегмента в колонке.
-        // d.x = внутренний левый край колонки, d.topY = верхняя граница сегмента.
-        // Линия прижимается к левой стенке колонки (для каждой колонки своя).
+        // Вертикальная — высота сегмента в колонке. computeDims считает h
+        // как расстояние МЕЖДУ ЦЕНТРАМИ полок (полка — это y центра).
+        // Хотим визуально привязать риски к внешним граням полок: верхняя
+        // граница сегмента = topY + t/2 (низ верхней полки), нижняя = topY + h - t/2
+        // (верх нижней полки). Если topY = 0 (потолок) или y = iH (пол) —
+        // оставляем как есть, это внешние грани корпуса.
+        const topYRaw = d.topY ?? 0;
+        const segH = d.h ?? 0;
+        const isTopWall = topYRaw <= 1;          // верхняя граница = потолок корпуса
+        const isBotWall = topYRaw + segH >= iHmm - 1; // нижняя граница = пол корпуса
+        const yTop = isTopWall ? topYRaw : topYRaw + t / 2;
+        const yBot = isBotWall ? topYRaw + segH : topYRaw + segH - t / 2;
+        const visH = yBot - yTop;
         const xCol = toX(d.x);
-        const y1 = toY(d.topY ?? 0);
-        const y2 = toY((d.topY ?? 0) + (d.h ?? 0));
+        const y1 = toY(yTop);
+        const y2 = toY(yBot);
         dims.push({
-          key: `row-${i}`, text: `${Math.round(d.h ?? 0)}`, axis: "v",
+          key: `row-${i}`, text: `${Math.round(visH)}`, axis: "v",
           p1: { x: xCol, y: y1, z: zFront },
           p2: { x: xCol, y: y2, z: zFront },
-          // Левее ниши на OFF_NEAR (за стенку корпуса)
           offset3d: { x: -OFF_NEAR, y: 0, z: 0 },
         });
       }
