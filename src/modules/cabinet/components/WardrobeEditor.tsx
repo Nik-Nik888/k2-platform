@@ -113,7 +113,15 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
     }
   }, []);
 
-  const orderRef = useRef(1);
+  // orderRef — счётчик _order для новых элементов. КРИТИЧЕСКИ важно:
+  // при загрузке сохранённого шкафа надо стартовать с max(_order существующих) + 1.
+  // Иначе новые детали получат меньший _order и в adjust() будут иметь приоритет
+  // над уже установленными — что приводит к «полка прорезает корпус» при редактировании.
+  const orderRef = useRef(
+    initial?.elements && initial.elements.length > 0
+      ? Math.max(...initial.elements.map((e: any) => e._order || 0), 0) + 1
+      : 1
+  );
   const svgRef = useRef(null);
 
   const t = corpus.thickness;

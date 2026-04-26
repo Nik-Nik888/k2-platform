@@ -2822,14 +2822,16 @@ export default function Wardrobe3D({
           }
 
           // Обновляем позицию ⚙️ ярлычка свойств — он следует за выделенной деталью.
-          // Берём центр меша selEl, проецируем в screen, ставим над деталью.
+          // Положение зависит от типа: для стойки слева от середины, для остальных
+          // (полка, дверь, ящик, штанга, панель) — над центром детали. ⚙️ ставится
+          // строго рядом с деталью, не на ней — чтоб не перекрывать.
           const gearEl = gearBadgeRef.current;
           const curSelId = propsRef.current.selId;
           if (gearEl) {
             if (curSelId && !propsRef.current.placeMode && !propsRef.current.drag3d) {
               const meshes = elementMeshes.get(curSelId);
+              const curEl = (propsRef.current.elements || []).find((x: any) => x.id === curSelId);
               if (meshes && meshes.length > 0) {
-                // Bounding box по всем мешам элемента
                 const bbox = new THREE.Box3();
                 for (const m of meshes) {
                   if (m.geometry) {
@@ -2840,20 +2842,36 @@ export default function Wardrobe3D({
                   }
                 }
                 if (!bbox.isEmpty()) {
-                  // Центр сверху bbox: x — центр, y — top, z — front
-                  const cx = (bbox.min.x + bbox.max.x) / 2;
+                  const cxMid = (bbox.min.x + bbox.max.x) / 2;
+                  const cxLeft = bbox.min.x;
                   const cyTop = bbox.max.y;
                   const cyMid = (bbox.min.y + bbox.max.y) / 2;
                   const czFront = bbox.max.z;
-                  // Проецируем точку «над передним верхом» в screen
-                  // Сначала пробуем сверху, если за пределами — справа от середины
-                  let p = projectToScreen(cx, cyTop, czFront);
-                  if (!p?.visible) p = projectToScreen(cx, cyMid, czFront);
+
+                  // Точка анкера в 3D + screen-смещение в пикселях
+                  let anchor3d: { x: number; y: number; z: number };
+                  let offsetPx: { x: number; y: number };
+
+                  if (curEl?.type === "stud") {
+                    // Стойка: ⚙️ слева от детали на середине высоты
+                    anchor3d = { x: cxLeft, y: cyMid, z: czFront };
+                    offsetPx = { x: -28, y: 0 };
+                  } else {
+                    // Полка/дверь/ящик/штанга/панель: ⚙️ над центром
+                    anchor3d = { x: cxMid, y: cyTop, z: czFront };
+                    offsetPx = { x: 0, y: -28 };
+                  }
+
+                  const p = projectToScreen(anchor3d.x, anchor3d.y, anchor3d.z);
                   if (p?.visible) {
+                    const finalX = p.px + offsetPx.x;
+                    const finalY = p.py + offsetPx.y;
+                    // Кламп чтобы значок не уходил за canvas (минимум 24px от края)
+                    const cw = mountRef.current?.clientWidth || 800;
+                    const ch = mountRef.current?.clientHeight || 600;
                     gearEl.style.display = "";
-                    // Смещение чуть выше детали (-24px) чтоб не перекрывала
-                    gearEl.style.left = `${p.px}px`;
-                    gearEl.style.top = `${Math.max(20, p.py - 24)}px`;
+                    gearEl.style.left = `${Math.max(24, Math.min(cw - 24, finalX))}px`;
+                    gearEl.style.top = `${Math.max(24, Math.min(ch - 24, finalY))}px`;
                   } else {
                     gearEl.style.display = "none";
                   }
