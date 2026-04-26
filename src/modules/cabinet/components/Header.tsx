@@ -72,16 +72,20 @@ export function Header(props: HeaderProps) {
               type="text"
               value={cabinetName}
               onChange={e => setCabinetName(e.target.value)}
+              onFocus={e => e.target.select()}
               placeholder="Без названия"
+              title="Редактировать название шкафа"
               style={{
                 background: "transparent",
                 border: "none",
+                borderBottom: "1px dashed rgba(217,119,6,0.5)",
                 outline: "none",
                 fontSize: 12, fontWeight: 700, letterSpacing: "0.1em",
                 textTransform: "uppercase", color: "#d1d5db",
-                padding: 0, margin: 0,
-                width: 180,
+                padding: "1px 4px", margin: 0,
+                width: isMobile ? 140 : 220,
                 fontFamily: "inherit",
+                cursor: "text",
               }}
             />
           ) : (
@@ -100,18 +104,18 @@ export function Header(props: HeaderProps) {
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        {/* Кнопка возврата к списку шкафов */}
+        {/* Кнопка возврата к списку шкафов. На мобильном показываем только эмодзи. */}
         <button
           onClick={() => navigate("/cabinet/list")}
           title="Все мои шкафы"
           style={{
-            padding: "6px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700,
+            padding: isMobile ? "6px 8px" : "6px 12px", borderRadius: 4, fontSize: isMobile ? 14 : 11, fontWeight: 700,
             background: "rgba(96,165,250,0.12)", color: "#60a5fa",
             border: "1px solid rgba(96,165,250,0.3)",
             cursor: "pointer", fontFamily: "inherit",
             display: "flex", alignItems: "center", gap: 4,
           }}
-        >📁 Шкафы</button>
+        >📁{!isMobile && " Шкафы"}</button>
 
         {/* Drag mode indicator (mobile) */}
         {mobileDragMode && isMobile && (
