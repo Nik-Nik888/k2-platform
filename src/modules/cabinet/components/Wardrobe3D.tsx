@@ -2310,7 +2310,7 @@ export default function Wardrobe3D({
           setDrag3d(null);
           return;
         }
-        const { placeMode: pm, placeInZone: piz, setPlaceMode: spm } = propsRef.current;
+        const { placeMode: pm, placeInZone: piz, setPlaceMode: spm, t: ct } = propsRef.current;
         // Короткий клик (не drag)?
         const dx = (e?.clientX ?? 0) - downX;
         const dy = (e?.clientY ?? 0) - downY;
@@ -2325,9 +2325,29 @@ export default function Wardrobe3D({
         if (isTouchDragPlace) {
           // Зафиксировать фантом в текущем месте: фантом уже отрисован updateZoneHighlight
           // на координатах последнего pointermove. Сохраняем эти координаты.
+          // Применяем snap к тем же осям что и в фантоме чтобы зафиксированная
+          // позиция совпадала с визуально показанной.
           const proj = screenToCabinetMm(e.clientX, e.clientY);
           if (proj) {
-            setPendingPlace({ clickX: proj.clickX, clickY: proj.clickY });
+            const pmTouch = propsRef.current.placeMode;
+            let { clickX, clickY } = proj;
+            if (pmTouch === "stud") {
+              const { centers, edges } = collectSnapTargets("__placing__", "x");
+              const r = applySnap(Math.round(clickX), [...centers, ...edges]);
+              clickX = r.value;
+            } else if (pmTouch === "shelf") {
+              const { centers, edges, dividers } = collectSnapTargets("__placing__", "y");
+              const all: number[] = [];
+              all.push(...centers, ...dividers);
+              for (const e of edges) all.push(e + ct / 2, e - ct / 2);
+              const r = applySnap(Math.round(clickY), all);
+              clickY = r.value;
+            } else if (pmTouch === "rod") {
+              const { centers, edges } = collectSnapTargets("__placing__", "y");
+              const r = applySnap(Math.round(clickY), [...centers, ...edges]);
+              clickY = r.value;
+            }
+            setPendingPlace({ clickX, clickY });
           }
           return;
         }
@@ -2341,11 +2361,29 @@ export default function Wardrobe3D({
         // 2. Если placeMode ВЫКЛЮЧЕН → проверяем попадание по элементу для выделения.
         if (pm && piz) {
           // ─── Режим постановки: проекция → placeInZone ───
-          // Используем последнюю позицию фантома (он уже посчитан updateZoneHighlight)
-          // или координаты клика как fallback.
           const proj = screenToCabinetMm(e.clientX, e.clientY);
           if (proj) {
-            piz(null, proj.clickX, proj.clickY);
+            // Применяем snap к координатам клика (как в фантоме фантоме postaviti).
+            // Раньше snap менял только визуал фантома — а сам placeInZone получал
+            // сырые clickX/clickY и ставил элемент мимо snap-цели.
+            let { clickX, clickY } = proj;
+            if (pm === "stud") {
+              const { centers, edges } = collectSnapTargets("__placing__", "x");
+              const r = applySnap(Math.round(clickX), [...centers, ...edges]);
+              clickX = r.value;
+            } else if (pm === "shelf") {
+              const { centers, edges, dividers } = collectSnapTargets("__placing__", "y");
+              const all: number[] = [];
+              all.push(...centers, ...dividers);
+              for (const e of edges) all.push(e + ct / 2, e - ct / 2);
+              const r = applySnap(Math.round(clickY), all);
+              clickY = r.value;
+            } else if (pm === "rod") {
+              const { centers, edges } = collectSnapTargets("__placing__", "y");
+              const r = applySnap(Math.round(clickY), [...centers, ...edges]);
+              clickY = r.value;
+            }
+            piz(null, clickX, clickY);
             hideZone();
           }
           return;
