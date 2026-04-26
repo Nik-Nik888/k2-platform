@@ -26,19 +26,40 @@ import { computeTopLevelCols, computeDims, applyHorizDimChange, applyVertDimChan
 import { placeInZone as purePlaceInZone, computeDoorDimensions } from "../logic/placement";
 import { useDragHandlers } from "../hooks/useDragHandlers";
 import { useMobileTouch } from "../hooks/useMobileTouch";
+import { createCabinet, updateCabinet, type CabinetCorpus } from "../api/cabinetApi";
 /* ═══════════════════════════════
    MAIN EDITOR
    ═══════════════════════════════ */
-export default function WardrobeEditor() {
-  const [corpus, setCorpus] = useState({ width: 1200, height: 2100, depth: 600, thickness: 16 });
-  const [elements, setElements] = useState([]);
+interface WardrobeEditorProps {
+  // Если задан — открывает существующий шкаф, иначе пустой "draft"
+  cabinetId?: string | null;
+  // Начальные данные (для нового шкафа из CRM/клиента)
+  initial?: {
+    name?: string;
+    corpus?: { width: number; height: number; depth: number; thickness: number };
+    elements?: any[];
+    corpus_texture_id?: string | null;
+    facade_texture_id?: string | null;
+    client_id?: string | null;
+  };
+  // Колбэк после первого сохранения (создание) — родитель может обновить URL
+  onCreated?: (id: string) => void;
+}
+
+export default function WardrobeEditor({ cabinetId, initial, onCreated }: WardrobeEditorProps = {}) {
+  const [corpus, setCorpus] = useState(initial?.corpus ?? { width: 1200, height: 2100, depth: 600, thickness: 16 });
+  const [elements, setElements] = useState<any[]>(initial?.elements ?? []);
+  const [cabinetName, setCabinetName] = useState<string>(initial?.name ?? "Без названия");
+  const [currentCabinetId, setCurrentCabinetId] = useState<string | null>(cabinetId ?? null);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [clientId, setClientId] = useState<string | null>(initial?.client_id ?? null);
   const [selId, setSelId] = useState(null);
   const [drag, setDrag] = useState(null);
   const [panel, setPanel] = useState("hardware");
   const [showDoors, setShowDoors] = useState(true);
   const [showCorpus, setShowCorpus] = useState(false); // false = пустая рамка (свободное проектирование)
-  const [corpusTextureId, setCorpusTextureId] = useState("egger-h1137");
-  const [facadeTextureId, setFacadeTextureId] = useState("egger-w1100");
+  const [corpusTextureId, setCorpusTextureId] = useState(initial?.corpus_texture_id ?? "egger-h1137");
+  const [facadeTextureId, setFacadeTextureId] = useState(initial?.facade_texture_id ?? "egger-w1100");
   const [customTextures, setCustomTextures] = useState([]);
   const [customBrands, setCustomBrands] = useState([]);
   const [leftOpen, setLeftOpen] = useState(true);
@@ -551,6 +572,58 @@ export default function WardrobeEditor() {
     onCanvasDoubleTap,
   } = useMobileTouch(userZoom, setUserZoom, setDrag);
 
+  // ═══ Auto-save ═══
+  // Сохраняем шкаф в Supabase через 1.5с после последнего изменения.
+  // Первое сохранение создаёт запись (createCabinet), последующие — updateCabinet.
+  // Состояние отображается в шапке (idle/saving/saved/error).
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipFirstSaveRef = useRef(true);
+  useEffect(() => {
+    // Первый рендер — initial state, не сохраняем (это либо пустой draft,
+    // либо уже загруженные данные из БД).
+    if (skipFirstSaveRef.current) {
+      skipFirstSaveRef.current = false;
+      return;
+    }
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      setSaveState("saving");
+      try {
+        if (currentCabinetId) {
+          await updateCabinet(currentCabinetId, {
+            name: cabinetName,
+            corpus,
+            elements,
+            corpus_texture_id: corpusTextureId,
+            facade_texture_id: facadeTextureId,
+            client_id: clientId,
+          });
+        } else {
+          // Первое сохранение — создаём
+          const row = await createCabinet({
+            name: cabinetName,
+            corpus,
+            elements,
+            corpus_texture_id: corpusTextureId,
+            facade_texture_id: facadeTextureId,
+            client_id: clientId,
+          });
+          setCurrentCabinetId(row.id);
+          if (onCreated) onCreated(row.id);
+        }
+        setSaveState("saved");
+        // Через 2с возвращаем в idle, чтобы плашка не висела вечно
+        setTimeout(() => setSaveState(s => s === "saved" ? "idle" : s), 2000);
+      } catch (err) {
+        console.error("Cabinet save failed:", err);
+        setSaveState("error");
+      }
+    }, 1500);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [corpus, elements, cabinetName, corpusTextureId, facadeTextureId, clientId, currentCabinetId, onCreated]);
+
   const canvas = (
 <svg ref={svgRef} width={svgW} height={svgH} viewBox={`-70 -16 ${corpus.width * SC + 140} ${corpus.height * SC + 60}`} style={{ cursor: placeMode ? "crosshair" : "default", filter: "drop-shadow(0 4px 20px rgba(0,0,0,0.5))" }} onClick={onSvgClick}>
   <defs>
@@ -650,11 +723,12 @@ export default function WardrobeEditor() {
         setShowDoors={setShowDoors}
         show3d={show3d}
         setShow3d={(v) => {
-          // При переходе в 3D сбрасываем placeMode (если был активен в 2D),
-          // иначе клик по элементу в 3D будет восприниматься как постановка, а не выделение
           if (v && placeMode) setPlaceMode(null);
           setShow3d(v);
         }}
+        cabinetName={cabinetName}
+        setCabinetName={setCabinetName}
+        saveState={saveState}
       />
 
       {/* ═══ PRE-PLACEMENT PREFS ═══

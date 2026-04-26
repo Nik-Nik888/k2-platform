@@ -3,6 +3,7 @@
  * активных режимов и кнопками «Двери» / «3D».
  */
 import React from "react";
+import { useNavigate } from "react-router-dom";
 
 export interface HeaderProps {
   /** Размеры корпуса для подзаголовка. */
@@ -24,6 +25,11 @@ export interface HeaderProps {
   /** Открытие 3D-просмотра. */
   show3d: boolean;
   setShow3d: (v: boolean) => void;
+  /** Название шкафа — редактируемое в шапке. */
+  cabinetName?: string;
+  setCabinetName?: (v: string) => void;
+  /** Состояние авто-сохранения для индикатора. */
+  saveState?: "idle" | "saving" | "saved" | "error";
 }
 
 const PLACE_MODE_LABELS: Record<string, string> = {
@@ -35,12 +41,14 @@ const PLACE_MODE_LABELS: Record<string, string> = {
 };
 
 export function Header(props: HeaderProps) {
+  const navigate = useNavigate();
   const {
     corpus, showCorpus, t,
     mobileDragMode, setMobileDragMode, isMobile,
     placeMode, setPlaceMode,
     showDoors, setShowDoors,
     show3d, setShow3d,
+    cabinetName, setCabinetName, saveState = "idle",
   } = props;
 
   return (
@@ -59,17 +67,52 @@ export function Header(props: HeaderProps) {
           color: "#000", fontWeight: 900, fontSize: 11,
         }}>К2</div>
         <div>
-          <h1 style={{
-            fontSize: 12, fontWeight: 700, letterSpacing: "0.1em",
-            textTransform: "uppercase", color: "#d1d5db", margin: 0,
-          }}>Редактор мебели</h1>
-          <p style={{ fontSize: 11, color: "#555", margin: 0 }}>
-            {corpus.width}×{corpus.height}×{corpus.depth} · {showCorpus ? `${t}мм ЛДСП` : "рамка"}
+          {setCabinetName && cabinetName !== undefined ? (
+            <input
+              type="text"
+              value={cabinetName}
+              onChange={e => setCabinetName(e.target.value)}
+              placeholder="Без названия"
+              style={{
+                background: "transparent",
+                border: "none",
+                outline: "none",
+                fontSize: 12, fontWeight: 700, letterSpacing: "0.1em",
+                textTransform: "uppercase", color: "#d1d5db",
+                padding: 0, margin: 0,
+                width: 180,
+                fontFamily: "inherit",
+              }}
+            />
+          ) : (
+            <h1 style={{
+              fontSize: 12, fontWeight: 700, letterSpacing: "0.1em",
+              textTransform: "uppercase", color: "#d1d5db", margin: 0,
+            }}>Редактор мебели</h1>
+          )}
+          <p style={{ fontSize: 11, color: "#555", margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+            <span>{corpus.width}×{corpus.height}×{corpus.depth} · {showCorpus ? `${t}мм ЛДСП` : "рамка"}</span>
+            {saveState === "saving" && <span style={{ color: "#888" }}>· сохраняется…</span>}
+            {saveState === "saved" && <span style={{ color: "#22c55e" }}>· сохранено ✓</span>}
+            {saveState === "error" && <span style={{ color: "#ef4444" }}>· ошибка сохранения</span>}
           </p>
         </div>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {/* Кнопка возврата к списку шкафов */}
+        <button
+          onClick={() => navigate("/cabinet/list")}
+          title="Все мои шкафы"
+          style={{
+            padding: "6px 12px", borderRadius: 4, fontSize: 11, fontWeight: 700,
+            background: "rgba(96,165,250,0.12)", color: "#60a5fa",
+            border: "1px solid rgba(96,165,250,0.3)",
+            cursor: "pointer", fontFamily: "inherit",
+            display: "flex", alignItems: "center", gap: 4,
+          }}
+        >📁 Шкафы</button>
+
         {/* Drag mode indicator (mobile) */}
         {mobileDragMode && isMobile && (
           <div style={{
