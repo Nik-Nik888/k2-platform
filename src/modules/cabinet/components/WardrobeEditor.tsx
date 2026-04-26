@@ -577,70 +577,84 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
     onCanvasDoubleTap,
   } = useMobileTouch(userZoom, setUserZoom, setDrag);
 
-  // ═══ Auto-save ═══
-  // Сохраняем шкаф в Supabase через 5с после последнего изменения.
-  // Первое сохранение создаёт запись (createCabinet), последующие — updateCabinet.
-  // Индикатор «сохранено ✓» показываем только если сохранение длилось >300мс
-  // (быстрые сохранения не моргают индикатором).
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ═══ Ручное сохранение ═══
+  // Auto-save выключен — он сохранял промежуточные состояния (например пока
+  // adjust() ещё не отработал), что приводило к битым данным после reload.
+  // Теперь пользователь явно жмёт «Сохранить». Кнопка подсвечивается когда
+  // есть несохранённые изменения. При попытке закрыть/обновить страницу с
+  // несохранёнными изменениями — браузер спросит подтверждение.
+  //
+  // hasUnsavedChanges — флаг что состояние отличается от того что в БД.
+  // Сбрасывается после успешного сохранения, ставится в true при изменении
+  // corpus/elements/name/textures.
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const skipFirstSaveRef = useRef(true);
   useEffect(() => {
     if (skipFirstSaveRef.current) {
       skipFirstSaveRef.current = false;
       return;
     }
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
-      const startMs = Date.now();
-      // setSaveState("saving") НЕ вызываем сразу — иначе "saving" моргнёт даже
-      // при быстрых сохранениях. Покажем "saving" только если сохранение
-      // длится дольше 300мс.
-      let savingShown = false;
-      const showSavingTimer = setTimeout(() => {
-        savingShown = true;
-        setSaveState("saving");
-      }, 300);
-      try {
-        if (currentCabinetId) {
-          await updateCabinet(currentCabinetId, {
-            name: cabinetName,
-            corpus,
-            elements,
-            corpus_texture_id: corpusTextureId,
-            facade_texture_id: facadeTextureId,
-            client_id: clientId,
-          });
-        } else {
-          const row = await createCabinet({
-            name: cabinetName,
-            corpus,
-            elements,
-            corpus_texture_id: corpusTextureId,
-            facade_texture_id: facadeTextureId,
-            client_id: clientId,
-          });
-          setCurrentCabinetId(row.id);
-          if (onCreated) onCreated(row.id);
-        }
-        clearTimeout(showSavingTimer);
-        // Показываем "сохранено" только если "saving" уже было показано
-        // или сохранение длилось дольше 300мс.
-        if (savingShown || Date.now() - startMs > 300) {
-          setSaveState("saved");
-          setTimeout(() => setSaveState(s => s === "saved" ? "idle" : s), 1500);
-        } else {
-          setSaveState("idle");
-        }
-      } catch (err) {
-        clearTimeout(showSavingTimer);
-        console.error("Cabinet save failed:", err);
-        setSaveState("error");
-      }
-    }, 5000);
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    setHasUnsavedChanges(true);
+  }, [corpus, elements, cabinetName, corpusTextureId, facadeTextureId, clientId]);
+
+  // Beforeunload — блокирует случайное закрытие/обновление страницы с несохранёнными
+  // изменениями. Браузер покажет нативный confirm-диалог.
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";  // Chrome требует returnValue
+      return "";
     };
-  }, [corpus, elements, cabinetName, corpusTextureId, facadeTextureId, clientId, currentCabinetId, onCreated]);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  // Функция ручного сохранения — вызывается из шапки.
+  const handleSave = useCallback(async () => {
+    setSaveState("saving");
+    try {
+      if (currentCabinetId) {
+        await updateCabinet(currentCabinetId, {
+          name: cabinetName,
+          corpus,
+          elements,
+          corpus_texture_id: corpusTextureId,
+          facade_texture_id: facadeTextureId,
+          client_id: clientId,
+        });
+      } else {
+        const row = await createCabinet({
+          name: cabinetName,
+          corpus,
+          elements,
+          corpus_texture_id: corpusTextureId,
+          facade_texture_id: facadeTextureId,
+          client_id: clientId,
+        });
+        setCurrentCabinetId(row.id);
+        if (onCreated) onCreated(row.id);
+      }
+      setSaveState("saved");
+      setHasUnsavedChanges(false);
+      setTimeout(() => setSaveState(s => s === "saved" ? "idle" : s), 1500);
+    } catch (err) {
+      console.error("Cabinet save failed:", err);
+      setSaveState("error");
+    }
+  }, [currentCabinetId, cabinetName, corpus, elements, corpusTextureId, facadeTextureId, clientId, onCreated]);
+
+  // Cmd/Ctrl+S — горячая клавиша сохранения.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        if (hasUnsavedChanges) handleSave();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hasUnsavedChanges, handleSave]);
 
   const canvas = (
 <svg ref={svgRef} width={svgW} height={svgH} viewBox={`-70 -16 ${corpus.width * SC + 140} ${corpus.height * SC + 60}`} style={{ cursor: placeMode ? "crosshair" : "default", filter: "drop-shadow(0 4px 20px rgba(0,0,0,0.5))" }} onClick={onSvgClick}>
@@ -999,6 +1013,8 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
         cabinetName={cabinetName}
         setCabinetName={setCabinetName}
         saveState={saveState}
+        hasUnsavedChanges={hasUnsavedChanges}
+        onSave={handleSave}
         onShowList={() => navigate("/cabinet/list")}
         // Правая панель свойств для выделенного элемента рендерится ВНУТРИ Wardrobe3D
         // (поверх 3D, на десктопе — sidebar 320px справа, на мобильном — bottom sheet).

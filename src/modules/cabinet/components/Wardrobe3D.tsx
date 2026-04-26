@@ -124,6 +124,8 @@ export default function Wardrobe3D({
   setCabinetName = null,
   saveState = "idle",
   onShowList = null,
+  hasUnsavedChanges = false,
+  onSave = null,
 }) {
   const mountRef = useRef(null);
   const stateRef = useRef({});
@@ -2977,21 +2979,59 @@ export default function Wardrobe3D({
             <div style={{
               fontSize: 10, color: "#444",
               fontFamily: "'IBM Plex Mono',monospace",
-              display: "flex", alignItems: "center", gap: 6,
             }}>
-              <span>{corpus.width}×{corpus.height}×{corpus.depth} мм</span>
-              {saveState === "saving" && <span style={{ color: "#888" }}>· сохраняется…</span>}
-              {saveState === "saved" && <span style={{ color: "#22c55e" }}>· сохранено ✓</span>}
-              {saveState === "error" && <span style={{ color: "#ef4444" }}>· ошибка</span>}
+              {corpus.width}×{corpus.height}×{corpus.depth} мм
+              {hasUnsavedChanges && <span style={{ marginLeft: 6, color: "#d97706" }}>· не сохранено</span>}
             </div>
           </div>
         </div>
 
-        {/* Кнопка возврата к списку шкафов. Показываем всегда — и в 3D и в 2D. */}
+        {/* Кнопки справа: Сохранить + Шкафы. Сохранить подсвечивается оранжевым
+            если есть несохранённые изменения, серый если всё сохранено. */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {onSave && (
+            <button
+              onClick={onSave}
+              disabled={!hasUnsavedChanges || saveState === "saving"}
+              title={hasUnsavedChanges ? "Сохранить проект (Ctrl/Cmd+S)" : "Всё сохранено"}
+              style={{
+                padding: isMobile ? "6px 10px" : "6px 14px",
+                borderRadius: 4, fontSize: isMobile ? 14 : 11, fontWeight: 700,
+                background: hasUnsavedChanges
+                  ? "rgba(217,119,6,0.18)"
+                  : "rgba(50,50,60,0.3)",
+                color: hasUnsavedChanges ? "#d97706" : "#666",
+                border: hasUnsavedChanges
+                  ? "1px solid rgba(217,119,6,0.5)"
+                  : "1px solid rgba(80,80,90,0.4)",
+                cursor: hasUnsavedChanges ? "pointer" : "default",
+                fontFamily: "'IBM Plex Mono',monospace",
+                display: "flex", alignItems: "center", gap: 4,
+                opacity: saveState === "saving" ? 0.6 : 1,
+                position: "relative",
+              }}
+            >
+              {saveState === "saving" ? "⏳" : "💾"}
+              {!isMobile && <span>{saveState === "saving" ? "Сохраняю…" : "Сохранить"}</span>}
+              {hasUnsavedChanges && saveState !== "saving" && (
+                <span style={{
+                  position: "absolute", top: -3, right: -3,
+                  width: 8, height: 8, borderRadius: "50%",
+                  background: "#d97706",
+                  boxShadow: "0 0 4px rgba(217,119,6,0.6)",
+                }} />
+              )}
+            </button>
+          )}
+
           {onShowList && (
             <button
-              onClick={onShowList}
+              onClick={() => {
+                if (hasUnsavedChanges) {
+                  if (!window.confirm("Есть несохранённые изменения. Перейти к списку без сохранения?")) return;
+                }
+                onShowList();
+              }}
               title="Все мои шкафы"
               style={{
                 padding: isMobile ? "6px 10px" : "6px 14px",
