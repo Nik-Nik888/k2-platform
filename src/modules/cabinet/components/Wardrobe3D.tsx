@@ -359,6 +359,34 @@ export default function Wardrobe3D({
     setDrag3dInput(null);
   }, []);
 
+  // ═══ Скачивание скриншота сцены ═══
+  // Берём WebGL canvas (renderer.domElement) → toDataURL → ссылка на скачивание.
+  // Имя файла включает габариты и дату чтобы не путать множество скринов.
+  // SVG-overlay (размеры) не попадает в canvas — это отдельный DOM-элемент. Если
+  // нужен скрин с размерами, надо отдельно композитить — оставлю на потом.
+  const downloadScreenshot = useCallback(() => {
+    const renderer = stateRef.current.renderer;
+    if (!renderer) return;
+    try {
+      // Принудительный render чтобы буфер был актуальным
+      const scene = stateRef.current.scene;
+      const camera = stateRef.current.camera;
+      if (scene && camera) renderer.render(scene, camera);
+      const dataUrl = renderer.domElement.toDataURL("image/png");
+      const { width: W, height: H, depth: D } = corpus;
+      const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      const fname = `cabinet-${W}x${H}x${D}-${date}.png`;
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = fname;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error("Screenshot failed:", err);
+    }
+  }, [corpus]);
+
   // ═══ Edit-Z controls (Этап 5) ═══
   // Работает для выделенной панели insert или штанги.
   // A = значение спереди (утоплена от передней грани шкафа)
@@ -1367,7 +1395,11 @@ export default function Wardrobe3D({
     camera.lookAt(0, 0, 0);
 
     /* ═══ RENDERER ═══ */
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    // preserveDrawingBuffer: true — нужен чтобы renderer.domElement.toDataURL("image/png")
+    // возвращал актуальный кадр. Без этого toDataURL даёт пустую картинку (буфер
+    // очищается после render). Лёгкое снижение производительности ради функции
+    // экспорта скриншота.
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
     renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
@@ -1478,6 +1510,9 @@ export default function Wardrobe3D({
       // Сохраняем updateOutline в stateRef, чтобы можно было дёргать при изменении selId снаружи
       stateRef.current.updateOutline = updateOutline;
       stateRef.current.zoneHighlight = zoneHighlight;
+      stateRef.current.renderer = renderer;
+      stateRef.current.scene = scene;
+      stateRef.current.camera = camera;
       // Начальная подсветка (если selId уже задан)
       updateOutline(selId);
 
@@ -3063,6 +3098,28 @@ export default function Wardrobe3D({
               }}
             >📐 2D</button>
           )}
+
+          {/* Кнопка скачивания скриншота сцены в PNG.
+              Имя файла: cabinet-WxHxD-YYYY-MM-DD.png (например cabinet-1200x2100x600-2026-04-26.png).
+              Удобно отправлять клиенту визуализацию проекта. */}
+          <button
+            onClick={downloadScreenshot}
+            title="Скачать скриншот сцены (PNG)"
+            style={{
+              position: "absolute", top: 12, left: onClose ? 112 : 56,
+              width: 36, height: 36, borderRadius: 6,
+              padding: 0,
+              cursor: "pointer",
+              border: "1px solid rgba(34,197,94,0.4)",
+              background: "rgba(34,197,94,0.15)",
+              color: "#22c55e",
+              fontSize: 16, lineHeight: 1,
+              fontFamily: "'IBM Plex Mono', monospace",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              zIndex: 9,
+              pointerEvents: "auto",
+            }}
+          >📷</button>
 
           {/* Индикатор активного placeMode — поверх 3D, сверху.
               pointerEvents: "none" на контейнере чтобы клики СКВОЗЬ плашку
