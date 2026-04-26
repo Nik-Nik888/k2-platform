@@ -119,6 +119,11 @@ export default function Wardrobe3D({
   // маленький ярлычок ⚙️ рядом с деталью. Тап на ярлычок → setPropsModalOpen(true).
   propsModalOpen = false,
   setPropsModalOpen = null,
+  // Шапка 3D-режима — имя шкафа, индикатор сохранения, кнопка списка
+  cabinetName = undefined,
+  setCabinetName = null,
+  saveState = "idle",
+  onShowList = null,
 }) {
   const mountRef = useRef(null);
   const stateRef = useRef({});
@@ -1466,6 +1471,7 @@ export default function Wardrobe3D({
   useEffect(() => {
     if (!mountRef.current) return;
     let cancelled = false;
+    let localAnimId: number | null = null;
 
     build().then(({ scene, camera, renderer, dist, elementMeshes, group, placeProjPlane, zoneHighlight, S, d, cTex, fTex }) => {
       if (cancelled) return;
@@ -2712,7 +2718,9 @@ export default function Wardrobe3D({
       stateRef.current.updateEditDimLabels = updateEditDimLabels;
 
       const animate = () => {
-        stateRef.current.animId = requestAnimationFrame(animate);
+        if (cancelled) return;
+        localAnimId = requestAnimationFrame(animate);
+        stateRef.current.animId = localAnimId;
         if (!isDragging) {} // no auto-rotation — manual only
         // Сохраняем текущее положение камеры в ref — чтобы при следующем rebuild
         // (добавление элемента, смена текстуры и т.д.) восстановить угол/зум.
@@ -2899,6 +2907,13 @@ export default function Wardrobe3D({
 
     return () => {
       cancelled = true;
+      // Останавливаем animate-loop старого build'a — иначе при rebuild старый
+      // rAF продолжает работать на удалённом renderer'e и борется за GPU
+      // с новым build'ом, что вызывает подёргивание сцены.
+      if (localAnimId !== null) {
+        cancelAnimationFrame(localAnimId);
+        localAnimId = null;
+      }
       stateRef.current.cleanup?.();
     };
   }, [build]);
@@ -2933,23 +2948,62 @@ export default function Wardrobe3D({
             boxShadow: "0 2px 8px rgba(96,165,250,0.3)",
           }}>3D</div>
           <div>
-            <div style={{
-              fontSize: 13, fontWeight: 700, color: "#d1d5db",
-              fontFamily: "'IBM Plex Mono',monospace",
-            }}>3D Редактор · ЛДСП</div>
+            {/* Имя шкафа — редактируемое поле (тап и печатай). Подчёркнуто пунктиром
+                чтобы было ясно что можно править. На мобильном уже. */}
+            {setCabinetName && cabinetName !== undefined ? (
+              <input
+                type="text"
+                value={cabinetName}
+                onChange={e => setCabinetName(e.target.value)}
+                onFocus={e => e.target.select()}
+                placeholder="Без названия"
+                style={{
+                  background: "transparent", border: "none",
+                  borderBottom: "1px dashed rgba(217,119,6,0.5)",
+                  outline: "none",
+                  fontSize: 13, fontWeight: 700, color: "#d1d5db",
+                  padding: "1px 4px", margin: 0,
+                  width: isMobile ? 140 : 200,
+                  fontFamily: "'IBM Plex Mono',monospace",
+                  cursor: "text",
+                }}
+              />
+            ) : (
+              <div style={{
+                fontSize: 13, fontWeight: 700, color: "#d1d5db",
+                fontFamily: "'IBM Plex Mono',monospace",
+              }}>3D Редактор · ЛДСП</div>
+            )}
             <div style={{
               fontSize: 10, color: "#444",
               fontFamily: "'IBM Plex Mono',monospace",
+              display: "flex", alignItems: "center", gap: 6,
             }}>
-              {corpus.width}×{corpus.height}×{corpus.depth} мм · Кромка · Петли · ДВП
-              <span style={{ marginLeft: 8, color: "#555" }}>Палец = вращение · 2 пальца = зум · клик = выделить</span>
+              <span>{corpus.width}×{corpus.height}×{corpus.depth} мм</span>
+              {saveState === "saving" && <span style={{ color: "#888" }}>· сохраняется…</span>}
+              {saveState === "saved" && <span style={{ color: "#22c55e" }}>· сохранено ✓</span>}
+              {saveState === "error" && <span style={{ color: "#ef4444" }}>· ошибка</span>}
             </div>
           </div>
         </div>
 
-        {/* Шапка теперь содержит только заголовок и описание шкафа.
-            Добавление элементов — через FAB ("+") справа внизу canvas (на всех устройствах).
-            Переключение на 2D — через кнопку в верхнем левом углу canvas рядом с «Размеры». */}
+        {/* Кнопка возврата к списку шкафов. Показываем всегда — и в 3D и в 2D. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {onShowList && (
+            <button
+              onClick={onShowList}
+              title="Все мои шкафы"
+              style={{
+                padding: isMobile ? "6px 10px" : "6px 14px",
+                borderRadius: 4, fontSize: isMobile ? 14 : 11, fontWeight: 700,
+                background: "rgba(96,165,250,0.12)", color: "#60a5fa",
+                border: "1px solid rgba(96,165,250,0.3)",
+                cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace",
+                display: "flex", alignItems: "center", gap: 4,
+              }}
+            >📁{!isMobile && " Шкафы"}</button>
+          )}
+        </div>
       </div>
 
       {/* BODY: 3D canvas + right panel (desktop) или bottom sheet (mobile) */}
@@ -3228,11 +3282,11 @@ export default function Wardrobe3D({
             </div>
           )}
 
-          {/* Контекстное меню выделенного элемента — быстрые действия.
-              Показывается когда есть выделение И нет placeMode.
-              Плавающая плашка снизу-по-центру над canvas.
-              Не мешает PropsPanel (справа/снизу) и индикатору edit-Z (сверху). */}
-          {selEl && !placeMode && (
+          {/* Контекстное меню выделенного элемента — только кнопка «Глубина» для panel/rod.
+              Удаление/дублирование убраны — теперь они в modal-свойствах через ⚙️ ярлычок.
+              Глубина оставлена как быстрый шорткат — это частое действие при редактировании
+              insert-панели и штанги. */}
+          {selEl && !placeMode && editableZ && (
             <div style={{
               position: "absolute",
               bottom: 24, left: "50%",
@@ -3246,71 +3300,26 @@ export default function Wardrobe3D({
               zIndex: 11,
               pointerEvents: "auto",
             }}>
-              {/* Удалить */}
-              {delSel && (
-                <button
-                  onClick={() => delSel()}
-                  title="Удалить элемент"
-                  style={{
-                    padding: "6px 10px", borderRadius: 5,
-                    border: "1px solid rgba(239,68,68,0.4)",
-                    background: "rgba(239,68,68,0.12)",
-                    color: "#f87171",
-                    fontSize: 11, fontWeight: 700,
-                    fontFamily: "'IBM Plex Mono',monospace",
-                    cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: 4,
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.25)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(239,68,68,0.12)"; }}
-                >
-                  🗑 Удалить
-                </button>
-              )}
-              {/* Дублировать */}
-              {onDuplicate && (
-                <button
-                  onClick={() => onDuplicate(selEl.id)}
-                  title="Создать копию рядом"
-                  style={{
-                    padding: "6px 10px", borderRadius: 5,
-                    border: "1px solid rgba(96,165,250,0.4)",
-                    background: "rgba(96,165,250,0.12)",
-                    color: "#93c5fd",
-                    fontSize: 11, fontWeight: 700,
-                    fontFamily: "'IBM Plex Mono',monospace",
-                    cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: 4,
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(96,165,250,0.25)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(96,165,250,0.12)"; }}
-                >
-                  📋 Дублировать
-                </button>
-              )}
-              {/* Глубина — только для insert-панели и штанги. Активирует edit-Z (A). */}
-              {editableZ && (
-                <button
-                  onClick={() => {
-                    setEditDim("A");
-                  }}
-                  title="Редактировать глубину (Z)"
-                  style={{
-                    padding: "6px 10px", borderRadius: 5,
-                    border: "1px solid rgba(251,191,36,0.4)",
-                    background: "rgba(251,191,36,0.12)",
-                    color: "#fcd34d",
-                    fontSize: 11, fontWeight: 700,
-                    fontFamily: "'IBM Plex Mono',monospace",
-                    cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: 4,
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(251,191,36,0.25)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(251,191,36,0.12)"; }}
-                >
-                  📏 Глубина
-                </button>
-              )}
+              <button
+                onClick={() => {
+                  setEditDim("A");
+                }}
+                title="Редактировать глубину (Z)"
+                style={{
+                  padding: "6px 10px", borderRadius: 5,
+                  border: "1px solid rgba(251,191,36,0.4)",
+                  background: "rgba(251,191,36,0.12)",
+                  color: "#fcd34d",
+                  fontSize: 11, fontWeight: 700,
+                  fontFamily: "'IBM Plex Mono',monospace",
+                  cursor: "pointer",
+                  display: "flex", alignItems: "center", gap: 4,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(251,191,36,0.25)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "rgba(251,191,36,0.12)"; }}
+              >
+                📏 Глубина
+              </button>
             </div>
           )}
 
@@ -3479,20 +3488,19 @@ export default function Wardrobe3D({
           )}
         </div>
 
-        {/* Если выделена деталь — показываем маленький ⚙️ ярлычок в верхнем
-            правом углу canvas. Это даёт возможность работать с деталью без
-            всегда-видимой панели свойств: двигать, ресайзить через popup,
-            а модальное окно свойств открывается только при необходимости. */}
+        {/* Если выделена деталь — показываем ⚙️ ярлычок СНИЗУ-СПРАВА над FAB.
+            Так он не загораживает шкаф и не дублирует кнопку 2D в верхнем углу.
+            FAB на bottom:24 (40-44px), ⚙️ ставим выше на gap 12 = bottom 24+44+12 = 80. */}
         {selEl && !placeMode && !drag3d && !propsModalOpen && (
           <button
             onClick={() => setPropsModalOpen?.(true)}
             title="Свойства детали"
             style={{
               position: "absolute",
-              top: isMobile ? 60 : 56,
-              right: 12,
+              bottom: 80,
+              right: 24,
               width: 44, height: 44,
-              borderRadius: 8,
+              borderRadius: "50%",
               padding: 0,
               cursor: "pointer",
               border: "1px solid rgba(217,119,6,0.5)",

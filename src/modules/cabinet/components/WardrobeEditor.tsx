@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import Wardrobe3D from "./Wardrobe3D";
 import { getTextureInfo } from "./TexturePicker";
 import { useIsMobile } from "@shared/hooks/useIsMobile";
@@ -47,6 +48,7 @@ interface WardrobeEditorProps {
 }
 
 export default function WardrobeEditor({ cabinetId, initial, onCreated }: WardrobeEditorProps = {}) {
+  const navigate = useNavigate();
   const [corpus, setCorpus] = useState(initial?.corpus ?? { width: 1200, height: 2100, depth: 600, thickness: 16 });
   const [elements, setElements] = useState<any[]>(initial?.elements ?? []);
   const [cabinetName, setCabinetName] = useState<string>(initial?.name ?? "Без названия");
@@ -994,6 +996,10 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
         }}
         propsModalOpen={propsModalOpen}
         setPropsModalOpen={setPropsModalOpen}
+        cabinetName={cabinetName}
+        setCabinetName={setCabinetName}
+        saveState={saveState}
+        onShowList={() => navigate("/cabinet/list")}
         // Правая панель свойств для выделенного элемента рендерится ВНУТРИ Wardrobe3D
         // (поверх 3D, на десктопе — sidebar 320px справа, на мобильном — bottom sheet).
         selEl={selEl}
