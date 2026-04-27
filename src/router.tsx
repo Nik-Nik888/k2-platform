@@ -18,6 +18,7 @@ const CalculatorPage = lazy(() => import('@modules/calculator/pages/CalculatorPa
 const EstimatesPage = lazy(() => import('@modules/estimates/pages/EstimatesPage').then(m => ({ default: m.EstimatesPage })));
 const WarehousePage = lazy(() => import('@modules/warehouse/pages/WarehousePage').then(m => ({ default: m.WarehousePage })));
 const MaterialsPage = lazy(() => import('@modules/materials/pages/MaterialsPage').then(m => ({ default: m.MaterialsPage })));
+const ReferencePage = lazy(() => import('@modules/reference/pages/ReferencePage').then(m => ({ default: m.ReferencePage })));
 const CabinetPage = lazy(() => import('@modules/cabinet/pages/CabinetPage').then(m => ({ default: m.CabinetPage })));
 const CabinetListPage = lazy(() => import('@modules/cabinet/pages/CabinetListPage').then(m => ({ default: m.CabinetListPage })));
 const BillingPage = lazy(() => import('@modules/billing/pages/BillingPage').then(m => ({ default: m.BillingPage })));
@@ -58,6 +59,7 @@ export const router = createBrowserRouter([
       { path: 'estimates', element: L(<EstimatesPage />) },
       { path: 'warehouse', element: L(<WarehousePage />) },
       { path: 'materials', element: L(<MaterialsPage />) },
+      { path: 'reference', element: L(<ReferencePage />) },
       { path: 'cabinet', element: L(<CabinetPage />) },
       { path: 'cabinet/list', element: L(<CabinetListPage />) },
       { path: 'cabinet/:id', element: L(<CabinetPage />) },
