@@ -24,9 +24,9 @@ describe('computeTopLevelCols', () => {
 
   it('правая колонка: sl = left + t (учёт толщины стойки)', () => {
     const cols = computeTopLevelCols([{ id: 's', type: 'stud', x: 600 }], iW, t);
-    expect(cols[0].sl).toBe(0); // левая — без стойки слева
-    expect(cols[1].sl).toBe(600 + t);
-    expect(cols[1].sw).toBe(iW - 600 - t);
+    expect(cols[0]!.sl).toBe(0); // левая — без стойки слева
+    expect(cols[1]!.sl).toBe(600 + t);
+    expect(cols[1]!.sw).toBe(iW - 600 - t);
   });
 
   it('стойки сортируются по X', () => {
@@ -35,9 +35,9 @@ describe('computeTopLevelCols', () => {
       { id: 'a', type: 'stud', x: 300 },
     ], iW, t);
     expect(cols).toHaveLength(3);
-    expect(cols[0].right).toBe(300);
-    expect(cols[1].left).toBe(300);
-    expect(cols[1].right).toBe(800);
+    expect(cols[0]!.right).toBe(300);
+    expect(cols[1]!.left).toBe(300);
+    expect(cols[1]!.right).toBe(800);
   });
 
   it('не-stud элементы игнорируются', () => {
@@ -57,9 +57,9 @@ describe('computeDims', () => {
     const wDims = dims.filter(d => d.t === 'w');
     const hDims = dims.filter(d => d.t === 'h');
     expect(wDims).toHaveLength(1);
-    expect(wDims[0].w).toBe(iW);
+    expect(wDims[0]!.w).toBe(iW);
     expect(hDims).toHaveLength(1);
-    expect(hDims[0].h).toBe(iH);
+    expect(hDims[0]!.h).toBe(iH);
   });
 
   it('одна стойка → 2 W-размера (ширины колонок) + 2 H-размера', () => {
@@ -105,7 +105,7 @@ describe('computeDims', () => {
     const hDims = dims.filter(d => d.t === 'h');
     // Только 1 сегмент: от полки до низа
     expect(hDims).toHaveLength(1);
-    expect(hDims[0].topY).toBe(10);
+    expect(hDims[0]!.topY).toBe(10);
   });
 });
 

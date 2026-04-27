@@ -181,8 +181,9 @@ function placeDrawers(p: {
   const allStuds = elements.filter(e => e.type === "stud");
 
   const studAtLeft = allStuds.some(st => Math.abs(st.x - bounds.left.x) < 2);
-  const studAtRight = allStuds.some(st =>
-    Math.abs(st.x - (bounds.right.x - t)) < 2 || Math.abs(st.x - bounds.right.x) < 2);
+  // TODO: studAtRight (учёт правой стойки в bounds.right.x) — было вычислено, но
+  // не использовалось в логике. Удалено при чистке типов; восстановить если
+  // выяснится что правая кромка некорректна для случая стойки у iW-t.
   const shelfAtTop = allShelves.some(sh => Math.abs(sh.y - bounds.top.y) < 2);
   const shelfAtBot = allShelves.some(sh => Math.abs(sh.y - bounds.bottom.y) < 2);
 
@@ -276,7 +277,7 @@ function placeDoor(p: {
   hingeType: "overlay" | "insert";
   hingeSide: "left" | "right" | "auto";
 }): PlacementResult {
-  const { id, order, clickX, clickY, iW, iH, t, elements, findDoorBounds, hingeType, hingeSide } = p;
+  const { id, order, clickX, clickY, iW, iH, t: _t, elements, findDoorBounds, hingeType, hingeSide } = p;
   const bounds = findDoorBounds(clickX, clickY);
 
   // Уже существующие двери в этом же проёме (совпадающие top/bottom границы) —

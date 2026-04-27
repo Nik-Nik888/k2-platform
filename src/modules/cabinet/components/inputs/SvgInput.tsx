@@ -40,8 +40,9 @@ export function SvgInput({
     let n = NaN;
     const mathMatch = input.match(/^(-?\d+(?:\.\d+)?)([+-])(\d+(?:\.\d+)?)$/);
     if (mathMatch) {
-      const a = parseFloat(mathMatch[1]);
-      const b = parseFloat(mathMatch[3]);
+      // Regex имеет три capture-группы — при успешном match они всегда определены.
+      const a = parseFloat(mathMatch[1]!);
+      const b = parseFloat(mathMatch[3]!);
       n = mathMatch[2] === '+' ? a + b : a - b;
     } else if (input.length >= 2 && (input[0] === '+' || input[0] === '-')) {
       const num = parseFloat(input.slice(1));

@@ -1,10 +1,8 @@
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
-import { useUiStore } from '@store/uiStore';
 
 export function AppLayout() {
-  const { sidebarCollapsed } = useUiStore();
 
   return (
     <div className="flex h-screen overflow-hidden bg-surface-50">

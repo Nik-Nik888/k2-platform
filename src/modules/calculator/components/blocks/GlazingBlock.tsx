@@ -169,7 +169,7 @@ export function GlazingBlock({ tabId, db }: { tabId: string; db: CalcDB }) {
             )}
 
             {/* ═══ Стандартные категории (не спец-блоки) ═══ */}
-            {catType === 'other' && catType !== 'whatdo' && (
+            {catType === 'other' && (
               <>
                 {visibleMats.map((om) => {
                   if (isRemoved(tabId, cat.id, om.id)) return (

@@ -27,7 +27,7 @@ import { computeTopLevelCols, computeDims, applyHorizDimChange, applyVertDimChan
 import { placeInZone as purePlaceInZone, computeDoorDimensions } from "../logic/placement";
 import { useDragHandlers } from "../hooks/useDragHandlers";
 import { useMobileTouch } from "../hooks/useMobileTouch";
-import { createCabinet, updateCabinet, type CabinetCorpus } from "../api/cabinetApi";
+import { createCabinet, updateCabinet } from "../api/cabinetApi";
 /* ═══════════════════════════════
    MAIN EDITOR
    ═══════════════════════════════ */
@@ -54,7 +54,7 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
   const [cabinetName, setCabinetName] = useState<string>(initial?.name ?? "Без названия");
   const [currentCabinetId, setCurrentCabinetId] = useState<string | null>(cabinetId ?? null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [clientId, setClientId] = useState<string | null>(initial?.client_id ?? null);
+  const [clientId, _setClientId] = useState<string | null>(initial?.client_id ?? null);
   const [selId, setSelId] = useState(null);
   const [drag, setDrag] = useState(null);
   const [panel, setPanel] = useState("hardware");
@@ -225,8 +225,9 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
     });
   }, [adjust]);
 
-  /* Быстрые колбэки для всплывающего тулбара двери (смена типа и стороны петель). */
-  const changeDoorType = useCallback((newType: "overlay" | "insert") => {
+  /* Быстрые колбэки для всплывающего тулбара двери (смена типа и стороны петель).
+     Префикс _ — пока не подключены к UI, но логика готова для quickToolbar. */
+  const _changeDoorType = useCallback((newType: "overlay" | "insert") => {
     if (!selEl || selEl.type !== "door" || selEl.doorLeft === undefined) return;
     const cx = (selEl.x || 0) + (selEl.w || 400) / 2;
     const cy = (selEl.y || 0) + (selEl.h || 600) / 2;
@@ -258,10 +259,17 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
     });
   }, [selEl, elements, iW, iH, t, updateEl]);
 
-  const changeDoorHingeSide = useCallback((side: "left" | "right") => {
+  const _changeDoorHingeSide = useCallback((side: "left" | "right") => {
     if (!selEl || selEl.type !== "door") return;
     updateEl(selEl.id, { hingeSide: side });
   }, [selEl, updateEl]);
+
+  // Удерживаем ссылки чтобы линтер не ругался на unused (TS6133).
+  // Когда подключим к UI — заменить на реальное использование.
+  void _changeDoorType;
+  void _changeDoorHingeSide;
+  void _onElClick;
+  void _toggleDimDir;
 
   const toSvg = useCallback((e) => {
     const svg = svgRef.current; if (!svg) return { x: 0, y: 0 };
@@ -348,7 +356,7 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
   }, [toSvg, placeMode, mobileDragMode]);
 
   // Double-click element: placeholder for future inline editing action, prevents deselect
-  const onElClick = useCallback((e) => {
+  const _onElClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
   }, []);
 
@@ -498,8 +506,8 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
     [elements, topLevelCols, iH, iW],
   );
 
-  const getDimDir = (i) => dimDirOverrides[i] || (dims[i]?.t === "w" ? "left" : "top");
-  const toggleDimDir = useCallback((i) => { setDimDirOverrides(p => ({ ...p, [i]: getDimDir(i) === "left" || getDimDir(i) === "top" ? (dims[i].t === "w" ? "right" : "bottom") : (dims[i].t === "w" ? "left" : "top") })); }, [dims, dimDirOverrides]);
+  const getDimDir = (i: number) => dimDirOverrides[i] || (dims[i]?.t === "w" ? "left" : "top");
+  const _toggleDimDir = useCallback((i: number) => { setDimDirOverrides(p => ({ ...p, [i]: getDimDir(i) === "left" || getDimDir(i) === "top" ? (dims[i]!.t === "w" ? "right" : "bottom") : (dims[i]!.t === "w" ? "left" : "top") })); }, [dims, dimDirOverrides]);
 
   const changeHorizDim = useCallback((d, v, dir) => {
     const cmd = applyHorizDimChange(d, v, dir, topLevelCols, elements, iW, t);

@@ -1,4 +1,4 @@
-import { Box, MousePointer2, RotateCcw, ZoomIn, Download, Lightbulb } from 'lucide-react';
+import { MousePointer2, RotateCcw, ZoomIn, Download, Lightbulb } from 'lucide-react';
 
 export function VisualizerPage() {
   return (

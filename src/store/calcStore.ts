@@ -204,7 +204,9 @@ export const useCalcStore = create<CalcState>((set, get) => ({
 
   updateWindow: (tabId, index, key, value) => {
     const cur = [...get().getWindows(tabId)];
-    cur[index] = { ...cur[index], [key]: value };
+    const item = cur[index];
+    if (!item) return; // защита от out-of-bounds index
+    cur[index] = { ...item, [key]: value };
     get().setWindows(tabId, cur);
   },
 
@@ -236,9 +238,11 @@ export const useCalcStore = create<CalcState>((set, get) => ({
 
   updateFurnitureCat: (tabId, index, catId, optId) => {
     const cur = [...get().getFurniture(tabId)];
+    const item = cur[index];
+    if (!item) return; // защита от out-of-bounds index
     cur[index] = {
-      ...cur[index],
-      catSelections: { ...cur[index].catSelections, [catId]: optId },
+      ...item,
+      catSelections: { ...item.catSelections, [catId]: optId },
     };
     set((s) => ({
       sel: {

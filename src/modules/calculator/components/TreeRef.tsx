@@ -1,9 +1,9 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { supabase } from '@lib/supabase';
 import { useAuthStore } from '@store/authStore';
-import { TABS, CALC_MODE_LABELS, parseDims } from '@modules/calculator/api/calcApi';
+import { TABS, CALC_MODE_LABELS } from '@modules/calculator/api/calcApi';
 import type { CalcDB, Material, Category, CategoryOption, OptionMaterial } from '@modules/calculator/api/calcApi';
-import { ChevronRight, Plus, Trash2, Pencil, X, Save, Package, BookmarkPlus, Bookmark } from 'lucide-react';
+import { ChevronRight, Plus, Trash2, Pencil, X, Package, BookmarkPlus, Bookmark } from 'lucide-react';
 import { NumberInput } from './primitives';
 
 // ════════════════════════════════════════════════════════
@@ -299,13 +299,19 @@ export function TreeRef({ db, refresh, notify }: {
 
   const catOpts = useMemo(() => {
     const m: Record<number, CategoryOption[]> = {};
-    db.options.forEach((o) => { if (!m[o.category_id]) m[o.category_id] = []; m[o.category_id].push(o); });
+    db.options.forEach((o) => {
+      if (!m[o.category_id]) m[o.category_id] = [];
+      m[o.category_id]!.push(o);
+    });
     return m;
   }, [db]);
 
   const optMats = useMemo(() => {
     const m: Record<number, OptionMaterial[]> = {};
-    db.optionMaterials.forEach((om) => { if (!m[om.option_id]) m[om.option_id] = []; m[om.option_id].push(om); });
+    db.optionMaterials.forEach((om) => {
+      if (!m[om.option_id]) m[om.option_id] = [];
+      m[om.option_id]!.push(om);
+    });
     return m;
   }, [db]);
 

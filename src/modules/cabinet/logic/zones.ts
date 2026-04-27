@@ -77,8 +77,13 @@ export function computeZones(
  * Небольшие допуски по краям чтобы тап рядом с границей попадал в правильную зону.
  */
 export function findZone(zones: Zone[], x: number, y: number): Zone {
-  return zones.find(z =>
+  const found = zones.find(z =>
     x >= z.sl - 10 && x < z.right + 10 &&
     y >= z.top - 5 && y < z.bot + 5,
-  ) || zones[0];
+  );
+  if (found) return found;
+  if (zones[0]) return zones[0];
+  // Дегенеративный случай — пустой массив зон. По API функция всегда возвращает Zone,
+  // поэтому возвращаем "нулевую" зону. На практике сюда не должно попадать.
+  return { left: 0, right: 0, sl: 0, sw: 0, top: 0, bot: 0, bandIdx: 0, colIdx: 0, id: "empty" };
 }

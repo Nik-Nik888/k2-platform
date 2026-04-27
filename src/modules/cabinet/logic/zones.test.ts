@@ -19,10 +19,10 @@ describe('computeZones', () => {
     const stud = { id: 's1', type: 'stud', x: 600 };
     const zones = computeZones([stud], iW, iH, t);
     expect(zones).toHaveLength(2);
-    expect(zones[0].left).toBe(0);
-    expect(zones[0].right).toBe(600);
-    expect(zones[1].left).toBe(600);
-    expect(zones[1].right).toBe(iW);
+    expect(zones[0]!.left).toBe(0);
+    expect(zones[0]!.right).toBe(600);
+    expect(zones[1]!.left).toBe(600);
+    expect(zones[1]!.right).toBe(iW);
   });
 
   it('стойка не у края → её правая колонка начинается с x+t (учёт толщины)', () => {
@@ -30,19 +30,19 @@ describe('computeZones', () => {
     const zones = computeZones([stud], iW, iH, t);
     const rightCol = zones[1];
     // Для правой колонки: левая граница = stud.x (600), но sl = 600+t (учёт толщины стойки)
-    expect(rightCol.left).toBe(600);
-    expect(rightCol.sl).toBe(600 + t);
-    expect(rightCol.sw).toBe(iW - 600 - t);
+    expect(rightCol!.left).toBe(600);
+    expect(rightCol!.sl).toBe(600 + t);
+    expect(rightCol!.sw).toBe(iW - 600 - t);
   });
 
   it('одна полка без стоек → 2 зоны (верхняя и нижняя)', () => {
     const shelf = { id: 'sh1', type: 'shelf', x: 0, y: 1000, w: iW };
     const zones = computeZones([shelf], iW, iH, t);
     expect(zones).toHaveLength(2);
-    expect(zones[0].top).toBe(0);
-    expect(zones[0].bot).toBe(1000);
-    expect(zones[1].top).toBe(1000);
-    expect(zones[1].bot).toBe(iH);
+    expect(zones[0]!.top).toBe(0);
+    expect(zones[0]!.bot).toBe(1000);
+    expect(zones[1]!.top).toBe(1000);
+    expect(zones[1]!.bot).toBe(iH);
   });
 
   it('стойка + полка на всю ширину → 4 зоны (2 колонки × 2 полосы)', () => {
@@ -66,11 +66,11 @@ describe('computeZones', () => {
     const sh2 = { id: 'b', type: 'shelf', x: 0, y: 500, w: iW };
     const zones = computeZones([sh1, sh2], iW, iH, t);
     expect(zones).toHaveLength(3);
-    expect(zones[0].top).toBe(0);
-    expect(zones[0].bot).toBe(500);
-    expect(zones[1].top).toBe(500);
-    expect(zones[1].bot).toBe(1500);
-    expect(zones[2].bot).toBe(iH);
+    expect(zones[0]!.top).toBe(0);
+    expect(zones[0]!.bot).toBe(500);
+    expect(zones[1]!.top).toBe(500);
+    expect(zones[1]!.bot).toBe(1500);
+    expect(zones[2]!.bot).toBe(iH);
   });
 
   it('каждая зона получает уникальный id z_{ci}_{yi}', () => {

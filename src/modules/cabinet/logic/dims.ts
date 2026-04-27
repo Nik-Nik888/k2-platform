@@ -79,13 +79,16 @@ export function computeDims(
     breaks.push({ y: iH });
     const sorted = [...new Set(breaks.map(b => b.y))].sort((a, b) => a - b);
     for (let i = 0; i < sorted.length - 1; i++) {
-      const h = sorted[i + 1] - sorted[i];
+      const cur = sorted[i];
+      const next = sorted[i + 1];
+      if (cur === undefined || next === undefined) continue;
+      const h = next - cur;
       if (h > 25) {
         hSegments.push({
           x: col.sl,
-          y: sorted[i],
+          y: cur,
           h,
-          topY: sorted[i],
+          topY: cur,
           si: ci,
           xRight: col.sl + col.sw,
         });
@@ -98,9 +101,11 @@ export function computeDims(
   for (let i = 0; i < hSegments.length; i++) {
     if (used[i]) continue;
     const seg = hSegments[i];
+    if (!seg) continue;
     for (let j = 0; j < hSegments.length; j++) {
       if (i === j || used[j]) continue;
       const other = hSegments[j];
+      if (!other) continue;
       if (other.topY === seg.topY && other.h === seg.h && other.x !== seg.x) {
         used[j] = true;
       }
@@ -132,7 +137,9 @@ export function applyHorizDimChange(
   const tryRight = () => {
     if (d.si >= studs.length) return null;
     const st = studs[d.si];
-    const nx = topLevelCols[d.si].sl + v;
+    const col = topLevelCols[d.si];
+    if (!st || !col) return null;
+    const nx = col.sl + v;
     if (nx >= MIN_S && nx <= iW - MIN_S) {
       return { type: "updateStud" as const, id: st.id, x: nx };
     }
@@ -141,7 +148,9 @@ export function applyHorizDimChange(
   const tryLeft = () => {
     if (d.si <= 0) return null;
     const st = studs[d.si - 1];
-    const nx = topLevelCols[d.si].sl + topLevelCols[d.si].sw - v;
+    const col = topLevelCols[d.si];
+    if (!st || !col) return null;
+    const nx = col.sl + col.sw - v;
     if (nx >= MIN_S && nx <= iW - MIN_S) {
       return { type: "updateStud" as const, id: st.id, x: nx };
     }

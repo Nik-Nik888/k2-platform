@@ -1,4 +1,4 @@
-import { Settings, Building2, Users, Palette, Bell } from 'lucide-react';
+import { Building2, Users, Palette, Bell } from 'lucide-react';
 
 export function SettingsPage() {
   return (

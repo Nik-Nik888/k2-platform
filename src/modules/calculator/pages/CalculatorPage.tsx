@@ -131,7 +131,7 @@ export function CalculatorPage() {
     if (!results) return;
     setSaving(true);
     try {
-      const total = Object.values(results).flat().reduce((s, r) => s + (r.cost || 0), 0);
+      const total = Object.values(results).flat().reduce((s, r: any) => s + (r.cost || 0), 0);
       const orgId = useAuthStore.getState().organization?.id;
       const data: Record<string, unknown> = {
         org_id: orgId,
@@ -215,7 +215,7 @@ export function CalculatorPage() {
   // Итого (для отображения в хедере)
   const grandTotal = useMemo(() => {
     if (!results) return 0;
-    return Object.values(results).flat().reduce((s, r) => s + (r.cost || 0), 0);
+    return Object.values(results).flat().reduce((s, r: any) => s + (r.cost || 0), 0);
   }, [results]);
 
   if (isLoading && !db) {

@@ -8,7 +8,7 @@
  * - Manual overrides (manualX/manualW/manualPTop/manualPBot) игнорируют авто-пересчёт.
  */
 import { computeZones, findZone } from "./zones";
-import { computeDoorDimensions, computePanelDimensions } from "./placement";
+import { computeDoorDimensions } from "./placement";
 
 export function computeStudBounds(
   stud: any, allEls: any[],
@@ -118,7 +118,7 @@ export function adjust(els: any[], iW: number, iH: number, t: number): any[] {
       if (el.type === "drawers") {
         // Сначала клампим высоту: ящики не должны выходить за корпус.
         // h ограничен суммой drawerHeights (если есть) и iH.
-        const requestedH = el.h || (el.drawerHeights || []).reduce((a, b) => a + b, 0) || 100;
+        const requestedH = el.h || (el.drawerHeights || []).reduce((a: number, b: number) => a + b, 0) || 100;
         // y клампим так чтобы блок целиком помещался: y + h <= iH
         let y = Math.max(0, el.y || 0);
         const maxY = Math.max(0, iH - 20); // минимум 20мм высоты
@@ -128,9 +128,9 @@ export function adjust(els: any[], iW: number, iH: number, t: number): any[] {
         let drawerHeights = el.drawerHeights;
         if (drawerHeights?.length && h < requestedH - 1) {
           const k = h / requestedH;
-          drawerHeights = drawerHeights.map(dh => Math.max(50, Math.round(dh * k)));
+          drawerHeights = drawerHeights.map((dh: number) => Math.max(50, Math.round(dh * k)));
           // Дочистка: сумма должна точно равняться h (округление могло сместить)
-          const sum = drawerHeights.reduce((a, b) => a + b, 0);
+          const sum = drawerHeights.reduce((a: number, b: number) => a + b, 0);
           if (sum !== h && drawerHeights.length > 0) {
             drawerHeights[drawerHeights.length - 1] += (h - sum);
           }
@@ -212,13 +212,25 @@ export function adjust(els: any[], iW: number, iH: number, t: number): any[] {
         const maxCx = studNearRight ? iW - t - 2 : iW;
         const clampedCx = Math.max(minCx, Math.min(maxCx, cx));
 
-        let left = vBounds[0];
+        // Дефолтные стены на случай пустого массива (не должно случаться в рантайме,
+        // но noUncheckedIndexedAccess требует явного fallback'а).
+        const wallL = { x: 0, isWall: true };
+        const wallR = { x: iW, isWall: true };
+
+        let left = vBounds[0] ?? wallL;
         for (const v of vBounds) { if (v.x <= clampedCx + 5) left = v; else break; }
-        let right = vBounds[vBounds.length - 1];
+        let right = vBounds[vBounds.length - 1] ?? wallR;
         for (let i = vBounds.length - 1; i >= 0; i--) {
-          if (vBounds[i].x >= clampedCx - 5) right = vBounds[i]; else break;
+          const vi = vBounds[i];
+          if (vi && vi.x >= clampedCx - 5) right = vi; else break;
         }
-        if (left.x >= right.x) { const li = vBounds.indexOf(left); if (li > 0) left = vBounds[li - 1]; }
+        if (left.x >= right.x) {
+          const li = vBounds.indexOf(left);
+          if (li > 0) {
+            const prev = vBounds[li - 1];
+            if (prev) left = prev;
+          }
+        }
 
         let innerLeft = left.x + (left.isWall ? 0 : t);
         let innerRight = right.x;

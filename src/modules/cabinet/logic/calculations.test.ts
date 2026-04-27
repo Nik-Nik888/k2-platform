@@ -155,10 +155,10 @@ describe('calcParts', () => {
     const sides = parts.filter(p => p.n.startsWith('Бок.ящ'));
     expect(facades).toHaveLength(3);
     expect(sides).toHaveLength(3); // q=2 в каждом, но 3 записи (3 ящика)
-    expect(sides[0].q).toBe(2);
+    expect(sides[0]!.q).toBe(2);
     // Фасад: L = высота - 6, W = ширина - 4
-    expect(facades[0].l).toBe(150 - 6);
-    expect(facades[0].w).toBe(400 - 4);
+    expect(facades[0]!.l).toBe(150 - 6);
+    expect(facades[0]!.w).toBe(400 - 4);
   });
 
   // ──────────────────────────────────────────────────────────
@@ -190,7 +190,7 @@ describe('calcParts', () => {
       const dr = { id: 'd', type: 'drawers', x: 100, y: 500, w: 400, h: 450, count: 3, drawerHeights: [150, 150, 150], depth: 450 };
       const parts = calcParts(c, [dr], false);
       const sides = parts.filter(p => p.n.startsWith('Бок.ящ'));
-      expect(sides[0].l).toBe(400);
+      expect(sides[0]!.l).toBe(400);
     });
 
     it('depth=0 или отрицательная → игнорируется, используется corpus.depth', () => {
@@ -198,8 +198,8 @@ describe('calcParts', () => {
       const shelf2 = { id: 'b', type: 'shelf', x: 0, y: 1500, w: 800, depth: -100 };
       const parts = calcParts(c, [shelf1, shelf2], false);
       const both = parts.filter(p => p.n.startsWith('Полка'));
-      expect(both[0].w).toBe(c.depth - 4);
-      expect(both[1].w).toBe(c.depth - 4);
+      expect(both[0]!.w).toBe(c.depth - 4);
+      expect(both[1]!.w).toBe(c.depth - 4);
     });
   });
 });

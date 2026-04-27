@@ -37,7 +37,7 @@ export function renderFrame(ctx: FrameCtx): React.ReactNode {
           fill="none" stroke="#4a3f35" strokeWidth={1} strokeDasharray="6 3"
         />
         {/* Уголки по 4-м углам */}
-        {[[0, 0], [wPx, 0], [0, hPx], [wPx, hPx]].map(([cx, cy], i) => (
+        {([[0, 0], [wPx, 0], [0, hPx], [wPx, hPx]] as [number, number][]).map(([cx, cy], i) => (
           <g key={`c${i}`}>
             <line x1={cx - (cx > 0 ? 8 : -8)} y1={cy} x2={cx} y2={cy} stroke="#d97706" strokeWidth={0.8} />
             <line x1={cx} y1={cy - (cy > 0 ? 8 : -8)} x2={cx} y2={cy} stroke="#d97706" strokeWidth={0.8} />

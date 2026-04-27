@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@lib/supabase';
 import { useAuthStore } from '@store/authStore';
 import {
@@ -7,8 +7,8 @@ import {
 import type { StockItem, StockMovement, MovementType } from '@modules/warehouse/api/warehouseApi';
 import { NumberInput } from '@modules/calculator/components/primitives';
 import {
-  Package, AlertTriangle, TrendingDown, ArrowDownToLine, ArrowUpFromLine,
-  Loader2, X, Search, Plus, Trash2, Edit3, History, BarChart3,
+  Package, AlertTriangle, ArrowDownToLine, ArrowUpFromLine,
+  Loader2, X, Search, Plus, Trash2, History, BarChart3,
 } from 'lucide-react';
 
 // ── Лейблы ──────────────────────────────────────────────
@@ -412,7 +412,7 @@ export function WarehousePage() {
           ) : (
             <div className="divide-y divide-surface-100">
               {filteredMovements.map((m) => {
-                const t = TYPE_LABELS[m.type] || TYPE_LABELS.in;
+                const t = TYPE_LABELS[m.type as MovementType] || TYPE_LABELS.in;
                 return (
                   <div key={m.id} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-50 transition-colors">
                     <span className="text-lg">{t.icon}</span>

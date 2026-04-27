@@ -1421,46 +1421,10 @@ export default function Wardrobe3D({
     renderer.toneMappingExposure = 1.15;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     // ═══ CROSS-FADE OVERLAY (anti-flicker) ═══
-    // Перед очисткой mount делаем snapshot текущего canvas (toDataURL) и
-    // вешаем его абсолютной <img>-маской поверх mountRef. После первого render
-    // новой сцены маска плавно исчезает (opacity 1→0 за 220ms) и удаляется из
-    // DOM. Пользователь видит непрерывное изображение без чёрного мига.
-    // На первом mount маски нет (нет старого canvas) — и не нужно.
-    let fadeMask: HTMLImageElement | null = null;
-    {
-      const oldCanvas = mountRef.current.querySelector("canvas") as HTMLCanvasElement | null;
-      if (oldCanvas) {
-        try {
-          const dataUrl = oldCanvas.toDataURL("image/png");
-          const img = document.createElement("img");
-          img.src = dataUrl;
-          img.style.position = "absolute";
-          img.style.top = "0";
-          img.style.left = "0";
-          img.style.width = "100%";
-          img.style.height = "100%";
-          img.style.objectFit = "fill";
-          img.style.pointerEvents = "none";
-          // SVG-overlay имеет zIndex: 5 — маска НИЖЕ него (zIndex: 4),
-          // чтобы размеры/snap-линии оставались видны поверх маски.
-          img.style.zIndex = "4";
-          img.style.opacity = "1";
-          img.style.transition = "opacity 220ms ease-out";
-          img.setAttribute("data-fade-mask", "1");
-          // Маску кладём в РОДИТЕЛЯ mountRef, чтобы она пережила innerHTML="".
-          // Родитель — div со style position:relative, inset:0 (см. JSX),
-          // т.е. абсолютное позиционирование маски сработает корректно.
-          mountRef.current.parentElement?.appendChild(img);
-          fadeMask = img;
-        } catch {
-          // toDataURL может бросить SecurityError если в текстуре есть cross-origin
-          // изображение без CORS. В этом случае пропускаем маску — мерцание
-          // вернётся, но всё остальное работает.
-          fadeMask = null;
-        }
-      }
-    }
-    stateRef.current.fadeMask = fadeMask;
+    // Snapshot уходящей сцены и наложение <img>-маски делается в CLEANUP старого
+    // useEffect (см. ниже, в stateRef.current.cleanup). Здесь, в build, маска уже
+    // должна висеть в parentElement mountRef. После первого render новой сцены
+    // animate-loop плавно скроет её через opacity-transition 220ms.
 
     mountRef.current.innerHTML = "";
     mountRef.current.appendChild(renderer.domElement);
@@ -3007,6 +2971,42 @@ export default function Wardrobe3D({
         // Без этого, несмотря на dispose(), браузер держит контекст в пуле и
         // после нескольких переключений упирается в лимит (обычно 16 контекстов).
         renderer.forceContextLoss?.();
+
+        // ═══ CROSS-FADE: snapshot перед удалением старого canvas ═══
+        // Снимаем "фотографию" уходящей сцены и вешаем как абсолютную <img>-маску
+        // в parentElement (поверх mountRef, под SVG-overlay). Когда новая сцена
+        // отрендерит первый кадр — animate-loop плавно скроет маску за 220ms.
+        // Это нужно делать ИМЕННО ЗДЕСЬ — до removeChild — иначе toDataURL
+        // на отсоединённом canvas теряет содержимое в некоторых браузерах.
+        try {
+          const dataUrl = renderer.domElement.toDataURL("image/png");
+          const parent = mountRef.current?.parentElement;
+          if (parent && dataUrl && dataUrl.length > 100) { // length>100 = не пустой png
+            // Перед добавлением новой маски убираем все старые (если предыдущая
+            // не успела сняться — например при быстрых последовательных rebuild).
+            parent.querySelectorAll('[data-fade-mask="1"]').forEach(el => {
+              try { el.remove(); } catch {}
+            });
+            const img = document.createElement("img");
+            img.src = dataUrl;
+            img.style.position = "absolute";
+            img.style.top = "0";
+            img.style.left = "0";
+            img.style.width = "100%";
+            img.style.height = "100%";
+            img.style.objectFit = "fill";
+            img.style.pointerEvents = "none";
+            img.style.zIndex = "4"; // SVG-overlay имеет zIndex:5 → размеры/snap поверх
+            img.style.opacity = "1";
+            img.style.transition = "opacity 220ms ease-out";
+            img.setAttribute("data-fade-mask", "1");
+            parent.appendChild(img);
+            // Сохраняем ссылку — новый build её подхватит и спрячет после первого render.
+            stateRef.current.fadeMask = img;
+          }
+        } catch {
+          // SecurityError при cross-origin текстурах без CORS — просто пропускаем.
+        }
 
         // Убираем canvas из DOM, чтобы React не хранил ссылку на старый элемент.
         if (renderer.domElement?.parentNode) {

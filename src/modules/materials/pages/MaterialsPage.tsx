@@ -364,7 +364,7 @@ export function MaterialsPage() {
             </div>
           </div>
         ))}
-        {catCounts.none > 0 && (
+        {(catCounts.none ?? 0) > 0 && (
           <button onClick={() => setFilterCat('none')}
             className={`shrink-0 text-xs px-3 py-2 rounded-lg border transition-all ${
               filterCat === 'none' ? 'border-brand-500 bg-brand-50 text-brand-700 font-semibold' : 'border-surface-200 text-gray-400'

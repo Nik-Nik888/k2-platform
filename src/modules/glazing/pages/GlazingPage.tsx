@@ -99,7 +99,7 @@ export function GlazingPage() {
             />
 
             {/* Sections */}
-            {sections.reduce((acc, section, i) => {
+            {sections.reduce((acc, section, _i) => {
               const x = acc.x;
               const w = section.width * svgScale;
               const h = height * svgScale;
@@ -158,7 +158,7 @@ export function GlazingPage() {
                     x={x + w / 2} y={y + h / 2 + 4}
                     textAnchor="middle" fontSize="9" fill="#94A3B8" fontFamily="Inter, sans-serif"
                   >
-                    {SECTION_LABELS[section.type]}
+                    {SECTION_LABELS[section.type as SectionType]}
                   </text>
                 </g>
               );
