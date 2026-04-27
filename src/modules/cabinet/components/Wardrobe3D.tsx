@@ -2566,8 +2566,8 @@ export default function Wardrobe3D({
       // Предотвращаем скролл браузера на канвасе
       renderer.domElement.style.touchAction = "none";
 
-      // Throttle для updateDimLabels — не каждый кадр, а раз в 2 кадра (30fps достаточно)
-      let dimFrameSkip = 0;
+      // Throttle для updateDimLabels отключён — был причиной "снэп не работает"
+      // и "размеры стоят при вращении". Размеры обновляются каждый кадр.
       // Вспомогательная: проецирует 3D-точку → pixel coords относительно canvas
       const _proj = new THREE.Vector3();
       const projectToScreen = (x, y, z) => {
@@ -2744,9 +2744,20 @@ export default function Wardrobe3D({
           }
           oldCanvases.length = 0;
         }
-        // Обновляем подписи (throttle через frame skip)
-        dimFrameSkip = (dimFrameSkip + 1) % 2;
-        if (dimFrameSkip === 0) {
+        // Обновляем подписи каждый кадр.
+        // ВАЖНО: throttle (skip каждые 2 кадра) был ошибочно добавлен под видом
+        // "anti-flicker" и приводил к трём багам:
+        //   1. Размеры "стояли на месте" при вращении сцены (rAF идёт каждый кадр,
+        //      а перепроецирование SVG — раз в 2). Визуально размеры отстают.
+        //   2. Snap-линии (жёлтые пунктиры) при drag/placeMode пропадали:
+        //      activeSnap обновляется в pointermove КАЖДЫЙ кадр, и часто
+        //      попадал на "пропускаемый" кадр → линия не успевала отрисоваться.
+        //   3. Тап по 📏 (toggle размеров) реагировал через раз — первый
+        //      пост-toggle кадр мог попасть на skip.
+        // updateDimLabels — это десяток setAttribute на SVG, нагрузка минимальна.
+        // Anti-flicker реализован отдельно — через preserveDrawingBuffer и
+        // удаление oldCanvases ВЫШЕ (см. строки 1423 и 2741).
+        {
           updateDimLabels();
           updateEditDimLabels();
           // Перепроецирование цифр drag3d при вращении сцены — позиции 3D
