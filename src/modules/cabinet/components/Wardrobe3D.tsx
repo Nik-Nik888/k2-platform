@@ -2856,12 +2856,13 @@ export default function Wardrobe3D({
               if (meshes && meshes.length > 0) {
                 const bbox = new THREE.Box3();
                 for (const m of meshes) {
-                  if (m.geometry) {
-                    if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
-                    const mb = m.geometry.boundingBox.clone();
-                    mb.applyMatrix4(m.matrixWorld);
-                    bbox.union(mb);
-                  }
+                  // setFromObject рекурсивно собирает bbox по всем потомкам объекта
+                  // (включая Group без собственной geometry — например panel/shelf/stud,
+                  // которые сделаны через createLDSPPanel и являются Group с детьми).
+                  // Это надёжнее чем m.geometry.boundingBox: оно работает только на Mesh,
+                  // и для Group возвращало бы пустой bbox → gear не показывался.
+                  const mb = new THREE.Box3().setFromObject(m);
+                  if (!mb.isEmpty()) bbox.union(mb);
                 }
                 if (!bbox.isEmpty()) {
                   const cxMid = (bbox.min.x + bbox.max.x) / 2;
@@ -2874,19 +2875,26 @@ export default function Wardrobe3D({
                   // Размеры детали в world units → определяем ориентацию
                   const bw = bbox.max.x - bbox.min.x;
                   const bh = bbox.max.y - bbox.min.y;
-                  // Вертикальная деталь: высота больше ширины (стойка, дверь, вертикальная панель)
-                  // Горизонтальная: ширина больше высоты (полка, штанга, ящики, горизонтальная панель)
-                  const isVertical = bh > bw;
+                  // Тип детали определяет ориентацию приоритетно над геометрией:
+                  //  - door, panel — всегда вертикальные (даже если шире чем выше,
+                  //    как у распашной двери — пользователю удобнее badge сбоку)
+                  //  - stud — всегда вертикальная
+                  //  - shelf, rod, drawers — всегда горизонтальные
+                  // Для остальных (если появятся новые типы) — по геометрии
+                  const t = curEl?.type as string | undefined;
+                  const forcedVertical = t === "stud" || t === "door" || t === "panel";
+                  const forcedHorizontal = t === "shelf" || t === "rod" || t === "drawers";
+                  const isVertical = forcedVertical || (!forcedHorizontal && bh > bw);
 
                   // Точка анкера в 3D + screen-смещение в пикселях
                   let anchor3d: { x: number; y: number; z: number };
                   let offsetPx: { x: number; y: number };
 
                   if (isVertical) {
-                    // Вертикальная: ⚙️ сбоку. Стойка/левая панель — слева, дверь/правая панель — справа от центра.
-                    // По умолчанию справа (чтобы не мешать наиболее частым стойкам слева).
-                    // Стойка — единственный случай где надо явно слева.
-                    if (curEl?.type === "stud") {
+                    // Вертикальная: ⚙️ сбоку.
+                    // Стойка — слева (чтобы не конфликтовать с дверьми/панелями справа).
+                    // Дверь, панель — справа сбоку на середине высоты.
+                    if (t === "stud") {
                       anchor3d = { x: cxLeft, y: cyMid, z: czFront };
                       offsetPx = { x: -28, y: 0 };
                     } else {
