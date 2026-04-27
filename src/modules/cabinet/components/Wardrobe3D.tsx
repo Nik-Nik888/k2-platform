@@ -1420,6 +1420,48 @@ export default function Wardrobe3D({
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // ═══ CROSS-FADE OVERLAY (anti-flicker) ═══
+    // Перед очисткой mount делаем snapshot текущего canvas (toDataURL) и
+    // вешаем его абсолютной <img>-маской поверх mountRef. После первого render
+    // новой сцены маска плавно исчезает (opacity 1→0 за 220ms) и удаляется из
+    // DOM. Пользователь видит непрерывное изображение без чёрного мига.
+    // На первом mount маски нет (нет старого canvas) — и не нужно.
+    let fadeMask: HTMLImageElement | null = null;
+    {
+      const oldCanvas = mountRef.current.querySelector("canvas") as HTMLCanvasElement | null;
+      if (oldCanvas) {
+        try {
+          const dataUrl = oldCanvas.toDataURL("image/png");
+          const img = document.createElement("img");
+          img.src = dataUrl;
+          img.style.position = "absolute";
+          img.style.top = "0";
+          img.style.left = "0";
+          img.style.width = "100%";
+          img.style.height = "100%";
+          img.style.objectFit = "fill";
+          img.style.pointerEvents = "none";
+          // SVG-overlay имеет zIndex: 5 — маска НИЖЕ него (zIndex: 4),
+          // чтобы размеры/snap-линии оставались видны поверх маски.
+          img.style.zIndex = "4";
+          img.style.opacity = "1";
+          img.style.transition = "opacity 220ms ease-out";
+          img.setAttribute("data-fade-mask", "1");
+          // Маску кладём в РОДИТЕЛЯ mountRef, чтобы она пережила innerHTML="".
+          // Родитель — div со style position:relative, inset:0 (см. JSX),
+          // т.е. абсолютное позиционирование маски сработает корректно.
+          mountRef.current.parentElement?.appendChild(img);
+          fadeMask = img;
+        } catch {
+          // toDataURL может бросить SecurityError если в текстуре есть cross-origin
+          // изображение без CORS. В этом случае пропускаем маску — мерцание
+          // вернётся, но всё остальное работает.
+          fadeMask = null;
+        }
+      }
+    }
+    stateRef.current.fadeMask = fadeMask;
+
     mountRef.current.innerHTML = "";
     mountRef.current.appendChild(renderer.domElement);
 
@@ -2726,6 +2768,22 @@ export default function Wardrobe3D({
         );
         camera.lookAt(0, 0, 0);
         renderer.render(scene, camera);
+        // ═══ CROSS-FADE: снимаем маску после первого render новой сцены ═══
+        // Делается ОДИН раз — на первом кадре после build. Через 240ms
+        // (длительность transition + запас) удаляем <img> из DOM.
+        // requestAnimationFrame: даём браузеру отрисовать первый кадр новой
+        // сцены, и только потом запускаем opacity-transition. Без этого fade
+        // может стартовать ДО того как новый canvas отображён → миг.
+        if (stateRef.current.fadeMask) {
+          const mask = stateRef.current.fadeMask;
+          stateRef.current.fadeMask = null; // защита от повторного срабатывания
+          requestAnimationFrame(() => {
+            mask.style.opacity = "0";
+            setTimeout(() => {
+              try { mask.parentNode?.removeChild(mask); } catch {}
+            }, 240);
+          });
+        }
         // Обновляем подписи (throttle через frame skip)
         dimFrameSkip = (dimFrameSkip + 1) % 2;
         if (dimFrameSkip === 0) {
@@ -2960,6 +3018,12 @@ export default function Wardrobe3D({
     return () => {
       cancelled = true;
       stateRef.current.cleanup?.();
+      // Если компонент unmount'ился до того как маска успела сняться — убираем.
+      const stale = stateRef.current.fadeMask;
+      if (stale) {
+        try { stale.parentNode?.removeChild(stale); } catch {}
+        stateRef.current.fadeMask = null;
+      }
     };
   }, [build]);
 
