@@ -34,6 +34,11 @@ export function shelfRenderRange(
   return { top: y - t / 2, bot: y + t / 2 };
 }
 
+/**
+ * Базовый тип границы. Используется внутри функции для составления массивов
+ * vBounds/hBounds — туда попадают и V-границы (с x), и H-границы (с y),
+ * поэтому оба поля опциональны.
+ */
 export interface DoorBound {
   x?: number;
   y?: number;
@@ -48,11 +53,27 @@ export interface DoorBound {
   xRight?: number;
 }
 
+/**
+ * V-граница (left/right) — у неё всегда есть x.
+ * Сужение DoorBound для использования на выходе findDoorBounds.
+ */
+export interface VBound extends DoorBound {
+  x: number;
+}
+
+/**
+ * H-граница (top/bottom) — у неё всегда есть y.
+ * Сужение DoorBound для использования на выходе findDoorBounds.
+ */
+export interface HBound extends DoorBound {
+  y: number;
+}
+
 export interface DoorBoundsResult {
-  left: DoorBound;
-  right: DoorBound;
-  top: DoorBound;
-  bottom: DoorBound;
+  left: VBound;
+  right: VBound;
+  top: HBound;
+  bottom: HBound;
 }
 
 /**
@@ -171,22 +192,35 @@ export function findDoorBounds(
     ...(shelfNearBot ? [] : [{ y: iH, isWall: true, innerEdge: iH }]),
   ].sort((a, b) => (a.y ?? 0) - (b.y ?? 0));
 
+  // Дефолтные стены на случай пустого массива (не должно случаться, но
+  // noUncheckedIndexedAccess требует явного fallback'а).
+  const wallLeft: DoorBound = { x: 0, isWall: true, innerEdge: 0 };
+  const wallRight: DoorBound = { x: iW, isWall: true, innerEdge: iW };
+  const wallTop: DoorBound = { y: 0, isWall: true, innerEdge: 0 };
+  const wallBottom: DoorBound = { y: iH, isWall: true, innerEdge: iH };
+
   // LEFT: самая правая V-граница слева от клика
-  let left = vBounds[0];
+  let left: DoorBound = vBounds[0] ?? wallLeft;
   for (const v of vBounds) { if ((v.x ?? 0) <= clickX + 5) left = v; else break; }
   // RIGHT: самая левая V-граница справа от клика
-  let right = vBounds[vBounds.length - 1];
+  let right: DoorBound = vBounds[vBounds.length - 1] ?? wallRight;
   for (let i = vBounds.length - 1; i >= 0; i--) {
-    if ((vBounds[i].x ?? 0) >= clickX - 5) right = vBounds[i]; else break;
+    const vi = vBounds[i];
+    if (vi && (vi.x ?? 0) >= clickX - 5) right = vi; else break;
   }
   if ((left.x ?? 0) >= (right.x ?? 0)) {
     const li = vBounds.indexOf(left);
-    if (li > 0) left = vBounds[li - 1];
-    else if (li < vBounds.length - 1) right = vBounds[li + 1];
+    if (li > 0) {
+      const prev = vBounds[li - 1];
+      if (prev) left = prev;
+    } else if (li < vBounds.length - 1) {
+      const next = vBounds[li + 1];
+      if (next) right = next;
+    }
   }
 
   // TOP: самая нижняя H-граница над кликом (только полки перекрывающие X)
-  let top = hBounds[0];
+  let top: DoorBound = hBounds[0] ?? wallTop;
   for (const h of hBounds) {
     if ((h.y ?? 0) > clickY - 5) break;
     if (h.isWall || (h.xLeft !== undefined && clickX >= h.xLeft - 5 && clickX <= (h.xRight ?? 0) + 5)) {
@@ -194,17 +228,24 @@ export function findDoorBounds(
     }
   }
   // BOTTOM: самая верхняя H-граница под кликом
-  let bottom = hBounds[hBounds.length - 1];
+  let bottom: DoorBound = hBounds[hBounds.length - 1] ?? wallBottom;
   for (let i = hBounds.length - 1; i >= 0; i--) {
-    if ((hBounds[i].y ?? 0) < clickY + 5) break;
-    if (hBounds[i].isWall || (hBounds[i].xLeft !== undefined && clickX >= hBounds[i].xLeft - 5 && clickX <= (hBounds[i].xRight ?? 0) + 5)) {
-      bottom = hBounds[i];
+    const hi = hBounds[i];
+    if (!hi) break;
+    if ((hi.y ?? 0) < clickY + 5) break;
+    if (hi.isWall || (hi.xLeft !== undefined && clickX >= hi.xLeft - 5 && clickX <= (hi.xRight ?? 0) + 5)) {
+      bottom = hi;
     }
   }
   if ((top.y ?? 0) >= (bottom.y ?? 0)) {
     const ti = hBounds.indexOf(top);
-    if (ti < hBounds.length - 1) bottom = hBounds[ti + 1];
-    else if (ti > 0) top = hBounds[ti - 1];
+    if (ti < hBounds.length - 1) {
+      const next = hBounds[ti + 1];
+      if (next) bottom = next;
+    } else if (ti > 0) {
+      const prev = hBounds[ti - 1];
+      if (prev) top = prev;
+    }
   }
 
   // ═══ Теперь посчитаем корректные innerEdge для выбранных 4 границ ═══
@@ -216,32 +257,38 @@ export function findDoorBounds(
     (b as any)._studRef !== undefined;
 
   // Создаём КОПИИ bound'ов, чтобы не мутировать оригинальные объекты в vBounds/hBounds.
-  const leftOut: DoorBound = isStudBound(left)
-    ? { ...left, innerEdge: (left.x ?? 0) + t } // стойка СЛЕВА от ниши → правая кромка стойки
-    : { ...left, innerEdge: left.x ?? 0 }; // внешняя стена корпуса
+  // Узкое сужение к VBound/HBound: x/y у выбранных границ всегда определены, т.к.
+  // в vBounds попадают только {x: 0|iW|st.x}, в hBounds — {y: 0|iH|sh.y}.
+  const leftX = left.x ?? 0;
+  const rightX = right.x ?? iW;
+  const leftOut: VBound = isStudBound(left)
+    ? { ...left, x: leftX, innerEdge: leftX + t } // стойка СЛЕВА от ниши → правая кромка стойки
+    : { ...left, x: leftX, innerEdge: leftX }; // внешняя стена корпуса
 
-  const rightOut: DoorBound = isStudBound(right)
-    ? { ...right, innerEdge: right.x ?? 0 } // стойка СПРАВА от ниши → левая кромка стойки
-    : { ...right, innerEdge: right.x ?? 0 }; // внешняя стена корпуса
+  const rightOut: VBound = isStudBound(right)
+    ? { ...right, x: rightX, innerEdge: rightX } // стойка СПРАВА от ниши → левая кромка стойки
+    : { ...right, x: rightX, innerEdge: rightX }; // внешняя стена корпуса
 
   // Для H-границ: используем shelfRenderRange() для точного Smart-Y расчёта.
-  const topOut: DoorBound = ((): DoorBound => {
+  const topOut: HBound = ((): HBound => {
+    const topY = top.y ?? 0;
     const shelfRef = (top as any)._shelfRef;
     if (!shelfRef) {
       // Внешняя стена или фоллбек
-      return { ...top, innerEdge: top.y ?? 0 };
+      return { ...top, y: topY, innerEdge: topY };
     }
     const { bot } = shelfRenderRange(shelfRef, t, iH);
-    return { ...top, innerEdge: bot }; // полка сверху от ниши → её нижняя кромка
+    return { ...top, y: topY, innerEdge: bot }; // полка сверху от ниши → её нижняя кромка
   })();
 
-  const bottomOut: DoorBound = ((): DoorBound => {
+  const bottomOut: HBound = ((): HBound => {
+    const botY = bottom.y ?? iH;
     const shelfRef = (bottom as any)._shelfRef;
     if (!shelfRef) {
-      return { ...bottom, innerEdge: bottom.y ?? 0 };
+      return { ...bottom, y: botY, innerEdge: botY };
     }
     const { top: shTop } = shelfRenderRange(shelfRef, t, iH);
-    return { ...bottom, innerEdge: shTop }; // полка снизу от ниши → её верхняя кромка
+    return { ...bottom, y: botY, innerEdge: shTop }; // полка снизу от ниши → её верхняя кромка
   })();
 
   // Удаляем служебные поля из результата (они не часть публичного API).

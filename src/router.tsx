@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, type ReactElement } from 'react';
 import { createBrowserRouter } from 'react-router-dom';
 import { AppLayout } from '@modules/core/components/AppLayout';
 import { ProtectedRoute } from '@modules/core/components/ProtectedRoute';
@@ -34,7 +34,7 @@ const Loading = () => (
     Загрузка…
   </div>
 );
-const L = (el) => <Suspense fallback={<Loading />}>{el}</Suspense>;
+const L = (el: ReactElement) => <Suspense fallback={<Loading />}>{el}</Suspense>;
 
 export const router = createBrowserRouter([
   {

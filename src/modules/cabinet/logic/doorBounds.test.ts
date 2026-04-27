@@ -98,7 +98,7 @@ describe('computeDoorSnapTargets edge-cases', () => {
     const atZero = vTargets.filter((v: any) => v.pos === 0);
     expect(atZero).toHaveLength(1);
     // И это должна быть СТОЙКА (innerEdgeFromHighSide=t), а не стена (innerEdgeFromHighSide=0)
-    expect(atZero[0].innerEdgeFromHighSide).toBe(t);
+    expect(atZero[0]!.innerEdgeFromHighSide).toBe(t);
   });
 
   it('краевая стойка x=iW-t заменяет стену справа — только ОДИН таргет на pos=iW', () => {
@@ -119,8 +119,8 @@ describe('computeDoorSnapTargets edge-cases', () => {
     const { vTargets } = computeDoorSnapTargets([stud], iW, iH, t);
     const walls = vTargets.filter((v: any) => v.isWall);
     expect(walls).toHaveLength(2);
-    expect(walls[0].pos).toBe(0);
-    expect(walls[1].pos).toBe(iW);
+    expect(walls[0]!.pos).toBe(0);
+    expect(walls[1]!.pos).toBe(iW);
   });
 
   it('краевая полка y=0 заменяет стену сверху в hTargets', () => {
@@ -130,8 +130,8 @@ describe('computeDoorSnapTargets edge-cases', () => {
     const atZero = hTargets.filter((h: any) => h.pos === 0);
     expect(atZero).toHaveLength(1);
     // Полка — это не стена (isWall: false) и innerEdgeFromHighSide = range.bot = t (Smart-Y)
-    expect(atZero[0].isWall).toBe(false);
-    expect(atZero[0].innerEdgeFromHighSide).toBe(t);
+    expect(atZero[0]!.isWall).toBe(false);
+    expect(atZero[0]!.innerEdgeFromHighSide).toBe(t);
   });
 });
 

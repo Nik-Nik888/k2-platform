@@ -19,6 +19,15 @@ export interface DepthControlProps {
   depthOffset: number | undefined;
   /** Callback при изменении. Передаёт { depth, depthOffset } — оба undefined если "на всю". */
   onChange: (next: { depth: number | undefined; depthOffset: number | undefined }) => void;
+  /**
+   * Режим отображения:
+   * - "full" (по умолчанию) — полный UI: вся/своя глубина + два инпута.
+   * - "positionOnly" — для панелей, где нужна только позиция (offset), без редактирования глубины.
+   *
+   * TODO: реализовать различающееся поведение для "positionOnly".
+   * Пока пропс принимается, но игнорируется (рендерится "full").
+   */
+  mode?: "full" | "positionOnly";
 }
 
 export function DepthControl({ corpusDepth, depth, depthOffset, onChange }: DepthControlProps) {
