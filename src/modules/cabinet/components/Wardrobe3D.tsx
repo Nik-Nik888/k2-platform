@@ -2955,6 +2955,39 @@ export default function Wardrobe3D({
       window.addEventListener("resize", onResize);
 
       stateRef.current.cleanup = () => {
+        // ═══ CROSS-FADE: snapshot ПЕРВЫМ ДЕЛОМ, пока WebGL контекст ещё живой ═══
+        // ВАЖНО: toDataURL должен вызываться ДО renderer.dispose() и ДО forceContextLoss(),
+        // иначе буфер уже уничтожен и png получается прозрачный/белый. По этой же причине
+        // snapshot должен идти ДО cancelAnimationFrame — на всякий случай чтобы render
+        // не попал в полусобранное состояние.
+        try {
+          const dataUrl = renderer.domElement.toDataURL("image/png");
+          const parent = mountRef.current?.parentElement;
+          if (parent && dataUrl && dataUrl.length > 100) { // length>100 = не пустой png
+            // Перед добавлением новой маски убираем старые (на случай быстрых rebuild).
+            parent.querySelectorAll('[data-fade-mask="1"]').forEach(el => {
+              try { el.remove(); } catch {}
+            });
+            const img = document.createElement("img");
+            img.src = dataUrl;
+            img.style.position = "absolute";
+            img.style.top = "0";
+            img.style.left = "0";
+            img.style.width = "100%";
+            img.style.height = "100%";
+            img.style.objectFit = "fill";
+            img.style.pointerEvents = "none";
+            img.style.zIndex = "4"; // SVG-overlay имеет zIndex:5 → размеры/snap поверх
+            img.style.opacity = "1";
+            img.style.transition = "opacity 220ms ease-out";
+            img.setAttribute("data-fade-mask", "1");
+            parent.appendChild(img);
+            stateRef.current.fadeMask = img;
+          }
+        } catch {
+          // SecurityError при cross-origin текстурах без CORS — пропускаем.
+        }
+
         cancelAnimationFrame(stateRef.current.animId);
         renderer.domElement.removeEventListener("wheel", onWheel);
         renderer.domElement.removeEventListener("pointerdown", onPointerDown);
@@ -3007,43 +3040,8 @@ export default function Wardrobe3D({
         // после нескольких переключений упирается в лимит (обычно 16 контекстов).
         renderer.forceContextLoss?.();
 
-        // ═══ CROSS-FADE: snapshot перед удалением старого canvas ═══
-        // Снимаем "фотографию" уходящей сцены и вешаем как абсолютную <img>-маску
-        // в parentElement (поверх mountRef, под SVG-overlay). Когда новая сцена
-        // отрендерит первый кадр — animate-loop плавно скроет маску за 220ms.
-        // Это нужно делать ИМЕННО ЗДЕСЬ — до removeChild — иначе toDataURL
-        // на отсоединённом canvas теряет содержимое в некоторых браузерах.
-        try {
-          const dataUrl = renderer.domElement.toDataURL("image/png");
-          const parent = mountRef.current?.parentElement;
-          if (parent && dataUrl && dataUrl.length > 100) { // length>100 = не пустой png
-            // Перед добавлением новой маски убираем все старые (если предыдущая
-            // не успела сняться — например при быстрых последовательных rebuild).
-            parent.querySelectorAll('[data-fade-mask="1"]').forEach(el => {
-              try { el.remove(); } catch {}
-            });
-            const img = document.createElement("img");
-            img.src = dataUrl;
-            img.style.position = "absolute";
-            img.style.top = "0";
-            img.style.left = "0";
-            img.style.width = "100%";
-            img.style.height = "100%";
-            img.style.objectFit = "fill";
-            img.style.pointerEvents = "none";
-            img.style.zIndex = "4"; // SVG-overlay имеет zIndex:5 → размеры/snap поверх
-            img.style.opacity = "1";
-            img.style.transition = "opacity 220ms ease-out";
-            img.setAttribute("data-fade-mask", "1");
-            parent.appendChild(img);
-            // Сохраняем ссылку — новый build её подхватит и спрячет после первого render.
-            stateRef.current.fadeMask = img;
-          }
-        } catch {
-          // SecurityError при cross-origin текстурах без CORS — просто пропускаем.
-        }
-
         // Убираем canvas из DOM, чтобы React не хранил ссылку на старый элемент.
+        // Snapshot для cross-fade уже сделан в начале cleanup (до dispose).
         if (renderer.domElement?.parentNode) {
           renderer.domElement.parentNode.removeChild(renderer.domElement);
         }
