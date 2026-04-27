@@ -2866,20 +2866,35 @@ export default function Wardrobe3D({
                 if (!bbox.isEmpty()) {
                   const cxMid = (bbox.min.x + bbox.max.x) / 2;
                   const cxLeft = bbox.min.x;
+                  const cxRight = bbox.max.x;
                   const cyTop = bbox.max.y;
                   const cyMid = (bbox.min.y + bbox.max.y) / 2;
                   const czFront = bbox.max.z;
+
+                  // Размеры детали в world units → определяем ориентацию
+                  const bw = bbox.max.x - bbox.min.x;
+                  const bh = bbox.max.y - bbox.min.y;
+                  // Вертикальная деталь: высота больше ширины (стойка, дверь, вертикальная панель)
+                  // Горизонтальная: ширина больше высоты (полка, штанга, ящики, горизонтальная панель)
+                  const isVertical = bh > bw;
 
                   // Точка анкера в 3D + screen-смещение в пикселях
                   let anchor3d: { x: number; y: number; z: number };
                   let offsetPx: { x: number; y: number };
 
-                  if (curEl?.type === "stud") {
-                    // Стойка: ⚙️ слева от детали на середине высоты
-                    anchor3d = { x: cxLeft, y: cyMid, z: czFront };
-                    offsetPx = { x: -28, y: 0 };
+                  if (isVertical) {
+                    // Вертикальная: ⚙️ сбоку. Стойка/левая панель — слева, дверь/правая панель — справа от центра.
+                    // По умолчанию справа (чтобы не мешать наиболее частым стойкам слева).
+                    // Стойка — единственный случай где надо явно слева.
+                    if (curEl?.type === "stud") {
+                      anchor3d = { x: cxLeft, y: cyMid, z: czFront };
+                      offsetPx = { x: -28, y: 0 };
+                    } else {
+                      anchor3d = { x: cxRight, y: cyMid, z: czFront };
+                      offsetPx = { x: 28, y: 0 };
+                    }
                   } else {
-                    // Полка/дверь/ящик/штанга/панель: ⚙️ над центром
+                    // Горизонтальная: ⚙️ сверху по центру
                     anchor3d = { x: cxMid, y: cyTop, z: czFront };
                     offsetPx = { x: 0, y: -28 };
                   }
@@ -2894,6 +2909,18 @@ export default function Wardrobe3D({
                     gearEl.style.display = "";
                     gearEl.style.left = `${Math.max(24, Math.min(cw - 24, finalX))}px`;
                     gearEl.style.top = `${Math.max(24, Math.min(ch - 24, finalY))}px`;
+                    // Цвет шестерёнки по типу детали — задаём через CSS var,
+                    // чтобы стиль кнопки в JSX мог использовать --gear-color.
+                    const colorByType: Record<string, string> = {
+                      shelf: "#22c55e",    // зелёный — полка
+                      stud: "#3b82f6",     // синий — стойка
+                      rod: "#8b5cf6",      // фиолетовый — штанга
+                      door: "#f59e0b",     // янтарный — дверь
+                      drawers: "#ef4444",  // красный — ящики
+                      panel: "#06b6d4",    // циан — панель
+                    };
+                    const elType = curEl?.type as string | undefined;
+                    gearEl.style.setProperty("--gear-color", colorByType[elType ?? ""] ?? "#475569");
                   } else {
                     gearEl.style.display = "none";
                   }
@@ -2920,39 +2947,6 @@ export default function Wardrobe3D({
       window.addEventListener("resize", onResize);
 
       stateRef.current.cleanup = () => {
-        // ═══ CROSS-FADE: snapshot ПЕРВЫМ ДЕЛОМ, пока WebGL контекст ещё живой ═══
-        // ВАЖНО: toDataURL должен вызываться ДО renderer.dispose() и ДО forceContextLoss(),
-        // иначе буфер уже уничтожен и png получается прозрачный/белый. По этой же причине
-        // snapshot должен идти ДО cancelAnimationFrame — на всякий случай чтобы render
-        // не попал в полусобранное состояние.
-        try {
-          const dataUrl = renderer.domElement.toDataURL("image/png");
-          const parent = mountRef.current?.parentElement;
-          if (parent && dataUrl && dataUrl.length > 100) { // length>100 = не пустой png
-            // Перед добавлением новой маски убираем старые (на случай быстрых rebuild).
-            parent.querySelectorAll('[data-fade-mask="1"]').forEach(el => {
-              try { el.remove(); } catch {}
-            });
-            const img = document.createElement("img");
-            img.src = dataUrl;
-            img.style.position = "absolute";
-            img.style.top = "0";
-            img.style.left = "0";
-            img.style.width = "100%";
-            img.style.height = "100%";
-            img.style.objectFit = "fill";
-            img.style.pointerEvents = "none";
-            img.style.zIndex = "4"; // SVG-overlay имеет zIndex:5 → размеры/snap поверх
-            img.style.opacity = "1";
-            img.style.transition = "opacity 220ms ease-out";
-            img.setAttribute("data-fade-mask", "1");
-            parent.appendChild(img);
-            stateRef.current.fadeMask = img;
-          }
-        } catch {
-          // SecurityError при cross-origin текстурах без CORS — пропускаем.
-        }
-
         cancelAnimationFrame(stateRef.current.animId);
         renderer.domElement.removeEventListener("wheel", onWheel);
         renderer.domElement.removeEventListener("pointerdown", onPointerDown);
@@ -3005,8 +2999,43 @@ export default function Wardrobe3D({
         // после нескольких переключений упирается в лимит (обычно 16 контекстов).
         renderer.forceContextLoss?.();
 
+        // ═══ CROSS-FADE: snapshot перед удалением старого canvas ═══
+        // Снимаем "фотографию" уходящей сцены и вешаем как абсолютную <img>-маску
+        // в parentElement (поверх mountRef, под SVG-overlay). Когда новая сцена
+        // отрендерит первый кадр — animate-loop плавно скроет маску за 220ms.
+        // Это нужно делать ИМЕННО ЗДЕСЬ — до removeChild — иначе toDataURL
+        // на отсоединённом canvas теряет содержимое в некоторых браузерах.
+        try {
+          const dataUrl = renderer.domElement.toDataURL("image/png");
+          const parent = mountRef.current?.parentElement;
+          if (parent && dataUrl && dataUrl.length > 100) { // length>100 = не пустой png
+            // Перед добавлением новой маски убираем все старые (если предыдущая
+            // не успела сняться — например при быстрых последовательных rebuild).
+            parent.querySelectorAll('[data-fade-mask="1"]').forEach(el => {
+              try { el.remove(); } catch {}
+            });
+            const img = document.createElement("img");
+            img.src = dataUrl;
+            img.style.position = "absolute";
+            img.style.top = "0";
+            img.style.left = "0";
+            img.style.width = "100%";
+            img.style.height = "100%";
+            img.style.objectFit = "fill";
+            img.style.pointerEvents = "none";
+            img.style.zIndex = "4"; // SVG-overlay имеет zIndex:5 → размеры/snap поверх
+            img.style.opacity = "1";
+            img.style.transition = "opacity 220ms ease-out";
+            img.setAttribute("data-fade-mask", "1");
+            parent.appendChild(img);
+            // Сохраняем ссылку — новый build её подхватит и спрячет после первого render.
+            stateRef.current.fadeMask = img;
+          }
+        } catch {
+          // SecurityError при cross-origin текстурах без CORS — просто пропускаем.
+        }
+
         // Убираем canvas из DOM, чтобы React не хранил ссылку на старый элемент.
-        // Snapshot для cross-fade уже сделан в начале cleanup (до dispose).
         if (renderer.domElement?.parentNode) {
           renderer.domElement.parentNode.removeChild(renderer.domElement);
         }
@@ -3635,15 +3664,28 @@ export default function Wardrobe3D({
               borderRadius: "50%",
               padding: 0,
               cursor: "pointer",
-              border: "1px solid rgba(217,119,6,0.6)",
-              background: "rgba(11,12,16,0.9)",
-              color: "#d97706",
-              fontSize: 16, lineHeight: 1,
+              // Полупрозрачный белый фон + лёгкая тень
+              border: "1px solid rgba(0,0,0,0.12)",
+              background: "rgba(255,255,255,0.88)",
+              backdropFilter: "blur(4px)",
+              WebkitBackdropFilter: "blur(4px)",
+              // Цвет шестерёнки задаётся в animate через CSS var --gear-color
+              color: "var(--gear-color, #475569)",
+              fontSize: 18, lineHeight: 1, fontWeight: 600,
               fontFamily: "'IBM Plex Mono',monospace",
               display: "flex", alignItems: "center", justifyContent: "center",
               zIndex: 11,
               pointerEvents: "auto",
-              boxShadow: "0 2px 8px rgba(0,0,0,0.5)",
+              boxShadow: "0 2px 6px rgba(0,0,0,0.15), 0 1px 2px rgba(0,0,0,0.1)",
+              transition: "transform 120ms ease-out, box-shadow 120ms ease-out",
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLButtonElement).style.transform = "translate(-50%, -50%) scale(1.1)";
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 4px 12px rgba(0,0,0,0.2), 0 2px 4px rgba(0,0,0,0.12)";
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLButtonElement).style.transform = "translate(-50%, -50%) scale(1)";
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 2px 6px rgba(0,0,0,0.15), 0 1px 2px rgba(0,0,0,0.1)";
             }}
           >⚙</button>
         )}
