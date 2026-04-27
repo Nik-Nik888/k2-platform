@@ -1,10 +1,15 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import WardrobeEditor from "../components/WardrobeEditor";
 import { loadCabinet, type CabinetRow } from "../api/cabinetApi";
 
 export function CabinetPage() {
   const { id } = useParams<{ id?: string }>();
+  const [searchParams] = useSearchParams();
+  // ?client_id=XXX в URL — для случая когда новый шкаф создаётся
+  // из карточки клиента в CRM (кнопка "+ Создать шкаф для клиента").
+  // Применяется только если шкаф ещё не сохранён (id отсутствует).
+  const initialClientId = !id ? searchParams.get("client_id") : null;
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<CabinetRow | null>(null);
@@ -69,6 +74,10 @@ export function CabinetPage() {
         corpus_texture_id: data.corpus_texture_id,
         facade_texture_id: data.facade_texture_id,
         client_id: data.client_id,
+      } : initialClientId ? {
+        // Новый шкаф из CRM (?client_id=XXX) — клиент сразу привязан,
+        // имя/корпус/элементы — дефолтные (заполнятся в WardrobeEditor).
+        client_id: initialClientId,
       } : undefined}
       onCreated={(newId) => {
         navigate(`/cabinet/${newId}`, { replace: true });

@@ -264,13 +264,6 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
     updateEl(selEl.id, { hingeSide: side });
   }, [selEl, updateEl]);
 
-  // Удерживаем ссылки чтобы линтер не ругался на unused (TS6133).
-  // Когда подключим к UI — заменить на реальное использование.
-  void _changeDoorType;
-  void _changeDoorHingeSide;
-  void _onElClick;
-  void _toggleDimDir;
-
   const toSvg = useCallback((e) => {
     const svg = svgRef.current; if (!svg) return { x: 0, y: 0 };
     // Поддержка как mouse/pointer event, так и touch event
@@ -508,6 +501,13 @@ export default function WardrobeEditor({ cabinetId, initial, onCreated }: Wardro
 
   const getDimDir = (i: number) => dimDirOverrides[i] || (dims[i]?.t === "w" ? "left" : "top");
   const _toggleDimDir = useCallback((i: number) => { setDimDirOverrides(p => ({ ...p, [i]: getDimDir(i) === "left" || getDimDir(i) === "top" ? (dims[i]!.t === "w" ? "right" : "bottom") : (dims[i]!.t === "w" ? "left" : "top") })); }, [dims, dimDirOverrides]);
+
+  // Удерживаем ссылки чтобы линтер не ругался на unused (TS6133).
+  // Когда подключим к UI — заменить на реальное использование.
+  void _changeDoorType;
+  void _changeDoorHingeSide;
+  void _onElClick;
+  void _toggleDimDir;
 
   const changeHorizDim = useCallback((d, v, dir) => {
     const cmd = applyHorizDimChange(d, v, dir, topLevelCols, elements, iW, t);

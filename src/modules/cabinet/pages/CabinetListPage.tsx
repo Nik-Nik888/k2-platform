@@ -8,6 +8,8 @@ export function CabinetListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  // Фильтр: "all" | "drafts" | clientId. По умолчанию все.
+  const [filter, setFilter] = useState<string>("all");
 
   const reload = () => {
     setLoading(true);
@@ -43,6 +45,22 @@ export function CabinetListPage() {
     } catch { return iso; }
   };
 
+  // Уникальные клиенты в списке шкафов — для select-фильтра.
+  const uniqueClients = (() => {
+    const seen = new Map<string, string>();
+    items.forEach(c => {
+      if (c.client_id && c.client_name) seen.set(c.client_id, c.client_name);
+    });
+    return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
+  })();
+
+  // Применяем фильтр.
+  const filteredItems = (() => {
+    if (filter === "all") return items;
+    if (filter === "drafts") return items.filter(c => !c.client_id);
+    return items.filter(c => c.client_id === filter);
+  })();
+
   return (
     <div style={{
       minHeight: "100vh",
@@ -63,19 +81,49 @@ export function CabinetListPage() {
               textTransform: "uppercase", margin: 0, color: "#d1d5db",
             }}>Мои шкафы</h1>
             <p style={{ fontSize: 11, color: "#666", margin: "4px 0 0" }}>
-              {items.length === 0 ? "Пока пусто" : `${items.length} ${items.length === 1 ? "проект" : items.length < 5 ? "проекта" : "проектов"}`}
+              {items.length === 0
+                ? "Пока пусто"
+                : filter === "all"
+                  ? `${items.length} ${items.length === 1 ? "проект" : items.length < 5 ? "проекта" : "проектов"}`
+                  : `${filteredItems.length} из ${items.length}`}
             </p>
           </div>
-          <button
-            onClick={() => navigate("/cabinet")}
-            style={{
-              padding: "10px 18px", borderRadius: 6,
-              background: "#d97706", color: "#000",
-              border: "none", cursor: "pointer", fontWeight: 700,
-              fontFamily: "inherit", fontSize: 12,
-              letterSpacing: "0.05em", textTransform: "uppercase",
-            }}
-          >+ Новый шкаф</button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {/* Фильтр по клиенту */}
+            {items.length > 0 && (
+              <select
+                value={filter}
+                onChange={e => setFilter(e.target.value)}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  background: "#14151c",
+                  color: "#d1d5db",
+                  border: "1px solid #2a2b35",
+                  fontFamily: "inherit",
+                  fontSize: 12,
+                  cursor: "pointer",
+                }}
+              >
+                <option value="all">Все шкафы</option>
+                <option value="drafts">Только черновики</option>
+                {uniqueClients.length > 0 && <option disabled>──────────</option>}
+                {uniqueClients.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            )}
+            <button
+              onClick={() => navigate("/cabinet")}
+              style={{
+                padding: "10px 18px", borderRadius: 6,
+                background: "#d97706", color: "#000",
+                border: "none", cursor: "pointer", fontWeight: 700,
+                fontFamily: "inherit", fontSize: 12,
+                letterSpacing: "0.05em", textTransform: "uppercase",
+              }}
+            >+ Новый шкаф</button>
+          </div>
         </div>
 
         {loading && (
@@ -122,13 +170,32 @@ export function CabinetListPage() {
           </div>
         )}
 
-        {!loading && !error && items.length > 0 && (
+        {!loading && !error && items.length > 0 && filteredItems.length === 0 && (
+          <div style={{
+            textAlign: "center", padding: "40px 20px",
+            border: "1px dashed #333", borderRadius: 8,
+            color: "#666",
+          }}>
+            <div style={{ marginBottom: 12 }}>По выбранному фильтру шкафов нет</div>
+            <button
+              onClick={() => setFilter("all")}
+              style={{
+                padding: "8px 16px", borderRadius: 6,
+                background: "transparent", color: "#d1d5db",
+                border: "1px solid #444", cursor: "pointer",
+                fontFamily: "inherit", fontSize: 11,
+              }}
+            >Сбросить фильтр</button>
+          </div>
+        )}
+
+        {!loading && !error && filteredItems.length > 0 && (
           <div style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
             gap: 12,
           }}>
-            {items.map(c => (
+            {filteredItems.map(c => (
               <div
                 key={c.id}
                 style={{
@@ -167,6 +234,30 @@ export function CabinetListPage() {
                 {/* Габариты */}
                 <div style={{ fontSize: 10, color: "#666", marginBottom: 6 }}>
                   {c.corpus.width}×{c.corpus.height}×{c.corpus.depth} мм
+                </div>
+                {/* Клиент или бейдж "Черновик" */}
+                <div style={{ marginBottom: 6 }}>
+                  {c.client_name ? (
+                    <div style={{
+                      fontSize: 10, color: "#22c55e",
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                    }}>
+                      👤 {c.client_name}
+                    </div>
+                  ) : (
+                    <div style={{
+                      fontSize: 9, color: "#888",
+                      display: "inline-block",
+                      padding: "2px 6px",
+                      borderRadius: 3,
+                      background: "rgba(255,255,255,0.05)",
+                      border: "1px dashed #444",
+                      letterSpacing: "0.05em",
+                      textTransform: "uppercase",
+                    }}>
+                      Черновик
+                    </div>
+                  )}
                 </div>
                 {/* Мета */}
                 <div style={{

@@ -7,6 +7,7 @@ import {
   ChevronRight, GripVertical, Loader2, AlertCircle, Users,
 } from 'lucide-react';
 import ClientInstallments from '@modules/installments/components/ClientInstallments';
+import ClientCabinets from '../components/ClientCabinets';
 import OrderDuplicatesWarning from '../components/OrderDuplicatesWarning';
 
 // ─── Этапы канбана ──────────────────────────────────────
@@ -262,6 +263,10 @@ function OrderDetail({
 
           {client && (
             <ClientInstallments clientId={client.id} onClose={onClose} />
+          )}
+
+          {client && (
+            <ClientCabinets clientId={client.id} onClose={onClose} />
           )}
 
           <div>

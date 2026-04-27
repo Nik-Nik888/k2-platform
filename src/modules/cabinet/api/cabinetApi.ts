@@ -44,10 +44,38 @@ export async function listCabinets(): Promise<CabinetSummary[]> {
   const orgId = useAuthStore.getState().organization?.id;
   if (!orgId) throw new Error('No organization');
 
+  // JOIN с clients чтобы сразу получить имя клиента — без второго запроса.
+  // foreign key: cabinets.client_id → clients.id
+  const { data, error } = await supabase
+    .from('cabinets')
+    .select('id, name, corpus, client_id, preview, elements, created_at, updated_at, clients(name)')
+    .eq('org_id', orgId)
+    .order('updated_at', { ascending: false });
+
+  if (error) throw error;
+  return (data || []).map((row: any) => ({
+    id: row.id,
+    name: row.name,
+    corpus: row.corpus,
+    client_id: row.client_id,
+    client_name: row.clients?.name ?? undefined,
+    preview: row.preview,
+    element_count: Array.isArray(row.elements) ? row.elements.length : 0,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  }));
+}
+
+// ── Список шкафов конкретного клиента (для карточки клиента в CRM) ───
+export async function listCabinetsByClient(clientId: string): Promise<CabinetSummary[]> {
+  const orgId = useAuthStore.getState().organization?.id;
+  if (!orgId) throw new Error('No organization');
+
   const { data, error } = await supabase
     .from('cabinets')
     .select('id, name, corpus, client_id, preview, elements, created_at, updated_at')
     .eq('org_id', orgId)
+    .eq('client_id', clientId)
     .order('updated_at', { ascending: false });
 
   if (error) throw error;
