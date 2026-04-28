@@ -1,6 +1,6 @@
 import type {
   GlazingProject, Frame, Cell, ProjectConfig,
-  EstimateLine, ProjectEstimate,
+  EstimateLine, ProjectEstimate, ProjectMetrics,
   GlazingEstimate, GlazingFormData, FrameConfig,
 } from '../types';
 
@@ -137,6 +137,70 @@ function round(n: number, digits = 2): number {
  * @param project — проект с геометрией и конфигом
  * @param materials — карта материалов из справочника (id → material)
  */
+// ═══════════════════════════════════════════════════════════════════
+// Геометрические метрики проекта (без участия материалов).
+// Используются для столбцов «площадь / рамы / импосты / штапики / ...»
+// в таблице сметы PVC-style.
+// ═══════════════════════════════════════════════════════════════════
+
+export function calcProjectMetrics(project: GlazingProject): ProjectMetrics {
+  let areaM2 = 0;
+  let framesPerimeterM = 0;
+  let impostsM = 0;
+  let beadingM = 0;
+  let sealM = 0;
+  let sashCount = 0;
+  let glassAreaM2 = 0;
+
+  for (const seg of project.segments) {
+    for (const frame of seg.frames) {
+      const fW = frame.width / 1000;   // → м
+      const fH = frame.height / 1000;
+      const fArea = fW * fH;
+      areaM2 += fArea;
+      framesPerimeterM += 2 * (fW + fH);
+
+      // Импосты: вертикальные имеют высоту полосы (rowIdx),
+      // горизонтальные — ширину рамы. Упрощённо считаем:
+      //   horizontals — каждый идёт через всю ширину
+      //   verticals — каждый идёт по высоте СВОЕЙ полосы
+      // Чтобы не строить yBoundaries здесь, упрощаем: вертикали
+      // считаем как высота_рамы / (число_горизонталей+1).
+      const horCount = frame.imposts.filter((i) => i.orientation === 'horizontal').length;
+      const vertCount = frame.imposts.filter((i) => i.orientation === 'vertical').length;
+      const verticalRowH = fH / (horCount + 1);
+      impostsM += horCount * fW;            // горизонтальные на всю ширину
+      impostsM += vertCount * verticalRowH; // вертикальные в полосах
+
+      // Штапики и уплотнители — по периметрам всех ячеек.
+      // Штапик ставится по контуру стеклопакета (4 стороны на ячейку).
+      // Уплотнитель — внутренний и внешний контур ячейки (×2).
+      for (const cell of frame.cells) {
+        const cW = cell.width / 1000;
+        const cH = cell.height / 1000;
+        const cellPerim = 2 * (cW + cH);
+        beadingM += cellPerim;
+        sealM += cellPerim * 2;
+        glassAreaM2 += cW * cH;
+
+        if (cell.sash !== 'fixed') sashCount++;
+      }
+    }
+  }
+
+  return {
+    areaM2: round(areaM2, 2),
+    framesPerimeterM: round(framesPerimeterM, 2),
+    impostsM: round(impostsM, 2),
+    beadingM: round(beadingM, 2),
+    sealM: round(sealM, 2),
+    sashCount,
+    doorSashCount: 0,         // двери появятся в Этапе 5
+    glassAreaM2: round(glassAreaM2, 2),
+    sandwichAreaM2: 0,        // сэндвич-панели появятся в Этапе 5
+  };
+}
+
 export function calcProject(
   project: GlazingProject,
   materials: MaterialMap
@@ -343,6 +407,7 @@ export function calcProject(
     discountAmount,
     total,
     isCustomPrice,
+    metrics: calcProjectMetrics(project),
   };
 }
 

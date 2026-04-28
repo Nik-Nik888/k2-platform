@@ -13,6 +13,7 @@ import {
   redistributeSectionsWithLocks,
   scaleSectionsToFit,
 } from '../logic/distribute';
+import { findTemplateById } from '../data/templates';
 
 // ═══════════════════════════════════════════════════════════════════
 // glazingStore — состояние редактора остекления.
@@ -47,10 +48,56 @@ function loadDraft(): GlazingFormData | null {
   try {
     const raw = localStorage.getItem(DRAFT_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as GlazingFormData;
+    const parsed = JSON.parse(raw) as GlazingFormData;
+    // Мигрируем старые конфиги к актуальной форме
+    return migrateFormData(parsed);
   } catch {
     return null;
   }
+}
+
+/**
+ * Заполняет недостающие поля в config — делает старые черновики
+ * совместимыми с новой версией структуры. Не теряет существующие данные.
+ *
+ * Когда добавляются новые поля в ProjectConfig, нужно дополнить эту
+ * функцию, иначе старые сохранённые проекты могут падать в UI.
+ */
+function migrateFormData(data: GlazingFormData): GlazingFormData {
+  if (!data || !Array.isArray(data.projects)) {
+    return { projects: [], activeProjectId: null };
+  }
+  return {
+    ...data,
+    projects: data.projects.map((p) => ({
+      ...p,
+      // Доводим config до актуальной формы — каждое поле проверяется отдельно
+      config: {
+        profileSystemId:   p.config?.profileSystemId ?? null,
+        glassId:           p.config?.glassId ?? null,
+        hardwareId:        p.config?.hardwareId ?? null,
+        laminationInnerId: p.config?.laminationInnerId ?? null,
+        laminationOuterId: p.config?.laminationOuterId ?? null,
+        quantity:          p.config?.quantity ?? 1,
+        sills:             p.config?.sills ?? [],
+        ebbs:              p.config?.ebbs ?? [],
+        mosquitos:         p.config?.mosquitos ?? [],
+        addons:            p.config?.addons ?? [],
+        extensions:        p.config?.extensions ?? [],
+        overlaps:          p.config?.overlaps ?? [],
+        connectors:        p.config?.connectors ?? [],
+        connectors90:      p.config?.connectors90 ?? [],
+        connectors135:     p.config?.connectors135 ?? [],
+        works:             p.config?.works ?? [],
+        miscs:             p.config?.miscs ?? [],
+        discountPercent:   (p.config?.discountPercent ?? 0) as 0 | 1 | 3 | 5,
+        customPrice:       p.config?.customPrice ?? null,
+        note:              p.config?.note ?? '',
+      },
+      segments: Array.isArray(p.segments) ? p.segments : [],
+      corners:  Array.isArray(p.corners) ? p.corners : [],
+    })),
+  };
 }
 
 function saveDraft(data: GlazingFormData) {
@@ -128,6 +175,8 @@ interface GlazingState {
 
   // ── Проекты ──────────────────────────────────────────────────
   addProject: (name?: string) => string;       // возвращает id нового
+  /** Создать проект из шаблона (см. data/templates.ts). */
+  addProjectFromTemplate: (templateId: string, projectName: string) => string;
   removeProject: (projectId: string) => void;
   setActiveProject: (projectId: string) => void;
   renameProject: (projectId: string, name: string) => void;
@@ -280,6 +329,23 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       activeProjectId: project.id,
     };
     set({ data });
+    if (!get().orderId) saveDraft(data);
+    return project.id;
+  },
+
+  addProjectFromTemplate: (templateId, projectName) => {
+    const tpl = findTemplateById(templateId);
+    if (!tpl) {
+      console.warn(`Template "${templateId}" not found, falling back to empty project`);
+      return get().addProject(projectName);
+    }
+    const project = tpl.build(projectName);
+    const data = {
+      ...get().data,
+      projects: [...get().data.projects, project],
+      activeProjectId: project.id,
+    };
+    set({ data, activeSegmentId: null, activeFrameId: null, activeCellId: null });
     if (!get().orderId) saveDraft(data);
     return project.id;
   },

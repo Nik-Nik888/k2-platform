@@ -15,21 +15,23 @@ import type { GlazingFormData } from '../types';
 // ── Имена категорий, которые ищет UI остекления ───────────────────
 // Они должны совпадать с теми, что создаёт миграция 013_glazing_seed.sql.
 export const GLAZING_CATEGORY_NAMES = {
-  profiles:    'Профильные системы',
-  glass:       'Стеклопакеты',
-  hardware:    'Фурнитура',
-  sills:       'Подоконники',
-  ebbs:        'Отливы',
-  mosquito:    'Москитные сетки',
+  profiles:      'Профильные системы',
+  glass:         'Стеклопакеты',
+  hardware:      'Фурнитура',
+  sills:         'Подоконники',
+  ebbs:          'Отливы',
+  mosquito:      'Москитные сетки',
   laminationIn:  'Ламинация внутренняя',
   laminationOut: 'Ламинация внешняя',
-  addons:      'Дополнения по размеру',
-  connectors:  'Соединительные профили',
-  bones:       'Кости (усиленные соединители)',
-  extensions:  'Доборные профили',
-  overlaps:    'Нащельники',
-  works:       'Работы (остекление)',
-  miscs:       'Расходники монтажа',
+  addons:        'Дополнения по размеру',
+  connectors:    'Соединительные профили',
+  connectors90:  'Соединительные профили 90°',
+  connectors135: 'Соединительные профили 135°',
+  bones:         'Кости (усиленные соединители)',
+  extensions:    'Доборные профили',
+  overlaps:      'Нащельники',
+  works:         'Работы (остекление)',
+  miscs:         'Расходники монтажа',
 } as const;
 
 export type GlazingCategoryKey = keyof typeof GLAZING_CATEGORY_NAMES;

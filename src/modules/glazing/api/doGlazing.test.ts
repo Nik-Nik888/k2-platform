@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   calcProject, calcAll, frameAreaM2, cellAreaM2,
   projectAreaM2, projectOpeningSashesCount, projectBonesCount,
+  calcProjectMetrics,
   type CalcMaterial, type MaterialMap,
 } from './doGlazing';
 import {
@@ -338,5 +339,70 @@ describe('calcAll', () => {
     const all = calcAll({ projects: [], activeProjectId: null }, matMap);
     expect(all.grandTotal).toBe(0);
     expect(all.projects).toEqual([]);
+  });
+});
+
+describe('calcProjectMetrics', () => {
+  it('одна пустая рама 750×1500 — простые метрики', () => {
+    // Площадь = 0.75 × 1.5 = 1.125 м²
+    // Периметр рамы = 2×(0.75+1.5) = 4.5 м
+    // Импостов нет → 0 м импостов
+    // Одна ячейка: периметр = 2×(0.75+1.5) = 4.5 → штапик 4.5, уплотнитель 9.0
+    // Glass area = 0.75 × 1.5 = 1.125 м²
+    // Sash count = 0 (всё fixed)
+    const proj = createEmptyProject();
+    const m = calcProjectMetrics(proj);
+    expect(m.areaM2).toBe(1.13);
+    expect(m.framesPerimeterM).toBe(4.5);
+    expect(m.impostsM).toBe(0);
+    expect(m.beadingM).toBe(4.5);
+    expect(m.sealM).toBe(9);
+    expect(m.sashCount).toBe(0);
+    expect(m.glassAreaM2).toBe(1.13);
+    expect(m.doorSashCount).toBe(0);
+    expect(m.sandwichAreaM2).toBe(0);
+  });
+
+  it('одна рама 1500×1400 с двумя вертикальными импостами и одной поворотной створкой', () => {
+    const proj: GlazingProject = createEmptyProject();
+    const seg = proj.segments[0]!;
+    const fr = seg.frames[0]!;
+    fr.width = 1500;
+    fr.height = 1400;
+    fr.imposts = [
+      { id: 'i1', orientation: 'vertical', position: 500 },
+      { id: 'i2', orientation: 'vertical', position: 1000 },
+    ];
+    fr.cells = [
+      { id: 'c1', x: 0,    y: 0, width: 500, height: 1400, sash: 'fixed' },
+      { id: 'c2', x: 500,  y: 0, width: 500, height: 1400, sash: 'turn_left' },
+      { id: 'c3', x: 1000, y: 0, width: 500, height: 1400, sash: 'fixed' },
+    ];
+    const m = calcProjectMetrics(proj);
+    // Площадь = 1.5 × 1.4 = 2.1
+    expect(m.areaM2).toBe(2.1);
+    // Периметр рамы = 2 × (1.5 + 1.4) = 5.8
+    expect(m.framesPerimeterM).toBe(5.8);
+    // 2 вертикальных импоста × высота полосы 1.4м = 2.8 м
+    expect(m.impostsM).toBe(2.8);
+    // 3 ячейки, каждая 0.5 × 1.4, периметр = 2×(0.5+1.4) = 3.8 → 3 ячейки = 11.4
+    expect(m.beadingM).toBe(11.4);
+    expect(m.sealM).toBe(22.8);
+    expect(m.sashCount).toBe(1);
+    expect(m.glassAreaM2).toBe(2.1);
+  });
+
+  it('пустой проект (без сегментов) → нули', () => {
+    const proj: GlazingProject = {
+      id: 'p',
+      name: 'Empty',
+      segments: [],
+      corners: [],
+      config: {} as any,
+    };
+    const m = calcProjectMetrics(proj);
+    expect(m.areaM2).toBe(0);
+    expect(m.framesPerimeterM).toBe(0);
+    expect(m.sashCount).toBe(0);
   });
 });

@@ -227,6 +227,8 @@ export interface FrameConfig {
  * (фото 7-10). У нас он на уровне проекта (или отдельной рамы через override).
  */
 export interface ProjectConfig extends FrameConfig {
+  /** Количество одинаковых окон этого типа (для тиражируемых проектов). */
+  quantity: number;
   /** Подоконники: id материала + длина в п.м. */
   sills: { materialId: string; length: number }[];
   /** Отливы: id + длина. */
@@ -239,6 +241,12 @@ export interface ProjectConfig extends FrameConfig {
   extensions: { materialId: string; length: number }[];
   /** Нащельники. */
   overlaps: { materialId: string; length: number }[];
+  /** Соединительные профили (общие). */
+  connectors: { materialId: string; length: number }[];
+  /** Соединительные профили 90° (для Г-образных балконов). */
+  connectors90: { materialId: string; length: number }[];
+  /** Соединительные профили 135°. */
+  connectors135: { materialId: string; length: number }[];
   /** Работы (демонтаж, монтаж, отделка откосов). */
   works: { materialId: string; quantity: number }[];
   /** Расходники монтажа. */
@@ -259,12 +267,16 @@ export function emptyProjectConfig(): ProjectConfig {
     hardwareId: null,
     laminationInnerId: null,
     laminationOuterId: null,
+    quantity: 1,
     sills: [],
     ebbs: [],
     mosquitos: [],
     addons: [],
     extensions: [],
     overlaps: [],
+    connectors: [],
+    connectors90: [],
+    connectors135: [],
     works: [],
     miscs: [],
     discountPercent: 0,
@@ -321,6 +333,29 @@ export interface ProjectEstimate {
   discountAmount: number;  // фактическая скидка в рублях
   total: number;           // итог: либо subtotal-discount, либо customPrice
   isCustomPrice: boolean;  // использован ли override
+  /**
+   * Геометрические метрики проекта для отображения в ResultsTable.
+   * Это агрегаты, не зависящие от справочника материалов
+   * (площадь и метраж считаются по геометрии конструкции).
+   */
+  metrics: ProjectMetrics;
+}
+
+/**
+ * Геометрические метрики одного проекта остекления.
+ * Используется для столбцов таблицы сметы PVC-style:
+ * площадь / рамы / импосты / штапики / уплотн. / створки / стёкла.
+ */
+export interface ProjectMetrics {
+  areaM2: number;          // суммарная площадь всех рам, м²
+  framesPerimeterM: number;// общий периметр рам, п.м.
+  impostsM: number;        // суммарный метраж импостов, п.м.
+  beadingM: number;        // штапики, п.м. (~ периметр всех ячеек)
+  sealM: number;           // уплотнители, п.м. (~ 2× периметр ячеек)
+  sashCount: number;       // число открывающихся створок (не fixed)
+  doorSashCount: number;   // двер.створки (пока всегда 0, для таблицы)
+  glassAreaM2: number;     // суммарная площадь стекла (≈ areaM2 × коэф)
+  sandwichAreaM2: number;  // сэндвич-панели (пока всегда 0, для таблицы)
 }
 
 export interface GlazingEstimate {
@@ -330,7 +365,7 @@ export interface GlazingEstimate {
 
 // ─── Утилиты создания пустых сущностей ────────────────────────────
 
-const uid = () =>
+export const uid = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2) + Date.now().toString(36);

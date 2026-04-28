@@ -5,8 +5,13 @@ import { WindowCanvas } from '../components/canvas/WindowCanvas';
 import { CellEditPopup } from '../components/popups/CellEditPopup';
 import { CornerEditPopup, type CornerEditValue } from '../components/popups/CornerEditPopup';
 import { JoinPickerPopup } from '../components/popups/JoinPickerPopup';
+import { NewProjectPopup } from '../components/popups/NewProjectPopup';
+import { ConfigPopup } from '../components/popups/ConfigPopup';
+import { WindowsStrip } from '../components/strip/WindowsStrip';
+import { ResultsTable } from '../components/results/ResultsTable';
+import { ConfigGearButton } from '../components/ConfigGearButton';
 import { calcProject, type MaterialMap } from '../api/doGlazing';
-import { loadGlazingReference } from '../api/glazingApi';
+import { loadGlazingReference, type GlazingCategoryKey, type GlazingCategoryWithItems } from '../api/glazingApi';
 import { validateProject, hasErrors, countErrors, countWarns } from '../logic/validate';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -25,6 +30,9 @@ export function GlazingTestPage() {
   const project = store.data.projects.find((p) => p.id === store.data.activeProjectId);
 
   const [materials, setMaterials] = useState<MaterialMap | null>(null);
+  const [reference, setReference] = useState<
+    Partial<Record<GlazingCategoryKey, GlazingCategoryWithItems>> | null
+  >(null);
   const [refLoading, setRefLoading] = useState(true);
   const [refError, setRefError] = useState<string | null>(null);
 
@@ -45,6 +53,12 @@ export function GlazingTestPage() {
     afterFrameIndex: number;
   } | null>(null);
 
+  // Попап создания нового проекта (выбор шаблона)
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
+
+  // Большой попап настроек проекта (ConfigPopup)
+  const [configOpen, setConfigOpen] = useState(false);
+
   // ── Инициализация ──────────────────────────────────────────────
   useEffect(() => {
     store.initFromDraft();
@@ -64,6 +78,7 @@ export function GlazingTestPage() {
           }
         }
         setMaterials(map);
+        setReference(ref);
         setRefLoading(false);
 
         if (project) {
@@ -234,9 +249,15 @@ export function GlazingTestPage() {
             Inline-редактирование размеров, попапы, углы между сегментами.
           </p>
         </div>
-        <button onClick={() => store.reset()} className="btn-secondary text-xs py-1.5 px-3">
-          Сброс
-        </button>
+        <div className="flex items-center gap-2">
+          <ConfigGearButton
+            onClick={() => setConfigOpen(true)}
+            disabled={!project}
+          />
+          <button onClick={() => store.reset()} className="btn-secondary text-xs py-1.5 px-3">
+            Сброс
+          </button>
+        </div>
       </div>
 
       {/* ── Селектор активного сегмента ──────────────────────── */}
@@ -350,7 +371,28 @@ export function GlazingTestPage() {
         Большие 🟦+ по краям → новая рама. ⊕ между рамами → выбор «Кость» или «Поворот».
       </p>
 
-      {/* ── Расчёт + валидация ──────────────────────────────── */}
+      {/* ── Лента проектов ───────────────────────────────────── */}
+      <WindowsStrip
+        projects={store.data.projects}
+        activeProjectId={store.data.activeProjectId}
+        onSelectProject={(id) => store.setActiveProject(id)}
+        onAddProject={() => setNewProjectOpen(true)}
+        onDeleteProject={(id) => store.removeProject(id)}
+      />
+
+      {/* ── Таблица сметы PVC-style ─────────────────────────── */}
+      <ResultsTable
+        data={store.data}
+        activeProjectId={store.data.activeProjectId}
+        projectTotals={Object.fromEntries(
+          store.data.projects.map((p) => [
+            p.id,
+            calcProject(p, materials ?? new Map()).total,
+          ])
+        )}
+      />
+
+      {/* ── Детализация сметы + валидация ───────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div className="card p-3">
           <h3 className="text-sm font-semibold mb-2">Смета</h3>
@@ -496,6 +538,48 @@ export function GlazingTestPage() {
           onChooseCorner={handleChooseCorner}
         />
       )}
+
+      {newProjectOpen && (
+        <NewProjectPopup
+          suggestedName={suggestProjectName(store.data.projects)}
+          onClose={() => setNewProjectOpen(false)}
+          onCreate={(templateId, name) => {
+            store.addProjectFromTemplate(templateId, name);
+          }}
+        />
+      )}
+
+      {configOpen && project && reference && (
+        <ConfigPopup
+          current={project.config}
+          reference={reference}
+          onClose={() => setConfigOpen(false)}
+          onSave={(patch) => store.setProjectConfig(project.id, patch)}
+        />
+      )}
     </div>
   );
+}
+
+/**
+ * Предлагаемое название следующего проекта — на основе уже существующих.
+ * Например, если есть «Балкон 1», предлагаем «Балкон 2».
+ */
+function suggestProjectName(projects: { name: string }[]): string {
+  // Базовое имя — первое слово существующих ("Балкон", "Окно") + следующий номер
+  if (projects.length === 0) return 'Балкон 1';
+  // Извлекаем базы и максимальный номер
+  const counts: Record<string, number> = {};
+  for (const p of projects) {
+    const m = p.name.match(/^(.+?)\s*(\d+)?$/);
+    if (m) {
+      const base = m[1]!.trim();
+      const n = m[2] ? parseInt(m[2], 10) : 1;
+      counts[base] = Math.max(counts[base] ?? 0, n);
+    }
+  }
+  // Возьмём самую частую "базу"
+  const lastBase = projects[projects.length - 1]!.name.match(/^(.+?)\s*\d*$/)?.[1]?.trim() ?? 'Окно';
+  const next = (counts[lastBase] ?? 0) + 1;
+  return `${lastBase} ${next}`;
 }
