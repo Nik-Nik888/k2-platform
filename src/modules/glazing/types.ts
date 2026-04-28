@@ -64,7 +64,49 @@ export interface Impost {
    * Для horizontal — от низа рамы.
    */
   position: number;
+  /**
+   * Для ВЕРТИКАЛЬНОГО импоста: индекс горизонтальной полосы (row), к которой
+   * он принадлежит. Полоса = область между двумя соседними горизонтальными
+   * импостами (или между гор. импостом и краем рамы), нумерация снизу вверх.
+   *
+   * Если в раме нет горизонтальных импостов → полоса всегда 0 (единственная).
+   * Если задано — вертикальный импост рисуется только в пределах своей полосы
+   * и НЕ пересекает горизонтальные.
+   *
+   * Для горизонтальных импостов поле игнорируется.
+   */
+  belongsToRow?: number;
 }
+
+/**
+ * Ячейка — прямоугольная область внутри рамы, ограниченная
+ * импостами и/или контуром рамы. Может быть глухой или содержать створку.
+ *
+ * Координаты задаются в мм относительно левого нижнего угла рамы.
+ */
+/**
+ * Тип москитной сетки. null/undefined = без сетки.
+ */
+export type MosquitoType = 'standard' | 'plug' | 'antiсat' | 'antidust';
+
+export const MOSQUITO_LABELS: Record<MosquitoType, string> = {
+  standard: 'Стандартная',
+  plug:     'Вкладная',
+  antiсat:  'Антикошка',
+  antidust: 'Антипыль',
+};
+
+/**
+ * Дополнительная фурнитура. Можно установить несколько одновременно
+ * на одну ячейку (например, детские замки + гребёнка).
+ */
+export type HardwareItem = 'child_lock' | 'comb' | 'air_box';
+
+export const HARDWARE_LABELS: Record<HardwareItem, string> = {
+  child_lock: 'Детские замки',
+  comb:       'Гребёнка',
+  air_box:    'Эйрбокс',
+};
 
 /**
  * Ячейка — прямоугольная область внутри рамы, ограниченная
@@ -79,6 +121,10 @@ export interface Cell {
   width: number;       // ширина, мм
   height: number;      // высота, мм
   sash: SashType;      // тип открывания (fixed = глухая)
+  /** Тип москитной сетки. null/undefined = без сетки. */
+  mosquito?: MosquitoType | null;
+  /** Доп. фурнитура (можно несколько). */
+  hardware?: HardwareItem[];
 }
 
 /**
@@ -93,6 +139,21 @@ export interface Frame {
   cells: Cell[];
   /** Override настроек проекта на уровне отдельной рамы (необязательно). */
   override?: Partial<FrameConfig>;
+  /**
+   * Закреплённые секции (по индексам в массиве, отсортированном по позиции).
+   * При изменении ширины одной секции остальные пересчитываются равномерно,
+   * но закреплённые сохраняют свою ширину.
+   *
+   * • horizontal — закреплённые ВЫСОТЫ горизонтальных полос (общие для всей рамы).
+   * • verticalByRow — закреплённые ШИРИНЫ вертикальных секций для каждой полосы
+   *   (ключ — индекс полосы 0,1,2... снизу вверх).
+   *
+   * Закрепы сбрасываются при добавлении/удалении импостов и по кнопке "выровнять".
+   */
+  lockedSections?: {
+    horizontal: number[];
+    verticalByRow: Record<number, number[]>;
+  };
 }
 
 /**
@@ -285,7 +346,7 @@ export function createDefaultCell(width: number, height: number): Cell {
 }
 
 /** Создать пустую раму с одной глухой ячейкой. */
-export function createEmptyFrame(width = 1500, height = 1400): Frame {
+export function createEmptyFrame(width = 750, height = 1500): Frame {
   return {
     id: uid(),
     width,
@@ -296,12 +357,12 @@ export function createEmptyFrame(width = 1500, height = 1400): Frame {
 }
 
 /** Создать пустой сегмент с одной рамой. */
-export function createEmptySegment(height = 1400): Segment {
+export function createEmptySegment(height = 1500): Segment {
   return {
     id: uid(),
     heightLeft: height,
     heightRight: height,
-    frames: [createEmptyFrame(1500, height)],
+    frames: [createEmptyFrame(750, height)],
     bones: [],
   };
 }
