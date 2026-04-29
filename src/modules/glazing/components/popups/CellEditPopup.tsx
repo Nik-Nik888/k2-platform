@@ -51,6 +51,7 @@ const TABS: Array<{ id: TabId; label: string; emoji: string }> = [
 ];
 
 const SASH_ORDER: SashType[] = [
+  'sandwich',           // сэндвич-панель (первой по запросу пользователя)
   'fixed',
   'turn_left', 'turn_right',
   'tilt',

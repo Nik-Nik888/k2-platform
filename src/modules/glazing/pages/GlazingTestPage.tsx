@@ -6,6 +6,7 @@ import { CellEditPopup } from '../components/popups/CellEditPopup';
 import { CornerEditPopup, type CornerEditValue } from '../components/popups/CornerEditPopup';
 import { JoinPickerPopup } from '../components/popups/JoinPickerPopup';
 import { NewProjectPopup } from '../components/popups/NewProjectPopup';
+import { SaveTemplatePopup } from '../components/popups/SaveTemplatePopup';
 import { ConfigPopup } from '../components/popups/ConfigPopup';
 import { WindowsStrip } from '../components/strip/WindowsStrip';
 import { ResultsTable } from '../components/results/ResultsTable';
@@ -56,12 +57,19 @@ export function GlazingTestPage() {
   // Попап создания нового проекта (выбор шаблона)
   const [newProjectOpen, setNewProjectOpen] = useState(false);
 
+  // Попап сохранения текущего проекта как шаблона
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
+
   // Большой попап настроек проекта (ConfigPopup)
   const [configOpen, setConfigOpen] = useState(false);
 
   // ── Инициализация ──────────────────────────────────────────────
   useEffect(() => {
     store.initFromDraft();
+    // Загружаем пользовательские шаблоны при монтировании
+    store.loadUserTemplates().catch((err) => {
+      console.warn('Не удалось загрузить шаблоны:', err);
+    });
   }, []);
 
   useEffect(() => {
@@ -220,7 +228,20 @@ export function GlazingTestPage() {
       project!.id,
       joinPicker.segmentId,
       joinPicker.afterFrameIndex,
-      defaultBoneMaterialId
+      defaultBoneMaterialId,
+      'bone'
+    );
+  }
+
+  // Из попапа: выбран Соединитель универсальный (тонкая стыковочная планка)
+  function handleChooseConnector() {
+    if (!joinPicker) return;
+    store.addBone(
+      project!.id,
+      joinPicker.segmentId,
+      joinPicker.afterFrameIndex,
+      undefined,        // материал у connector'а — другой, по умолчанию пусть будет null
+      'connector'
     );
   }
 
@@ -285,6 +306,29 @@ export function GlazingTestPage() {
 
       {/* ── Тулбар ──────────────────────────────────────────── */}
       <div className="card p-3 flex items-center gap-2 flex-wrap text-sm">
+        {/* Кнопка добавления нового проекта остекления */}
+        <button
+          onClick={() => setNewProjectOpen(true)}
+          className="text-xs py-1.5 px-3 rounded-lg bg-brand-500 text-white hover:bg-brand-600
+                     font-semibold flex items-center gap-1"
+        >
+          + Добавить проект
+        </button>
+
+        {/* Кнопка сохранения текущего проекта как шаблона */}
+        <button
+          onClick={() => setSaveTemplateOpen(true)}
+          disabled={!project}
+          className="text-xs py-1.5 px-3 rounded-lg bg-lime-500 text-white hover:bg-lime-600
+                     font-semibold flex items-center gap-1
+                     disabled:opacity-40 disabled:cursor-not-allowed"
+          title="Сохранить геометрию текущего проекта как шаблон"
+        >
+          + Шаблон
+        </button>
+
+        <span className="text-xs text-gray-300 mx-1">·</span>
+
         <span className="text-xs text-gray-500 mr-1">В сегмент:</span>
         <button onClick={handleRemoveFrame}
           disabled={!activeFrame || activeSegment.frames.length <= 1}
@@ -292,7 +336,6 @@ export function GlazingTestPage() {
           <Trash2 className="w-3 h-3 inline mr-0.5" /> рама
         </button>
 
-        <span className="text-xs text-gray-500 ml-3 mr-1">Балкон:</span>
         {project.segments.length > 1 && (
           <button onClick={handleRemoveSegment}
             className="text-xs py-1.5 px-2.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">
@@ -331,6 +374,12 @@ export function GlazingTestPage() {
           }}
           onResetSectionLocks={(segId, frId, orientation, rowIdx) => {
             store.resetSectionLocks(project.id, segId, frId, orientation, rowIdx);
+          }}
+          onChangeFrameBottomOffset={(segId, frId, offset) => {
+            store.setFrameBottomOffset(project.id, segId, frId, offset);
+          }}
+          onChangeFrameTopOffset={(segId, frId, offset) => {
+            store.setFrameTopOffset(project.id, segId, frId, offset);
           }}
           onChangeFrameWidth={(segId, frId, w) => {
             // Рама независима — меняем только её ширину, общий размер сегмента
@@ -535,6 +584,7 @@ export function GlazingTestPage() {
         <JoinPickerPopup
           onClose={() => setJoinPicker(null)}
           onChooseBone={handleChooseBone}
+          onChooseConnector={handleChooseConnector}
           onChooseCorner={handleChooseCorner}
         />
       )}
@@ -542,9 +592,30 @@ export function GlazingTestPage() {
       {newProjectOpen && (
         <NewProjectPopup
           suggestedName={suggestProjectName(store.data.projects)}
+          userTemplates={store.userTemplates}
           onClose={() => setNewProjectOpen(false)}
-          onCreate={(templateId, name) => {
-            store.addProjectFromTemplate(templateId, name);
+          onCreateEmpty={(constructionType, name) => {
+            store.addProjectByType(name, constructionType);
+          }}
+          onCreateFromTemplate={(templateId, name) => {
+            store.addProjectFromUserTemplate(templateId, name);
+          }}
+          onDeleteTemplate={async (templateId) => {
+            await store.deleteUserTemplate(templateId);
+          }}
+        />
+      )}
+
+      {saveTemplateOpen && project && (
+        <SaveTemplatePopup
+          defaultName={project.name}
+          defaultType={project.constructionType ?? 'window'}
+          onClose={() => setSaveTemplateOpen(false)}
+          onSave={async (name, constructionType) => {
+            const result = await store.saveAsTemplate(project.id, name, constructionType);
+            if (!result) {
+              throw new Error('Не удалось сохранить шаблон');
+            }
           }}
         />
       )}

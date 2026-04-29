@@ -121,19 +121,19 @@ export function CornerEditPopup({
         {type === 'h_universal' && (
           <div className="mb-4">
             <label className="text-xs text-gray-500 font-semibold uppercase mb-1.5 block">
-              Угол, градусы (от 30° до 330°)
+              Угол, градусы (от 60° до 180°)
             </label>
             <input
               type="number"
               inputMode="numeric"
-              min={30}
-              max={330}
+              min={60}
+              max={180}
               value={angle}
               onChange={(e) => setAngle(parseInt(e.target.value || '0', 10) || 0)}
               className="input text-sm"
             />
             <div className="flex gap-1 mt-1.5 flex-wrap">
-              {[100, 110, 120, 135, 150].map((v) => (
+              {[100, 110, 120, 135, 150, 160].map((v) => (
                 <button
                   key={v}
                   onClick={() => setAngle(v)}

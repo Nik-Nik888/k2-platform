@@ -67,7 +67,8 @@ export function projectOpeningSashesCount(project: GlazingProject): number {
   for (const seg of project.segments) {
     for (const f of seg.frames) {
       for (const c of f.cells) {
-        if (c.sash !== 'fixed') n++;
+        // Открывающиеся = не глухие и не сэндвич-панели
+        if (c.sash !== 'fixed' && c.sash !== 'sandwich') n++;
       }
     }
   }
@@ -151,6 +152,7 @@ export function calcProjectMetrics(project: GlazingProject): ProjectMetrics {
   let sealM = 0;
   let sashCount = 0;
   let glassAreaM2 = 0;
+  let sandwichAreaM2 = 0;
 
   for (const seg of project.segments) {
     for (const frame of seg.frames) {
@@ -160,30 +162,28 @@ export function calcProjectMetrics(project: GlazingProject): ProjectMetrics {
       areaM2 += fArea;
       framesPerimeterM += 2 * (fW + fH);
 
-      // Импосты: вертикальные имеют высоту полосы (rowIdx),
-      // горизонтальные — ширину рамы. Упрощённо считаем:
-      //   horizontals — каждый идёт через всю ширину
-      //   verticals — каждый идёт по высоте СВОЕЙ полосы
-      // Чтобы не строить yBoundaries здесь, упрощаем: вертикали
-      // считаем как высота_рамы / (число_горизонталей+1).
       const horCount = frame.imposts.filter((i) => i.orientation === 'horizontal').length;
       const vertCount = frame.imposts.filter((i) => i.orientation === 'vertical').length;
       const verticalRowH = fH / (horCount + 1);
-      impostsM += horCount * fW;            // горизонтальные на всю ширину
-      impostsM += vertCount * verticalRowH; // вертикальные в полосах
+      impostsM += horCount * fW;
+      impostsM += vertCount * verticalRowH;
 
-      // Штапики и уплотнители — по периметрам всех ячеек.
-      // Штапик ставится по контуру стеклопакета (4 стороны на ячейку).
-      // Уплотнитель — внутренний и внешний контур ячейки (×2).
       for (const cell of frame.cells) {
         const cW = cell.width / 1000;
         const cH = cell.height / 1000;
         const cellPerim = 2 * (cW + cH);
         beadingM += cellPerim;
         sealM += cellPerim * 2;
-        glassAreaM2 += cW * cH;
 
-        if (cell.sash !== 'fixed') sashCount++;
+        // Сэндвич-панель занимает место стекла, но идёт отдельной графой
+        if (cell.sash === 'sandwich') {
+          sandwichAreaM2 += cW * cH;
+        } else {
+          glassAreaM2 += cW * cH;
+        }
+
+        // Sandwich и fixed — неоткрывающиеся, не считаются как створка
+        if (cell.sash !== 'fixed' && cell.sash !== 'sandwich') sashCount++;
       }
     }
   }
@@ -197,7 +197,7 @@ export function calcProjectMetrics(project: GlazingProject): ProjectMetrics {
     sashCount,
     doorSashCount: 0,         // двери появятся в Этапе 5
     glassAreaM2: round(glassAreaM2, 2),
-    sandwichAreaM2: 0,        // сэндвич-панели появятся в Этапе 5
+    sandwichAreaM2: round(sandwichAreaM2, 2),
   };
 }
 

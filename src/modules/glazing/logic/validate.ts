@@ -176,11 +176,11 @@ export function validateFrame(frame: Frame): ValidationWarning[] {
     out.push(...validateCell(c, frame));
   }
 
-  // Если рама большая, но все ячейки глухие — предупреждение
+  // Если рама большая, но все ячейки неоткрывающиеся (глухие или сэндвич) — предупреждение
   // (по ГОСТ глухие выше 1 этажа допустимы только до 800×400)
   const totalArea = area;
-  const allFixed = frame.cells.every((c) => c.sash === 'fixed');
-  if (allFixed && totalArea > 0.32) {
+  const allClosed = frame.cells.every((c) => c.sash === 'fixed' || c.sash === 'sandwich');
+  if (allClosed && totalArea > 0.32) {
     out.push({
       level: 'warn',
       targetId: frame.id,
@@ -215,8 +215,9 @@ export function validateCell(cell: Cell, frame: Frame): ValidationWarning[] {
     });
   }
 
-  // Активная створка не должна быть слишком большой по площади
-  if (cell.sash !== 'fixed' && area > GOST_LIMITS.MAX_SASH_AREA_M2) {
+  // Активная створка (не глухая и не сэндвич) не должна быть слишком большой
+  const isActiveSash = cell.sash !== 'fixed' && cell.sash !== 'sandwich';
+  if (isActiveSash && area > GOST_LIMITS.MAX_SASH_AREA_M2) {
     out.push({
       level: 'warn',
       targetId: cell.id,
@@ -227,8 +228,8 @@ export function validateCell(cell: Cell, frame: Frame): ValidationWarning[] {
     });
   }
 
-  // Слишком узкая створка
-  if (cell.sash !== 'fixed' && cell.width < 400) {
+  // Слишком узкая активная створка
+  if (isActiveSash && cell.width < 400) {
     out.push({
       level: 'warn',
       targetId: cell.id,

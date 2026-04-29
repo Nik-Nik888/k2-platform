@@ -24,6 +24,12 @@ interface DimensionLabelProps {
   max?: number;
   /** Если редактирование запрещено — просто отображаем число. */
   readOnly?: boolean;
+  /**
+   * Бледный стиль (текст и рамка серым, фон полупрозрачный).
+   * Используется когда значение «нулевое» — placeholder-стиль,
+   * чтобы пользователь видел что поле пустое и кликабельное.
+   */
+  muted?: boolean;
 }
 
 const COLOR_BG_DEFAULT = '#ffffff';
@@ -34,7 +40,7 @@ const COLOR_BORDER_EDITING = '#f59e0b';
 const COLOR_TEXT = '#475569';
 
 export function DimensionLabel({
-  x, y, value, onChange, bold, min = 100, max = 6000, readOnly,
+  x, y, value, onChange, bold, min = 100, max = 6000, readOnly, muted,
 }: DimensionLabelProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
@@ -82,6 +88,9 @@ export function DimensionLabel({
   // ── Рендер режима отображения ─────────────────────────────────
   if (!editing) {
     const bg = hover && canEdit ? COLOR_BG_HOVER : COLOR_BG_DEFAULT;
+    const textColor = muted ? '#94a3b8' : COLOR_TEXT;
+    const borderColor = muted ? '#cbd5e1' : COLOR_BORDER;
+    const fillOpacity = muted ? 0.7 : 1;
     return (
       <g
         onMouseEnter={() => canEdit && setHover(true)}
@@ -94,14 +103,15 @@ export function DimensionLabel({
           width={w} height={h}
           rx={h / 2} ry={h / 2}
           fill={bg}
-          stroke={COLOR_BORDER}
+          fillOpacity={fillOpacity}
+          stroke={borderColor}
           strokeWidth={1.5}
         />
         <text
           x={x} y={y}
           fontSize={fontSize}
           fontFamily="Inter, system-ui, sans-serif"
-          fill={COLOR_TEXT}
+          fill={textColor}
           textAnchor="middle"
           dominantBaseline="middle"
           fontWeight={bold ? 700 : 500}

@@ -177,7 +177,8 @@ function CellPiece({
   const innerW = Math.max(0, cellW - insetLeft - insetRight);
   const innerH = Math.max(0, cellH - insetTop - insetBottom);
 
-  const hasSash = cell.sash !== 'fixed';
+  const hasSash = cell.sash !== 'fixed' && cell.sash !== 'sandwich';
+  const isSandwich = cell.sash === 'sandwich';
   const sashX = innerX + (hasSash ? SASH_INSET : 0);
   const sashY = innerY + (hasSash ? SASH_INSET : 0);
   const sashW = Math.max(0, innerW - (hasSash ? SASH_INSET * 2 : 0));
@@ -195,14 +196,17 @@ function CellPiece({
       onClick={onClick}
       style={{ cursor: onClick ? 'pointer' : 'default' }}
     >
-      {/* Голубое стекло — на ВСЮ внутреннюю область безусловно */}
+      {/* Заполнение ячейки:
+          • sandwich-панель — белая непрозрачная (вместо стекла)
+          • остальные — голубое стекло */}
       {innerW > 0 && innerH > 0 && (
         <rect
           x={innerX} y={innerY}
           width={innerW} height={innerH}
-          fill={COLOR_GLASS}
-          fillOpacity={0.6}
-          stroke="none"
+          fill={isSandwich ? '#ffffff' : COLOR_GLASS}
+          fillOpacity={isSandwich ? 1 : 0.6}
+          stroke={isSandwich ? COLOR_FRAME : 'none'}
+          strokeWidth={isSandwich ? 2 : 0}
         />
       )}
 
@@ -216,8 +220,8 @@ function CellPiece({
         />
       )}
 
-      {/* Стекло с обводкой штапика */}
-      {glassW > 0 && glassH > 0 && (
+      {/* Стекло с обводкой штапика — только если не сэндвич */}
+      {!isSandwich && glassW > 0 && glassH > 0 && (
         <rect
           x={glassX} y={glassY} width={glassW} height={glassH}
           fill="none"
@@ -226,16 +230,16 @@ function CellPiece({
         />
       )}
 
-      {/* Москитная сетка — серые квадратики ~50×50мм по всей ВНУТРЕННЕЙ области */}
-      {hasMosquito && innerW > 50 && innerH > 50 && (
+      {/* Москитная сетка — только для не-сэндвич ячеек */}
+      {!isSandwich && hasMosquito && innerW > 50 && innerH > 50 && (
         <MosquitoMesh
           x={innerX} y={innerY}
           width={innerW} height={innerH}
         />
       )}
 
-      {/* Значок открывания */}
-      {glassW > 0 && glassH > 0 && (
+      {/* Значок открывания — только для не-сэндвич ячеек */}
+      {!isSandwich && glassW > 0 && glassH > 0 && (
         <SashIcon
           type={cell.sash}
           x={glassX}

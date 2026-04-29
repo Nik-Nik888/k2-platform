@@ -1,9 +1,10 @@
 import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
-import type { GlazingProject, Segment, Frame } from '../../types';
+import type { GlazingProject, Segment, Frame, JoinType } from '../../types';
 import { FrameShape } from './FrameShape';
 import { CornerJoint } from './CornerJoint';
 import { DimensionLabel } from './DimensionLabel';
+import { FrameOffsetControls } from './FrameOffsetControls';
 import { sectionWidths } from '../../logic/distribute';
 import { getRowYRange, findRowIdxByY } from '../../store/glazingStore';
 
@@ -18,12 +19,18 @@ import { getRowYRange, findRowIdxByY } from '../../store/glazingStore';
 
 const PADDING = 800;
 const DIM_OFFSET_BOTTOM = 200;
-const DIM_OFFSET_LEFT = 350;
-const BONE_WIDTH = 50;
+// Цифра размера высоты слева от рамы. Должна быть достаточно далеко
+// чтобы не перекрывалась большой кнопкой "+" по краю проекта (она стоит
+// на SIDE_OFFSET=200мм от рамы плюс свой радиус ~130мм).
+const DIM_OFFSET_FROM_PLUS = 100;
+const DIM_OFFSET_LEFT = 200 + 130 + DIM_OFFSET_FROM_PLUS;  // = 430мм
+const BONE_WIDTH = 50;                  // визуальная ширина кости (массивная)
+const CONNECTOR_WIDTH = 20;             // визуальная ширина соединителя (тонкая планка)
 const CORNER_GAP = 200;
 
 const COLOR_DIM_LINE = '#94a3b8';
-const COLOR_BONE = '#1e293b';
+const COLOR_BONE = '#475569';           // тёмно-серый (был чёрный #1e293b)
+const COLOR_CONNECTOR = '#94a3b8';      // светло-серый для тонкой планки
 
 interface FrameLayoutItem {
   type: 'frame';
@@ -88,6 +95,10 @@ interface WindowCanvasProps {
     orientation: 'vertical' | 'horizontal',
     rowIdx?: number,
   ) => void;
+  /** Изменить смещение нижнего края рамы от низа сегмента (мм). */
+  onChangeFrameBottomOffset?: (segmentId: string, frameId: string, offset: number) => void;
+  /** Изменить смещение верхнего края рамы от верха сегмента (мм). */
+  onChangeFrameTopOffset?: (segmentId: string, frameId: string, offset: number) => void;
 
   heightPx?: number;
 }
@@ -97,6 +108,7 @@ export function WindowCanvas({
   onCellClick, onCellEditClick, onImpostClick, onBoneClick, onCornerClick,
   onChangeFrameWidth, onChangeSegmentHeight, onChangeSegmentTotalWidth,
   onAddBoneAt, onAddFrameToSide, onChangeSection, onResetSectionLocks,
+  onChangeFrameBottomOffset, onChangeFrameTopOffset,
   heightPx,
 }: WindowCanvasProps) {
 
@@ -120,12 +132,14 @@ export function WindowCanvas({
         const bone = seg.bones.find((b) => b.afterFrameIndex === i);
         if (bone && i < seg.frames.length - 1) {
           const boneIdx = seg.bones.indexOf(bone);
+          // Тип определяет визуальную ширину: 'bone' = 50мм, 'connector' = 20мм
+          const boneVisualWidth = bone.type === 'connector' ? CONNECTOR_WIDTH : BONE_WIDTH;
           items.push({
             type: 'bone',
             segmentIdx: segIdx, boneIdx,
-            offsetX: cursor, width: BONE_WIDTH,
+            offsetX: cursor, width: boneVisualWidth,
           });
-          cursor += BONE_WIDTH;
+          cursor += boneVisualWidth;
         }
       }
 
@@ -284,7 +298,8 @@ export function WindowCanvas({
           ) as FrameLayoutItem | undefined;
           if (!activeItem) return null;
           const f = activeItem.frame;
-          const svgYofFrameTop = projectH - f.height;
+          const bottomOffset = f.bottomOffset ?? 0;
+          const svgYofFrameTop = projectH - f.height - bottomOffset;
           return (
             <g pointerEvents="none">
               <rect
@@ -342,7 +357,7 @@ export function WindowCanvas({
             vertImpostsInRow, 'vertical', f.width
           );
 
-          const SECTION_LABEL_OFFSET = 130;
+          const SECTION_LABEL_OFFSET = DIM_OFFSET_LEFT;  // = 430мм, согласовано с цифрой высоты
           const sectionLabelY = projectH + 70;
           const sectionLabelX = activeItem.offsetX - SECTION_LABEL_OFFSET;
 
@@ -413,7 +428,8 @@ export function WindowCanvas({
         {/* Layout: рамы, кости, стыки */}
         {layout.items.map((it) => {
           if (it.type === 'frame') {
-            const svgYofFrameTop = projectH - it.frame.height;
+            const bottomOffset = it.frame.bottomOffset ?? 0;
+            const svgYofFrameTop = projectH - it.frame.height - bottomOffset;
 
             // Если это активная рама — определяем активную полосу
             // и передаём её Y-диапазон в FrameShape для голубой подсветки
@@ -460,6 +476,7 @@ export function WindowCanvas({
                 y={projectH - segH}
                 width={it.width}
                 height={segH}
+                joinType={bone.type}
                 onClick={onBoneClick ? () => onBoneClick(seg.id, bone.id) : undefined}
               />
             );
@@ -602,7 +619,47 @@ export function WindowCanvas({
           baseX={-DIM_OFFSET_LEFT}
           totalHeight={projectH}
           onChangeHeight={onChangeSegmentHeight}
+          activeFrame={(() => {
+            if (!activeFrameId) return null;
+            const item = layout.items.find(
+              (it) => it.type === 'frame' && it.frame.id === activeFrameId
+            ) as FrameLayoutItem | undefined;
+            return item?.frame ?? null;
+          })()}
         />
+
+        {/* Контролы смещения активной рамы — рендерим САМЫМИ ПОСЛЕДНИМИ
+            чтобы они оказались поверх всех остальных элементов SVG
+            (порядок DOM = порядок наложения, нет z-index у SVG) */}
+        {activeFrameId && (() => {
+          const activeItem = layout.items.find(
+            (it) => it.type === 'frame' && it.frame.id === activeFrameId
+          ) as FrameLayoutItem | undefined;
+          if (!activeItem) return null;
+          const f = activeItem.frame;
+          const seg = activeItem.segment;
+          const segH = Math.max(seg.heightLeft, seg.heightRight);
+          return (
+            <FrameOffsetControls
+              key={`offset-${f.id}`}
+              frame={f}
+              frameX={activeItem.offsetX}
+              segHeight={segH}
+              bottomY={projectH}
+              isActive={true}
+              onChangeBottomOffset={
+                onChangeFrameBottomOffset
+                  ? (mm) => onChangeFrameBottomOffset(seg.id, f.id, mm)
+                  : () => {}
+              }
+              onChangeTopOffset={
+                onChangeFrameTopOffset
+                  ? (mm) => onChangeFrameTopOffset(seg.id, f.id, mm)
+                  : () => {}
+              }
+            />
+          );
+        })()}
       </svg>
     </div>
   );
@@ -610,10 +667,37 @@ export function WindowCanvas({
 
 // ═══════════════════════════════════════════════════════════════════
 
-function BoneShape({ x, y, width, height, onClick }: {
+function BoneShape({ x, y, width, height, joinType, onClick }: {
   x: number; y: number; width: number; height: number;
+  joinType?: JoinType;
   onClick?: () => void;
 }) {
+  const isConnector = joinType === 'connector';
+  if (isConnector) {
+    // Тонкая стыковочная планка: серая, две продольные линии-профиля
+    return (
+      <g
+        data-interactive
+        onClick={onClick}
+        style={{ cursor: onClick ? 'pointer' : 'default' }}
+      >
+        <rect x={x} y={y} width={width} height={height}
+          fill={COLOR_CONNECTOR} fillOpacity={0.5}
+          stroke={COLOR_BONE} strokeWidth={1.5} />
+        <line
+          x1={x + width / 2 - 2} y1={y}
+          x2={x + width / 2 - 2} y2={y + height}
+          stroke={COLOR_BONE} strokeWidth={1}
+        />
+        <line
+          x1={x + width / 2 + 2} y1={y}
+          x2={x + width / 2 + 2} y2={y + height}
+          stroke={COLOR_BONE} strokeWidth={1}
+        />
+      </g>
+    );
+  }
+  // Массивная кость: тёмно-серая, сплошная заливка
   return (
     <g
       data-interactive
@@ -625,7 +709,7 @@ function BoneShape({ x, y, width, height, onClick }: {
       <line
         x1={x + width / 2} y1={y}
         x2={x + width / 2} y2={y + height}
-        stroke="#475569" strokeWidth={2}
+        stroke="#1e293b" strokeWidth={2}
       />
     </g>
   );
@@ -863,18 +947,27 @@ function DimensionsBottom({
 }
 
 function DimensionsLeft({
-  segments, layoutItems, baseX, totalHeight, onChangeHeight,
+  segments, layoutItems, baseX, totalHeight, onChangeHeight, activeFrame,
 }: {
   segments: Segment[];
   layoutItems: LayoutItem[];
   baseX: number;
   totalHeight: number;
   onChangeHeight?: (segmentId: string, side: 'left' | 'right' | 'both', value: number) => void;
+  /** Активная рама — если у неё есть горизонтальные импосты, скрываем
+      общую цифру высоты сегмента (её заменяют цифры полос). */
+  activeFrame?: Frame | null;
 }) {
+  // Скрываем общую цифру высоты если у активной рамы есть горизонтальные импосты
+  // (вместо неё показываются цифры полос — отдельный блок «Подписи секций»).
+  const hasHorImposts = !!activeFrame &&
+    activeFrame.imposts.some((i) => i.orientation === 'horizontal');
+
   if (segments.length === 1) {
     const seg = segments[0]!;
     const showBoth = seg.heightLeft !== seg.heightRight;
     const yTopLeft = totalHeight - seg.heightLeft;
+    if (hasHorImposts) return null;  // не дублируем когда есть полосы
 
     return (
       <g pointerEvents="none">
@@ -908,7 +1001,10 @@ function DimensionsLeft({
     );
   }
 
-  // Несколько сегментов: для каждого подпись над серединой
+  // Несколько сегментов: цифра высоты обычно слева снаружи (как у одного сегмента).
+  // Но если у сегмента угол И слева, И справа — цифра не помещается между
+  // рамой и углом, поэтому переносим её ВНУТРЬ рамы по центру (чуть выше
+  // геометрического центра, ниже большого красного «+» который добавляет импост).
   return (
     <g pointerEvents="none">
       {segments.map((seg, segIdx) => {
@@ -919,21 +1015,40 @@ function DimensionsLeft({
         const startX = segItems[0]!.offsetX;
         const lastItem = segItems[segItems.length - 1]!;
         const endX = lastItem.offsetX + lastItem.width;
-        const cx = (startX + endX) / 2;
 
         const segH = Math.max(seg.heightLeft, seg.heightRight);
         const yTop = totalHeight - segH;
 
+        // Есть ли угол слева/справа от этого сегмента?
+        const hasLeftCorner = segIdx > 0;
+        const hasRightCorner = segIdx < segments.length - 1;
+        const between = hasLeftCorner && hasRightCorner;
+
+        // Координаты подписи:
+        // - между двух углов → внутри рамы по центру горизонтально, чуть выше середины
+        //   (над большим красным «+» который ставит импост в центре активной ячейки)
+        // - крайний слева → слева снаружи рамы
+        // - крайний справа → справа снаружи рамы
+        let labelX: number;
+        let labelY: number;
+        if (between) {
+          labelX = (startX + endX) / 2;
+          // Чуть выше середины — где-то на 30% высоты от верха
+          labelY = yTop + segH * 0.35;
+        } else if (hasRightCorner && !hasLeftCorner) {
+          // Сегмент крайний слева: цифра слева снаружи
+          labelX = startX - 200;
+          labelY = yTop + segH / 2;
+        } else {
+          // Сегмент крайний справа: цифра справа снаружи
+          labelX = endX + 200;
+          labelY = yTop + segH / 2;
+        }
+
         return (
           <g key={`dim-h-${seg.id}`} pointerEvents="auto" data-interactive>
-            <line
-              x1={cx - 80} y1={yTop - 100}
-              x2={cx + 80} y2={yTop - 100}
-              stroke={COLOR_DIM_LINE} strokeWidth={1}
-              pointerEvents="none"
-            />
             <DimensionLabel
-              x={cx} y={yTop - 100}
+              x={labelX} y={labelY}
               value={segH}
               onChange={onChangeHeight ? (v) => onChangeHeight(seg.id, 'both', v) : undefined}
               min={500} max={3500}

@@ -1,29 +1,37 @@
 import { useState, useEffect, useMemo } from 'react';
-import { X } from 'lucide-react';
+import { X, Trash2 } from 'lucide-react';
 import {
-  PROJECT_TEMPLATES, CONSTRUCTION_TYPE_LABELS,
-  type ConstructionType, type ProjectTemplate,
+  CONSTRUCTION_TYPE_LABELS,
 } from '../../data/templates';
+import type { ConstructionType, UserTemplate } from '../../api/glazingTemplatesApi';
 import { ProjectThumbnail } from '../strip/ProjectThumbnail';
+import type { GlazingProject } from '../../types';
+import { emptyProjectConfig } from '../../types';
 
 // ═══════════════════════════════════════════════════════════════════
 // NewProjectPopup — попап создания нового проекта остекления.
 //
 // Шаги:
-//   1. Ввод названия (по умолчанию подставляется «Балкон» / «Окно» / ...)
+//   1. Ввод названия
 //   2. Выбор типа конструкции (4 категории) — фильтрует список шаблонов
-//   3. Выбор конкретного шаблона из сетки превью
-//   4. Кнопка «Создать»
+//   3a. Выбор пользовательского шаблона из сетки (если есть)
+//   3b. ИЛИ кнопка «Создать пустой проект» (если шаблонов нет / не выбран)
 //
-// Шаблоны определены в data/templates.ts. После применения шаблона
-// пользователь может всё перенастроить вручную в канвасе.
+// Стандартные шаблоны убраны — есть только пользовательские, которые
+// сохранены через кнопку «+ Шаблон» в тулбаре.
 // ═══════════════════════════════════════════════════════════════════
 
 interface NewProjectPopupProps {
-  /** Подсказываемое название (например «Балкон 2», если уже есть «Балкон 1»). */
   suggestedName?: string;
+  /** Список пользовательских шаблонов (загружается из Supabase). */
+  userTemplates: UserTemplate[];
   onClose: () => void;
-  onCreate: (templateId: string, projectName: string) => void;
+  /** Создать пустой проект указанного типа. */
+  onCreateEmpty: (constructionType: ConstructionType, projectName: string) => void;
+  /** Создать проект из пользовательского шаблона. */
+  onCreateFromTemplate: (templateId: string, projectName: string) => void;
+  /** Удалить пользовательский шаблон. */
+  onDeleteTemplate: (templateId: string) => Promise<void>;
 }
 
 const CONSTRUCTION_TYPES: ConstructionType[] = [
@@ -38,26 +46,26 @@ const DEFAULT_NAMES: Record<ConstructionType, string> = {
 };
 
 export function NewProjectPopup({
-  suggestedName, onClose, onCreate,
+  suggestedName, userTemplates, onClose,
+  onCreateEmpty, onCreateFromTemplate, onDeleteTemplate,
 }: NewProjectPopupProps) {
   const [type, setType] = useState<ConstructionType>('balcony');
   const [name, setName] = useState(suggestedName ?? DEFAULT_NAMES.balcony);
+  const [nameTouched, setNameTouched] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
 
-  // Если поменяли тип конструкции — очищаем выбор шаблона
+  // При смене типа сбрасываем выбор шаблона
   useEffect(() => {
     setSelectedTemplateId(null);
   }, [type]);
 
-  // Если пользователь не редактировал имя — обновляем дефолт под тип
-  const [nameTouched, setNameTouched] = useState(false);
+  // Дефолтное имя обновляется под тип, если пользователь не правил
   useEffect(() => {
     if (!nameTouched && !suggestedName) {
       setName(DEFAULT_NAMES[type]);
     }
   }, [type, nameTouched, suggestedName]);
 
-  // Esc → закрыть
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
@@ -65,15 +73,19 @@ export function NewProjectPopup({
   }, [onClose]);
 
   const filteredTemplates = useMemo(
-    () => PROJECT_TEMPLATES.filter((t) => t.constructionType === type),
-    [type]
+    () => userTemplates.filter((t) => t.constructionType === type),
+    [userTemplates, type]
   );
 
-  const canCreate = !!selectedTemplateId && name.trim().length > 0;
+  const canCreate = name.trim().length > 0;
 
   function handleCreate() {
     if (!canCreate) return;
-    onCreate(selectedTemplateId!, name.trim());
+    if (selectedTemplateId) {
+      onCreateFromTemplate(selectedTemplateId, name.trim());
+    } else {
+      onCreateEmpty(type, name.trim());
+    }
     onClose();
   }
 
@@ -88,7 +100,7 @@ export function NewProjectPopup({
           <div>
             <h3 className="text-lg font-bold text-gray-900">Новый проект остекления</h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              Выберите тип конструкции и шаблон — потом всё можно изменить
+              Введите название, выберите тип и опционально шаблон
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 -mr-1">
@@ -96,10 +108,8 @@ export function NewProjectPopup({
           </button>
         </div>
 
-        {/* Содержимое (скроллится) */}
+        {/* Содержимое */}
         <div className="overflow-y-auto p-5 flex-1">
-
-          {/* Название */}
           <label className="block mb-4">
             <span className="text-xs text-gray-500 font-semibold uppercase mb-1.5 block">
               Название проекта
@@ -114,7 +124,6 @@ export function NewProjectPopup({
             />
           </label>
 
-          {/* Тип конструкции */}
           <div className="mb-4">
             <span className="text-xs text-gray-500 font-semibold uppercase mb-1.5 block">
               Тип конструкции
@@ -139,23 +148,30 @@ export function NewProjectPopup({
             </div>
           </div>
 
-          {/* Шаблоны */}
+          {/* Сетка пользовательских шаблонов или сообщение "пусто" */}
           <div className="mb-2">
             <span className="text-xs text-gray-500 font-semibold uppercase mb-1.5 block">
               Шаблон ({filteredTemplates.length})
             </span>
             {filteredTemplates.length === 0 ? (
               <div className="text-sm text-gray-500 italic py-6 text-center bg-surface-50 rounded-xl">
-                Шаблонов для этого типа пока нет. Можно создать пустой проект.
+                Шаблонов для этого типа пока нет.<br/>
+                Постройте конструкцию вручную и сохраните как шаблон через кнопку «+ Шаблон».
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {filteredTemplates.map((tpl) => (
-                  <TemplateCard
+                  <UserTemplateCard
                     key={tpl.id}
                     template={tpl}
                     isActive={selectedTemplateId === tpl.id}
                     onClick={() => setSelectedTemplateId(tpl.id)}
+                    onDelete={async () => {
+                      if (confirm(`Удалить шаблон «${tpl.name}»?`)) {
+                        await onDeleteTemplate(tpl.id);
+                        if (selectedTemplateId === tpl.id) setSelectedTemplateId(null);
+                      }
+                    }}
                   />
                 ))}
               </div>
@@ -163,7 +179,7 @@ export function NewProjectPopup({
           </div>
         </div>
 
-        {/* Подвал с кнопками */}
+        {/* Подвал */}
         <div className="border-t border-surface-200 p-3 flex justify-end gap-2">
           <button onClick={onClose} className="btn-secondary">
             Отмена
@@ -173,7 +189,10 @@ export function NewProjectPopup({
             disabled={!canCreate}
             className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Создать проект
+            {selectedTemplateId
+              ? 'Создать из шаблона'
+              : 'Создать пустой проект'
+            }
           </button>
         </div>
       </div>
@@ -181,35 +200,64 @@ export function NewProjectPopup({
   );
 }
 
-// ─── Карточка шаблона ──────────────────────────────────────────────
+// ─── Карточка пользовательского шаблона с кнопкой удаления ────────
 
-function TemplateCard({ template, isActive, onClick }: {
-  template: ProjectTemplate; isActive: boolean; onClick: () => void;
+function UserTemplateCard({ template, isActive, onClick, onDelete }: {
+  template: UserTemplate;
+  isActive: boolean;
+  onClick: () => void;
+  onDelete: () => Promise<void>;
 }) {
-  // Генерируем превью один раз — рендерим объект-шаблон через ProjectThumbnail.
-  // build() — лёгкая операция, можно вызывать прямо в рендере.
-  const sample = useMemo(() => template.build('preview'), [template]);
+  const [hover, setHover] = useState(false);
+
+  // Преобразуем геометрию шаблона в "виртуальный" GlazingProject для превью
+  const previewProject: GlazingProject = useMemo(() => ({
+    id: 'preview',
+    name: template.name,
+    constructionType: template.constructionType,
+    segments: template.geometry.segments,
+    corners: template.geometry.corners,
+    config: emptyProjectConfig(),
+  }), [template]);
 
   return (
-    <button
-      onClick={onClick}
-      className={`p-3 rounded-xl border-2 flex flex-col items-stretch gap-2 transition-all text-left ${
-        isActive
-          ? 'border-brand-500 bg-brand-50 shadow-sm'
-          : 'border-surface-200 hover:border-brand-300 bg-white'
-      }`}
+    <div
+      className="relative group"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
     >
-      <div className="flex items-center justify-center bg-surface-50 rounded-lg p-2 h-20">
-        <ProjectThumbnail project={sample} width={140} height={64} />
-      </div>
-      <div>
-        <div className={`text-sm font-semibold ${isActive ? 'text-brand-700' : 'text-gray-800'}`}>
-          {template.name}
+      <button
+        onClick={onClick}
+        className={`w-full p-3 rounded-xl border-2 flex flex-col items-stretch gap-2 transition-all text-left ${
+          isActive
+            ? 'border-brand-500 bg-brand-50 shadow-sm'
+            : 'border-surface-200 hover:border-brand-300 bg-white'
+        }`}
+      >
+        <div className="flex items-center justify-center bg-surface-50 rounded-lg p-2 h-20">
+          <ProjectThumbnail project={previewProject} width={140} height={64} />
         </div>
-        <div className="text-[11px] text-gray-500 leading-tight mt-0.5">
-          {template.description}
+        <div>
+          <div className={`text-sm font-semibold truncate ${isActive ? 'text-brand-700' : 'text-gray-800'}`}>
+            {template.name}
+          </div>
+          <div className="text-[11px] text-gray-500 leading-tight mt-0.5">
+            {template.geometry.segments.length} сегмент(ов)
+          </div>
         </div>
-      </div>
-    </button>
+      </button>
+
+      {/* Кнопка удаления (на ховере) */}
+      {hover && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          className="absolute -top-1.5 -right-1.5 w-7 h-7 rounded-full bg-red-500
+                     text-white flex items-center justify-center shadow-md hover:bg-red-600"
+          title="Удалить шаблон"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
   );
 }

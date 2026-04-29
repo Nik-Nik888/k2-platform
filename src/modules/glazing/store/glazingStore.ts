@@ -3,8 +3,9 @@ import {
   type GlazingFormData, type GlazingProject, type Segment, type Frame,
   type Cell, type Impost, type Bone, type Corner,
   type ProjectConfig, type FrameConfig, type SashType, type CornerConnector,
-  type MosquitoType, type HardwareItem,
+  type MosquitoType, type HardwareItem, type JoinType,
   createEmptyProject, createEmptySegment, createEmptyFrame, createDefaultCell,
+  emptyProjectConfig,
 } from '../types';
 import {
   distributeEvenly, redistributeAround,
@@ -13,7 +14,13 @@ import {
   redistributeSectionsWithLocks,
   scaleSectionsToFit,
 } from '../logic/distribute';
-import { findTemplateById } from '../data/templates';
+import { findTemplateById, createProjectByType } from '../data/templates';
+import {
+  loadUserTemplates as apiLoadUserTemplates,
+  createUserTemplate as apiCreateUserTemplate,
+  deleteUserTemplate as apiDeleteUserTemplate,
+  type UserTemplate, type ConstructionType,
+} from '../api/glazingTemplatesApi';
 
 // ═══════════════════════════════════════════════════════════════════
 // glazingStore — состояние редактора остекления.
@@ -41,6 +48,31 @@ function emptyFormData(): GlazingFormData {
   return {
     projects: [project],
     activeProjectId: project.id,
+  };
+}
+
+/**
+ * Глубокое копирование сегмента с присвоением новых id всем сущностям внутри.
+ * Используется при создании нового проекта из шаблона — чтобы при повторном
+ * применении шаблона id сущностей не конфликтовали с уже существующими.
+ */
+function reIdSegment(seg: Segment): Segment {
+  return {
+    id: uid(),
+    heightLeft: seg.heightLeft,
+    heightRight: seg.heightRight,
+    frames: seg.frames.map((f) => ({
+      id: uid(),
+      width: f.width,
+      height: f.height,
+      bottomOffset: f.bottomOffset,
+      topOffset: f.topOffset,
+      override: f.override,
+      lockedSections: f.lockedSections,
+      imposts: f.imposts.map((i) => ({ ...i, id: uid() })),
+      cells: f.cells.map((c) => ({ ...c, id: uid() })),
+    })),
+    bones: seg.bones.map((b) => ({ ...b, id: uid() })),
   };
 }
 
@@ -168,6 +200,23 @@ interface GlazingState {
   isSaving: boolean;
   error: string | null;
 
+  // ── Пользовательские шаблоны (Supabase) ──────────────────────
+  userTemplates: UserTemplate[];
+  templatesLoading: boolean;
+  templatesError: string | null;
+  /** Загрузить список шаблонов организации. */
+  loadUserTemplates: () => Promise<void>;
+  /** Сохранить текущий проект как новый шаблон (без config). */
+  saveAsTemplate: (
+    projectId: string,
+    name: string,
+    constructionType: ConstructionType,
+  ) => Promise<UserTemplate | null>;
+  /** Удалить шаблон по id. */
+  deleteUserTemplate: (templateId: string) => Promise<void>;
+  /** Создать проект из пользовательского шаблона (применить геометрию). */
+  addProjectFromUserTemplate: (templateId: string, projectName: string) => string | null;
+
   // ── Инициализация ────────────────────────────────────────────
   initFromDraft: () => void;
   initFromOrder: (orderId: string, data: GlazingFormData | null) => void;
@@ -177,6 +226,11 @@ interface GlazingState {
   addProject: (name?: string) => string;       // возвращает id нового
   /** Создать проект из шаблона (см. data/templates.ts). */
   addProjectFromTemplate: (templateId: string, projectName: string) => string;
+  /** Создать пустой проект с указанным типом конструкции. */
+  addProjectByType: (
+    projectName: string,
+    constructionType: 'window' | 'balcony' | 'balcony_block' | 'loggia'
+  ) => string;
   removeProject: (projectId: string) => void;
   setActiveProject: (projectId: string) => void;
   renameProject: (projectId: string, name: string) => void;
@@ -199,6 +253,10 @@ interface GlazingState {
   addFrame: (projectId: string, segmentId: string, width?: number, position?: 'start' | 'end') => string;
   removeFrame: (projectId: string, segmentId: string, frameId: string) => void;
   setFrameSize: (projectId: string, segmentId: string, frameId: string, width: number, height: number) => void;
+  /** Изменить смещение рамы от низа сегмента (мм). */
+  setFrameBottomOffset: (projectId: string, segmentId: string, frameId: string, offset: number) => void;
+  /** Изменить смещение рамы от верха сегмента (мм). */
+  setFrameTopOffset: (projectId: string, segmentId: string, frameId: string, offset: number) => void;
   /**
    * Установить ширину одной рамы И равномерно перераспределить остальные
    * рамы того же сегмента, чтобы общая ширина сегмента осталась прежней.
@@ -257,7 +315,7 @@ interface GlazingState {
   rebuildCells: (projectId: string, segmentId: string, frameId: string) => void;
 
   // ── Кости ────────────────────────────────────────────────────
-  addBone: (projectId: string, segmentId: string, afterFrameIndex: number, materialId?: string) => void;
+  addBone: (projectId: string, segmentId: string, afterFrameIndex: number, materialId?: string, type?: JoinType) => void;
   removeBone: (projectId: string, segmentId: string, boneId: string) => void;
 
   // ── Углы между сегментами ────────────────────────────────────
@@ -282,6 +340,11 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
   isLoading: false,
   isSaving: false,
   error: null,
+
+  // Пользовательские шаблоны (Supabase)
+  userTemplates: [],
+  templatesLoading: false,
+  templatesError: null,
 
   // ── Инициализация ──────────────────────────────────────────────
 
@@ -340,6 +403,91 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       return get().addProject(projectName);
     }
     const project = tpl.build(projectName);
+    const data = {
+      ...get().data,
+      projects: [...get().data.projects, project],
+      activeProjectId: project.id,
+    };
+    set({ data, activeSegmentId: null, activeFrameId: null, activeCellId: null });
+    if (!get().orderId) saveDraft(data);
+    return project.id;
+  },
+
+  addProjectByType: (projectName, constructionType) => {
+    const project = createProjectByType(projectName, constructionType);
+    const data = {
+      ...get().data,
+      projects: [...get().data.projects, project],
+      activeProjectId: project.id,
+    };
+    set({ data, activeSegmentId: null, activeFrameId: null, activeCellId: null });
+    if (!get().orderId) saveDraft(data);
+    return project.id;
+  },
+
+  // ── Пользовательские шаблоны ──────────────────────────────────
+
+  loadUserTemplates: async () => {
+    set({ templatesLoading: true, templatesError: null });
+    try {
+      const items = await apiLoadUserTemplates();
+      set({ userTemplates: items, templatesLoading: false });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Ошибка загрузки шаблонов';
+      set({ templatesLoading: false, templatesError: msg });
+    }
+  },
+
+  saveAsTemplate: async (projectId, name, constructionType) => {
+    const project = get().data.projects.find((p) => p.id === projectId);
+    if (!project) return null;
+
+    // Сохраняем только геометрию (без config)
+    try {
+      const created = await apiCreateUserTemplate(name, constructionType, {
+        segments: project.segments,
+        corners: project.corners,
+      });
+      // Добавляем в локальный кэш сразу, чтобы UI мгновенно обновился
+      set({ userTemplates: [created, ...get().userTemplates] });
+      return created;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Ошибка сохранения шаблона';
+      set({ templatesError: msg });
+      return null;
+    }
+  },
+
+  deleteUserTemplate: async (templateId) => {
+    try {
+      await apiDeleteUserTemplate(templateId);
+      set({ userTemplates: get().userTemplates.filter((t) => t.id !== templateId) });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Ошибка удаления шаблона';
+      set({ templatesError: msg });
+    }
+  },
+
+  addProjectFromUserTemplate: (templateId, projectName) => {
+    const tpl = get().userTemplates.find((t) => t.id === templateId);
+    if (!tpl) {
+      console.warn(`User template "${templateId}" not found`);
+      return null;
+    }
+    // Глубоко копируем геометрию и присваиваем новые id всем сущностям,
+    // чтобы шаблон можно было применять много раз без коллизий id.
+    const segments = tpl.geometry.segments.map(reIdSegment);
+    const corners = tpl.geometry.corners.map((c) => ({ ...c, id: uid() }));
+
+    const project: GlazingProject = {
+      id: uid(),
+      name: projectName,
+      constructionType: tpl.constructionType,
+      segments,
+      corners,
+      config: emptyProjectConfig(),
+    };
+
     const data = {
       ...get().data,
       projects: [...get().data.projects, project],
@@ -669,6 +817,69 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
           next = { ...next, width, height };
           return rebuildFrameCells(next);
         })
+      )
+    );
+    set({ data });
+    if (!get().orderId) saveDraft(data);
+  },
+
+  setFrameBottomOffset: (projectId, segmentId, frameId, offset) => {
+    const proj = get().data.projects.find((p) => p.id === projectId);
+    const seg = proj?.segments.find((s) => s.id === segmentId);
+    const frame = seg?.frames.find((f) => f.id === frameId);
+    if (!proj || !seg || !frame) return;
+
+    const currentOffset = frame.bottomOffset ?? 0;
+    const segH = Math.max(seg.heightLeft, seg.heightRight);
+    const topOffset = frame.topOffset ?? 0;
+
+    // Ограничиваем offset так чтобы рама осталась минимум 300мм высотой
+    const maxOffset = segH - 300 - topOffset;
+    const newOffset = Math.max(0, Math.min(Math.round(offset), maxOffset));
+
+    // delta > 0 — раму укоротить, < 0 — удлинить (если есть запас)
+    const delta = newOffset - currentOffset;
+    const newHeight = Math.max(300, frame.height - delta);
+
+    // Один атомарный update: setFrameSize + сохранение offset.
+    // Сначала меняем размер (он пересчитывает импосты и ячейки),
+    // потом дописываем offset поверх результата.
+    get().setFrameSize(projectId, segmentId, frameId, frame.width, newHeight);
+    const data = updProject(get().data, projectId, (p) =>
+      updSegment(p, segmentId, (s) =>
+        updFrame(s, frameId, (f) => ({
+          ...f,
+          bottomOffset: newOffset > 0 ? newOffset : undefined,
+        }))
+      )
+    );
+    set({ data });
+    if (!get().orderId) saveDraft(data);
+  },
+
+  setFrameTopOffset: (projectId, segmentId, frameId, offset) => {
+    const proj = get().data.projects.find((p) => p.id === projectId);
+    const seg = proj?.segments.find((s) => s.id === segmentId);
+    const frame = seg?.frames.find((f) => f.id === frameId);
+    if (!proj || !seg || !frame) return;
+
+    const currentOffset = frame.topOffset ?? 0;
+    const segH = Math.max(seg.heightLeft, seg.heightRight);
+    const bottomOffset = frame.bottomOffset ?? 0;
+
+    const maxOffset = segH - 300 - bottomOffset;
+    const newOffset = Math.max(0, Math.min(Math.round(offset), maxOffset));
+
+    const delta = newOffset - currentOffset;
+    const newHeight = Math.max(300, frame.height - delta);
+
+    get().setFrameSize(projectId, segmentId, frameId, frame.width, newHeight);
+    const data = updProject(get().data, projectId, (p) =>
+      updSegment(p, segmentId, (s) =>
+        updFrame(s, frameId, (f) => ({
+          ...f,
+          topOffset: newOffset > 0 ? newOffset : undefined,
+        }))
       )
     );
     set({ data });
@@ -1197,8 +1408,8 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
 
   // ── Кости ──────────────────────────────────────────────────────
 
-  addBone: (projectId, segmentId, afterFrameIndex, materialId) => {
-    const bone: Bone = { id: uid(), afterFrameIndex, materialId };
+  addBone: (projectId, segmentId, afterFrameIndex, materialId, type = 'bone') => {
+    const bone: Bone = { id: uid(), afterFrameIndex, materialId, type };
     const data = updProject(get().data, projectId, (p) =>
       updSegment(p, segmentId, (s) => ({ ...s, bones: [...s.bones, bone] }))
     );

@@ -80,66 +80,6 @@ function buildFrame(width: number, height: number, sashes: SashType[]): Frame {
   };
 }
 
-/**
- * Создать раму с горизонтальной фрамугой сверху и заданными створками снизу.
- * fragWidth = высота фрамуги (полосы сверху), bottomSashes = типы створок в нижней полосе.
- */
-function buildFrameWithFramuga(
-  width: number, height: number,
-  framugaHeight: number,
-  bottomSashes: SashType[],
-): Frame {
-  const N = bottomSashes.length;
-  const imposts: Impost[] = [];
-  // Один горизонтальный импост = граница полос
-  imposts.push({
-    id: uid(),
-    orientation: 'horizontal',
-    position: height - framugaHeight,
-  });
-  // Вертикальные импосты в нижней полосе (rowIdx=0)
-  if (N > 1) {
-    const step = width / N;
-    for (let i = 1; i < N; i++) {
-      imposts.push({
-        id: uid(),
-        orientation: 'vertical',
-        position: Math.round(step * i),
-        belongsToRow: 0,
-      });
-    }
-  }
-  // Ячейки: верхняя полоса = 1 фрамуга-fixed, нижняя полоса = N створок
-  const cells: Cell[] = [];
-  // Верхняя полоса — одна ячейка-фрамуга
-  cells.push({
-    id: uid(),
-    x: 0,
-    y: height - framugaHeight,
-    width,
-    height: framugaHeight,
-    sash: 'fixed',
-  });
-  // Нижняя полоса — N ячеек
-  for (let i = 0; i < N; i++) {
-    const x = (width / N) * i;
-    cells.push({
-      id: uid(),
-      x: Math.round(x),
-      y: 0,
-      width: Math.round(width / N),
-      height: height - framugaHeight,
-      sash: bottomSashes[i] ?? 'fixed',
-    });
-  }
-  return {
-    id: uid(),
-    width,
-    height,
-    imposts,
-    cells,
-  };
-}
 
 /** Создать сегмент с одной рамой. */
 function buildSingleFrameSegment(frame: Frame): Segment {
@@ -167,114 +107,15 @@ function makeProject(projectName: string, segments: Segment[]): GlazingProject {
 
 // ─── Сами шаблоны ──────────────────────────────────────────────────
 
-export const PROJECT_TEMPLATES: ProjectTemplate[] = [
-  // ═══ ОКНА ═══════════════════════════════════════════════════════
-  {
-    id: 'tpl-window-empty',
-    constructionType: 'window',
-    name: 'Пустая рама',
-    description: 'Одна рама 750×1500 без импостов',
-    build: (name) => makeProject(name, [
-      buildSingleFrameSegment(buildFrame(750, 1500, ['fixed'])),
-    ]),
-  },
-  {
-    id: 'tpl-window-2',
-    constructionType: 'window',
-    name: '2-створчатое окно',
-    description: 'Глухая + поворотно-откидная',
-    build: (name) => makeProject(name, [
-      buildSingleFrameSegment(buildFrame(1500, 1400, ['fixed', 'tilt_turn_right'])),
-    ]),
-  },
-  {
-    id: 'tpl-window-3',
-    constructionType: 'window',
-    name: '3-створчатое окно',
-    description: 'Поворотная + глухая + поворотно-откидная',
-    build: (name) => makeProject(name, [
-      buildSingleFrameSegment(buildFrame(1800, 1400, ['turn_left', 'fixed', 'tilt_turn_right'])),
-    ]),
-  },
-  {
-    id: 'tpl-window-framuga',
-    constructionType: 'window',
-    name: 'Окно с фрамугой',
-    description: '2-створчатое + горизонтальная фрамуга сверху',
-    build: (name) => makeProject(name, [
-      buildSingleFrameSegment(
-        buildFrameWithFramuga(1500, 1700, 400, ['fixed', 'tilt_turn_right'])
-      ),
-    ]),
-  },
-
-  // ═══ БАЛКОНЫ ════════════════════════════════════════════════════
-  {
-    id: 'tpl-balcony-straight',
-    constructionType: 'balcony',
-    name: 'Прямой балкон',
-    description: '4 створки в линию, 3000×1400',
-    build: (name) => makeProject(name, [
-      buildSingleFrameSegment(
-        buildFrame(3000, 1400, ['fixed', 'tilt_turn_left', 'tilt_turn_right', 'fixed'])
-      ),
-    ]),
-  },
-  {
-    id: 'tpl-balcony-l',
-    constructionType: 'balcony',
-    name: 'Г-образный балкон',
-    description: 'Длинная стена 3м + короткая 1м под 90°',
-    build: (name) => makeProject(name, [
-      buildSingleFrameSegment(
-        buildFrame(3000, 1400, ['fixed', 'tilt_turn_left', 'tilt_turn_right', 'fixed'])
-      ),
-      buildSingleFrameSegment(
-        buildFrame(1000, 1400, ['fixed'])
-      ),
-    ]),
-  },
-  {
-    id: 'tpl-balcony-p',
-    constructionType: 'balcony',
-    name: 'П-образный балкон',
-    description: '1м + 3м (перед) + 1м, два угла 90°',
-    build: (name) => makeProject(name, [
-      buildSingleFrameSegment(buildFrame(1000, 1400, ['fixed'])),
-      buildSingleFrameSegment(
-        buildFrame(3000, 1400, ['fixed', 'tilt_turn_left', 'tilt_turn_right', 'fixed'])
-      ),
-      buildSingleFrameSegment(buildFrame(1000, 1400, ['fixed'])),
-    ]),
-  },
-
-  // ═══ БАЛКОННЫЙ БЛОК ═════════════════════════════════════════════
-  {
-    id: 'tpl-block-classic',
-    constructionType: 'balcony_block',
-    name: 'Классический балконный блок',
-    description: 'Окно 1500 + дверь 700 (как глухая пока)',
-    build: (name) => makeProject(name, [
-      buildSingleFrameSegment(buildFrame(1500, 1400, ['fixed', 'tilt_turn_right'])),
-      buildSingleFrameSegment(buildFrame(700, 2100, ['turn_left'])),
-    ]),
-  },
-
-  // ═══ ЛОДЖИЯ ═════════════════════════════════════════════════════
-  {
-    id: 'tpl-loggia-6',
-    constructionType: 'loggia',
-    name: 'Лоджия 6 створок',
-    description: '6м, чередование глухих и открывающихся',
-    build: (name) => makeProject(name, [
-      buildSingleFrameSegment(
-        buildFrame(6000, 1400, [
-          'fixed', 'tilt_turn_left', 'fixed', 'fixed', 'tilt_turn_right', 'fixed'
-        ])
-      ),
-    ]),
-  },
-];
+/**
+ * Список шаблонов проектов остекления.
+ * Стандартные шаблоны убраны по запросу пользователя — пользователь
+ * создаёт пустой проект и сам конфигурирует его, потом может сохранить
+ * как пользовательский шаблон (планируется).
+ *
+ * При желании сюда можно добавить пользовательские шаблоны (Stage 3.5).
+ */
+export const PROJECT_TEMPLATES: ProjectTemplate[] = [];
 
 /** Получить шаблоны по типу конструкции. */
 export function getTemplatesByType(type: ConstructionType): ProjectTemplate[] {
@@ -284,4 +125,44 @@ export function getTemplatesByType(type: ConstructionType): ProjectTemplate[] {
 /** Найти шаблон по id. */
 export function findTemplateById(id: string): ProjectTemplate | undefined {
   return PROJECT_TEMPLATES.find((t) => t.id === id);
+}
+
+/**
+ * Создать пустой проект с указанным типом конструкции.
+ * Используется в попапе создания нового проекта когда пользователь
+ * выбирает тип, но не выбирает конкретный шаблон (пока их нет).
+ */
+export function createProjectByType(
+  name: string,
+  constructionType: ConstructionType
+): GlazingProject {
+  // Балконный блок — особая конструкция: дверь + connector + окно над выступом
+  if (constructionType === 'balcony_block') {
+    const door = buildFrame(700, 2100, ['tilt_turn_right']);
+    const win = buildFrame(1500, 1300, ['fixed']);
+    win.bottomOffset = 800;  // окно висит на высоте 800мм над полом
+    const segment: Segment = {
+      id: uid(),
+      heightLeft: 2100,
+      heightRight: 2100,
+      frames: [door, win],
+      bones: [
+        { id: uid(), afterFrameIndex: 0, type: 'connector' },
+      ],
+    };
+    const project = makeProject(name, [segment]);
+    project.constructionType = constructionType;
+    return project;
+  }
+
+  // Базовые размеры под другие типы
+  let frameWidth = 750, frameHeight = 1500;
+  if (constructionType === 'balcony') { frameWidth = 3000; frameHeight = 1400; }
+  else if (constructionType === 'loggia') { frameWidth = 6000; frameHeight = 1400; }
+
+  const project = makeProject(name, [
+    buildSingleFrameSegment(buildFrame(frameWidth, frameHeight, ['fixed'])),
+  ]);
+  project.constructionType = constructionType;
+  return project;
 }
