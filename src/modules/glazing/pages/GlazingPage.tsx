@@ -1,286 +1,855 @@
-import { useState } from 'react';
-import { PanelTop, Plus, Trash2, Download } from 'lucide-react';
-import type { ProfileType, GlassType, SectionType } from '@shared/types';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate, useParams, useSearchParams, useBlocker } from 'react-router-dom';
+import { Loader2, Trash2, ArrowLeft, Save, UserCircle, UserX } from 'lucide-react';
+import { useGlazingStore } from '../store/glazingStore';
+import { ClientPicker } from '@modules/calculator/components/modals/ClientPicker';
+import { WindowCanvas } from '../components/canvas/WindowCanvas';
+import { CellEditPopup } from '../components/popups/CellEditPopup';
+import { CornerEditPopup, type CornerEditValue } from '../components/popups/CornerEditPopup';
+import { JoinPickerPopup } from '../components/popups/JoinPickerPopup';
+import { NewProjectPopup } from '../components/popups/NewProjectPopup';
+import { SaveTemplatePopup } from '../components/popups/SaveTemplatePopup';
+import { ConfigPopup } from '../components/popups/ConfigPopup';
+import { WindowsStrip } from '../components/strip/WindowsStrip';
+import { ResultsTable } from '../components/results/ResultsTable';
+import { ConfigGearButton } from '../components/ConfigGearButton';
+import { calcProject, type MaterialMap } from '../api/doGlazing';
+import { loadGlazingReference, type GlazingCategoryKey, type GlazingCategoryWithItems } from '../api/glazingApi';
+import { validateProject, hasErrors, countErrors, countWarns } from '../logic/validate';
 
-const PROFILES: { value: ProfileType; label: string; price: string }[] = [
-  { value: 'rehau', label: 'REHAU Blitz', price: 'от 3 200 ₽/м²' },
-  { value: 'kbe', label: 'KBE Engine', price: 'от 2 900 ₽/м²' },
-  { value: 'veka', label: 'VEKA Euroline', price: 'от 3 100 ₽/м²' },
-  { value: 'novotex', label: 'Novotex Classic', price: 'от 2 600 ₽/м²' },
-  { value: 'aluminium_cold', label: 'Алюминий (холодный)', price: 'от 2 200 ₽/м²' },
-  { value: 'aluminium_warm', label: 'Алюминий (тёплый)', price: 'от 4 500 ₽/м²' },
-];
-
-const GLASS_TYPES: { value: GlassType; label: string }[] = [
-  { value: 'single', label: 'Однокамерный' },
-  { value: 'double', label: 'Двухкамерный' },
-  { value: 'triple', label: 'Трёхкамерный' },
-  { value: 'energy_saving', label: 'Энергосберегающий' },
-];
-
-interface Section {
-  id: string;
-  type: SectionType;
-  width: number;
-}
-
-const SECTION_LABELS: Record<SectionType, string> = {
-  fixed: 'Глухое',
-  sliding: 'Раздвижное',
-  tilt_turn: 'Поворотно-откидное',
-  tilt: 'Откидное',
-};
+// ═══════════════════════════════════════════════════════════════════
+// GlazingPage — страница редактора остекления.
+//
+// Маршруты:
+//   • /glazing/:glazingId           — открыть существующий проект
+//   • /glazing?client_id=XXX        — создать новый для клиента
+//
+// Сохранение происходит ТОЛЬКО по нажатию кнопки «Сохранить».
+// При наличии несохранённых изменений (dirty) выводится индикатор
+// и предупреждение через beforeunload.
+// ═══════════════════════════════════════════════════════════════════
 
 export function GlazingPage() {
-  const [profile, setProfile] = useState<ProfileType>('rehau');
-  const [glass, setGlass] = useState<GlassType>('double');
-  const [totalWidth] = useState(3000);
-  const [height] = useState(1500);
-  const [sections, setSections] = useState<Section[]>([
-    { id: '1', type: 'fixed', width: 800 },
-    { id: '2', type: 'tilt_turn', width: 700 },
-    { id: '3', type: 'tilt_turn', width: 700 },
-    { id: '4', type: 'fixed', width: 800 },
-  ]);
+  // Читаем :glazingId из path и client_id из query
+  const { glazingId } = useParams<{ glazingId?: string }>();
+  const [searchParams] = useSearchParams();
+  // ?client_id=XXX используется только при создании НОВОГО проекта
+  // (когда нет :glazingId в path)
+  const clientId = !glazingId ? searchParams.get('client_id') : null;
 
-  const addSection = () => {
-    setSections([...sections, {
-      id: crypto.randomUUID(),
-      type: 'fixed',
-      width: 600,
-    }]);
-  };
+  const store = useGlazingStore();
+  const navigate = useNavigate();
+  const project = store.data.projects.find((p) => p.id === store.data.activeProjectId);
 
-  const removeSection = (id: string) => {
-    if (sections.length <= 1) return;
-    setSections(sections.filter(s => s.id !== id));
-  };
+  const [materials, setMaterials] = useState<MaterialMap | null>(null);
+  const [reference, setReference] = useState<
+    Partial<Record<GlazingCategoryKey, GlazingCategoryWithItems>> | null
+  >(null);
+  const [refLoading, setRefLoading] = useState(true);
+  const [refError, setRefError] = useState<string | null>(null);
 
-  const updateSection = (id: string, updates: Partial<Section>) => {
-    setSections(sections.map(s => s.id === id ? { ...s, ...updates } : s));
-  };
+  // ── Состояние попапов ──────────────────────────────────────────
+  const [cellEditPopup, setCellEditPopup] = useState<{
+    segmentId: string; frameId: string; cellId: string; subtitle: string;
+  } | null>(null);
 
-  // SVG rendering
-  const svgPadding = 40;
-  const svgWidth = 600;
-  const svgScale = (svgWidth - svgPadding * 2) / totalWidth;
-  const svgHeight = height * svgScale + svgPadding * 2;
-  const actualTotalW = sections.reduce((a, s) => a + s.width, 0);
+  const [cornerPopup, setCornerPopup] = useState<{
+    cornerIdx: number;
+    current: CornerEditValue | null;
+    isCreate: boolean;
+  } | null>(null);
+
+  // Попап выбора между костью и поворотом (открывается тапом на ⊕ между рамами)
+  const [joinPicker, setJoinPicker] = useState<{
+    segmentId: string;
+    afterFrameIndex: number;
+  } | null>(null);
+
+  // Попап создания нового проекта (выбор шаблона)
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
+
+  // Попап сохранения текущего проекта как шаблона
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
+
+  // Попап выбора клиента для привязки текущего проекта
+  const [clientPickerOpen, setClientPickerOpen] = useState(false);
+
+  // Информация о привязанном клиенте (имя, телефон) — для отображения в шапке
+  const [clientInfo, setClientInfo] = useState<{
+    id: string; name: string; phone?: string;
+  } | null>(null);
+
+  // Большой попап настроек проекта (ConfigPopup)
+  const [configOpen, setConfigOpen] = useState(false);
+
+  // ── Инициализация ──────────────────────────────────────────────
+  useEffect(() => {
+    if (glazingId) {
+      // Режим: открыть существующий проект из таблицы glazings
+      store.loadGlazing(glazingId).catch((err) => {
+        console.error('[glazing] не удалось загрузить проект:', err);
+      });
+    } else if (clientId) {
+      // Режим: создать новый проект для клиента (ещё не сохранён в БД)
+      store.initNewForClient(clientId);
+    } else {
+      // Без glazingId и client_id — режим черновика (без клиента).
+      // Менеджер может привязать к клиенту позже через кнопку «Привязать».
+      store.initNewDraft();
+    }
+    // Загружаем пользовательские шаблоны при монтировании
+    store.loadUserTemplates().catch((err) => {
+      console.warn('Не удалось загрузить шаблоны:', err);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [glazingId, clientId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRefLoading(true);
+    loadGlazingReference()
+      .then((ref) => {
+        if (cancelled) return;
+        const map: MaterialMap = new Map();
+        for (const cat of Object.values(ref)) {
+          if (!cat) continue;
+          for (const m of cat.materials) {
+            map.set(m.id, { id: m.id, name: m.name, unit: m.unit, price: m.price });
+          }
+        }
+        setMaterials(map);
+        setReference(ref);
+        setRefLoading(false);
+
+        if (project) {
+          const cfg = project.config;
+          const patch: Partial<typeof cfg> = {};
+          if (!cfg.profileSystemId && ref.profiles?.materials[0]) {
+            patch.profileSystemId = ref.profiles.materials[0].id;
+          }
+          if (!cfg.glassId && ref.glass?.materials[0]) {
+            patch.glassId = ref.glass.materials[0].id;
+          }
+          if (!cfg.hardwareId && ref.hardware?.materials[0]) {
+            patch.hardwareId = ref.hardware.materials[0].id;
+          }
+          if (Object.keys(patch).length > 0) {
+            store.setProjectConfig(project.id, patch);
+          }
+        }
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setRefError(e instanceof Error ? e.message : 'Ошибка загрузки справочника');
+        setRefLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [project?.id]);
+
+  // ── beforeunload предупреждение при несохранённых изменениях ─
+  // Срабатывает только при ЗАКРЫТИИ ВКЛАДКИ или РЕЛОАДЕ.
+  // Для перехвата навигации внутри SPA используется useBlocker (ниже).
+  useEffect(() => {
+    if (!store.dirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = 'У вас есть несохранённые изменения. Точно уйти?';
+      return e.returnValue;
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [store.dirty]);
+
+  // Догружаем имя клиента когда меняется clientId — для отображения в шапке.
+  useEffect(() => {
+    if (!store.clientId) {
+      setClientInfo(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { supabase } = await import('@lib/supabase');
+        const { data } = await supabase
+          .from('clients')
+          .select('id, name, phone')
+          .eq('id', store.clientId!)
+          .single();
+        if (!cancelled && data) {
+          setClientInfo({
+            id: data.id,
+            name: data.name,
+            phone: data.phone || undefined,
+          });
+        }
+      } catch (err) {
+        console.warn('Не удалось загрузить инфо клиента:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [store.clientId]);
+
+  // Срабатывает при стрелке "Назад" в браузере, кликах по ссылкам,
+  // navigate() и т.д. Если есть несохранённые изменения — спрашиваем.
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      store.dirty && currentLocation.pathname !== nextLocation.pathname
+  );
+
+  useEffect(() => {
+    if (blocker.state === 'blocked') {
+      const ok = window.confirm(
+        'У вас есть несохранённые изменения. Точно уйти без сохранения?'
+      );
+      if (ok) {
+        blocker.proceed();
+      } else {
+        blocker.reset();
+      }
+    }
+  }, [blocker]);
+
+  // ── Ручное сохранение (по кнопке) ────────────────────────────
+  const handleSave = useCallback(async () => {
+    if (!materials) {
+      alert('Справочник материалов ещё загружается. Подождите секунду.');
+      return;
+    }
+    const savedId = await store.saveGlazing(materials);
+    if (savedId && !glazingId) {
+      // Если это был НОВЫЙ проект (создан через initNewForClient) —
+      // меняем URL на /glazing/:savedId чтобы при F5 загружался уже из БД
+      navigate(`/glazing/${savedId}`, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [materials, glazingId]);
+
+  // Материал кости по умолчанию (для quick-add)
+  const defaultBoneMaterialId = useMemo(() => {
+    if (!materials) return undefined;
+    return Array.from(materials.values()).find((m) => m.name.includes('Кость стандарт'))?.id
+        ?? Array.from(materials.values()).find((m) => m.name.includes('Кость'))?.id;
+  }, [materials]);
+
+  // Материал углового соединителя по умолчанию (90°)
+  const defaultCornerMaterialId = useMemo(() => {
+    if (!materials) return undefined;
+    return Array.from(materials.values()).find((m) => m.name.includes('угловой 90'))?.id
+        ?? Array.from(materials.values()).find((m) => m.name.includes('Соединитель'))?.id;
+  }, [materials]);
+
+  if (refLoading) {
+    return (
+      <div className="h-96 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-brand-500 animate-spin" />
+      </div>
+    );
+  }
+
+  if (refError) {
+    return (
+      <div className="p-4 bg-red-50 text-red-700 rounded-lg">{refError}</div>
+    );
+  }
+
+  if (!project) return null;
+
+  // Активные сущности (берём первую если ничего не выбрано)
+  const activeSegment = project.segments.find((s) => s.id === store.activeSegmentId)
+    ?? project.segments[0]!;
+  const activeFrame = activeSegment.frames.find((f) => f.id === store.activeFrameId)
+    ?? activeSegment.frames[0];
+
+  const estimate = materials ? calcProject(project, materials) : null;
+  const warnings = validateProject(project);
+
+  // ── Обработчики ────────────────────────────────────────────────
+
+  // Тап на ячейку = только активация (попап не открывается)
+  function handleCellClick(segmentId: string, frameId: string, cellId: string) {
+    store.setActive(segmentId, frameId, cellId);
+  }
+
+  // Тап на маленький "+" в центре активной ячейки = открыть попап редактирования
+  function handleCellEditClick(segmentId: string, frameId: string, cellId: string) {
+    const seg = project!.segments.find((s) => s.id === segmentId);
+    const fr = seg?.frames.find((f) => f.id === frameId);
+    const cell = fr?.cells.find((c) => c.id === cellId);
+    if (!seg || !fr || !cell) return;
+    setCellEditPopup({
+      segmentId, frameId, cellId,
+      subtitle: `Ячейка ${cell.width}×${cell.height} мм`,
+    });
+  }
+
+  function handleImpostClick(segmentId: string, frameId: string, impostId: string) {
+    if (!confirm('Удалить импост?')) return;
+    store.removeImpost(project!.id, segmentId, frameId, impostId);
+  }
+
+  function handleBoneClick(segmentId: string, boneId: string) {
+    if (!confirm('Удалить кость?')) return;
+    store.removeBone(project!.id, segmentId, boneId);
+  }
+
+  function handleCornerClick(cornerIdx: number) {
+    const corner = project!.corners[cornerIdx];
+    if (!corner) return;
+    setCornerPopup({
+      cornerIdx,
+      current: { type: corner.type, customAngle: corner.customAngle },
+      isCreate: false,
+    });
+  }
+
+  function handleRemoveSegment() {
+    if (project!.segments.length <= 1) return;
+    if (!confirm('Удалить этот сегмент со всем содержимым?')) return;
+    store.removeSegment(project!.id, activeSegment.id);
+  }
+
+  function handleAddFrameToSide(segmentId: string, side: 'start' | 'end') {
+    // Стандартный размер новой рамы: 750×1500 (одна створка)
+    const newFrameId = store.addFrame(project!.id, segmentId, 750, side);
+    // Активируем новую раму, чтобы пользователь сразу мог редактировать
+    store.setActive(segmentId, newFrameId, null);
+  }
+
+  function handleRemoveFrame() {
+    if (!activeFrame) return;
+    if (activeSegment.frames.length <= 1) {
+      alert('В сегменте должна остаться хотя бы одна рама.');
+      return;
+    }
+    if (!confirm(`Удалить раму ${activeFrame.width}×${activeFrame.height} мм?`)) return;
+    store.removeFrame(project!.id, activeSegment.id, activeFrame.id);
+    store.setActive(activeSegment.id, null, null);
+  }
+
+  // ⊕ между рамами → открыть попап выбора (Кость / Поворот)
+  function handleJoinClick(segmentId: string, afterFrameIndex: number) {
+    setJoinPicker({ segmentId, afterFrameIndex });
+  }
+
+  // Из попапа: выбрана Кость
+  function handleChooseBone() {
+    if (!joinPicker) return;
+    store.addBone(
+      project!.id,
+      joinPicker.segmentId,
+      joinPicker.afterFrameIndex,
+      defaultBoneMaterialId,
+      'bone'
+    );
+  }
+
+  // Из попапа: выбран Соединитель универсальный (тонкая стыковочная планка)
+  function handleChooseConnector() {
+    if (!joinPicker) return;
+    store.addBone(
+      project!.id,
+      joinPicker.segmentId,
+      joinPicker.afterFrameIndex,
+      undefined,        // материал у connector'а — другой, по умолчанию пусть будет null
+      'connector'
+    );
+  }
+
+  // Из попапа: выбран Поворот — разделяем сегмент в этой точке
+  function handleChooseCorner() {
+    if (!joinPicker) return;
+    const newSegId = store.splitSegmentAt(
+      project!.id,
+      joinPicker.segmentId,
+      joinPicker.afterFrameIndex
+    );
+    if (!newSegId) {
+      alert('Не удалось разделить сегмент.');
+      return;
+    }
+    // Активируем новый (правый) сегмент
+    store.setActive(newSegId, null, null);
+  }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Остекление</h1>
-          <p className="text-sm text-gray-500 mt-1">2D-проекция и расчёт стоимости</p>
-        </div>
-        <button className="btn-primary">
-          <Download className="w-4 h-4" /> Экспорт PDF
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4">
-        {/* SVG Canvas */}
-        <div className="card p-6">
-          <svg
-            viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-            className="w-full border border-surface-100 rounded-lg bg-white"
+    <div className="space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => navigate(-1)}
+            className="btn-secondary text-xs py-1.5 px-2"
+            title="Вернуться назад"
           >
-            {/* Frame */}
-            <rect
-              x={svgPadding}
-              y={svgPadding}
-              width={actualTotalW * svgScale}
-              height={height * svgScale}
-              fill="none"
-              stroke="#1E3A5F"
-              strokeWidth="3"
-              rx="2"
-            />
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <input
+            type="text"
+            value={store.glazingName}
+            onChange={(e) => store.setGlazingName(e.target.value)}
+            placeholder="Название проекта"
+            className="text-xl font-bold bg-transparent border-b border-transparent
+                       hover:border-gray-300 focus:border-brand-500 focus:outline-none px-1
+                       min-w-[200px]"
+          />
+          {/* Индикатор статуса сохранения */}
+          {store.isSaving && (
+            <span className="text-xs text-gray-500 flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Сохранение…
+            </span>
+          )}
+          {!store.isSaving && store.dirty && (
+            <span className="text-xs text-amber-600 flex items-center gap-1">
+              ● Не сохранено
+            </span>
+          )}
+          {!store.isSaving && !store.dirty && store.lastSavedAt && (
+            <span className="text-xs text-emerald-600">✓ Сохранено</span>
+          )}
+          {store.error && (
+            <span className="text-xs text-red-600" title={store.error}>
+              ⚠ {store.error}
+            </span>
+          )}
+        </div>
 
-            {/* Sections */}
-            {sections.reduce((acc, section, _i) => {
-              const x = acc.x;
-              const w = section.width * svgScale;
-              const h = height * svgScale;
-              const y = svgPadding;
-
-              const isOperable = section.type !== 'fixed';
-
-              acc.elements.push(
-                <g key={section.id}>
-                  {/* Section rect */}
-                  <rect
-                    x={x} y={y} width={w} height={h}
-                    fill={isOperable ? '#EFF6FF' : '#F8FAFC'}
-                    stroke="#1E3A5F"
-                    strokeWidth="1.5"
-                  />
-                  {/* Opening indicator */}
-                  {section.type === 'tilt_turn' && (
-                    <>
-                      <line x1={x + w / 2} y1={y + 4} x2={x + w / 2} y2={y + h - 4}
-                        stroke="#2563EB" strokeWidth="1" strokeDasharray="4 3" />
-                      <line x1={x + 4} y1={y + h / 2} x2={x + w - 4} y2={y + h / 2}
-                        stroke="#2563EB" strokeWidth="1" strokeDasharray="4 3" />
-                      {/* Triangle indicator */}
-                      <polygon
-                        points={`${x + w / 2},${y + 8} ${x + 8},${y + h - 8} ${x + w - 8},${y + h - 8}`}
-                        fill="none" stroke="#2563EB" strokeWidth="0.8" opacity="0.4"
-                      />
-                    </>
-                  )}
-                  {section.type === 'tilt' && (
-                    <>
-                      <line x1={x + 4} y1={y + h / 2} x2={x + w - 4} y2={y + h / 2}
-                        stroke="#2563EB" strokeWidth="1" strokeDasharray="4 3" />
-                    </>
-                  )}
-                  {section.type === 'sliding' && (
-                    <>
-                      <line x1={x + w * 0.3} y1={y + 8} x2={x + w * 0.3} y2={y + h - 8}
-                        stroke="#F97316" strokeWidth="1.5" />
-                      <polygon
-                        points={`${x + w * 0.3 + 6},${y + h / 2} ${x + w * 0.3 - 2},${y + h / 2 - 6} ${x + w * 0.3 - 2},${y + h / 2 + 6}`}
-                        fill="#F97316"
-                      />
-                    </>
-                  )}
-                  {/* Width label */}
-                  <text
-                    x={x + w / 2} y={y + h + 16}
-                    textAnchor="middle" fontSize="11" fill="#64748B" fontFamily="Inter, sans-serif"
-                  >
-                    {section.width}
-                  </text>
-                  {/* Type label */}
-                  <text
-                    x={x + w / 2} y={y + h / 2 + 4}
-                    textAnchor="middle" fontSize="9" fill="#94A3B8" fontFamily="Inter, sans-serif"
-                  >
-                    {SECTION_LABELS[section.type as SectionType]}
-                  </text>
-                </g>
-              );
-
-              return { x: x + w, elements: acc.elements };
-            }, { x: svgPadding, elements: [] as React.ReactNode[] }).elements}
-
-            {/* Height dimension */}
-            <text
-              x={svgPadding - 8}
-              y={svgPadding + (height * svgScale) / 2}
-              textAnchor="middle" fontSize="11" fill="#64748B"
-              fontFamily="Inter, sans-serif"
-              transform={`rotate(-90, ${svgPadding - 8}, ${svgPadding + (height * svgScale) / 2})`}
-            >
-              {height} мм
-            </text>
-
-            {/* Total width */}
-            <text
-              x={svgPadding + (actualTotalW * svgScale) / 2}
-              y={svgPadding - 10}
-              textAnchor="middle" fontSize="12" fill="#1E3A5F" fontWeight="600"
-              fontFamily="Inter, sans-serif"
-            >
-              {actualTotalW} мм (общая)
-            </text>
-          </svg>
-
-          {/* Section editor */}
-          <div className="mt-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-700">Секции ({sections.length})</h3>
-              <button onClick={addSection} className="btn-secondary text-xs py-1.5 px-3">
-                <Plus className="w-3 h-3" /> Добавить
+        <div className="flex items-center gap-2">
+          {/* Кнопка привязки к клиенту: либо показывает имя клиента
+              (с возможностью переключить/отвязать), либо предлагает выбрать */}
+          {clientInfo ? (
+            <div className="flex items-center gap-1 text-xs bg-emerald-50 border border-emerald-200
+                            rounded-lg pl-2 pr-1 py-1">
+              <UserCircle className="w-3.5 h-3.5 text-emerald-700" />
+              <span className="font-medium text-emerald-800 truncate max-w-[120px]"
+                    title={`${clientInfo.name}${clientInfo.phone ? ' · ' + clientInfo.phone : ''}`}>
+                {clientInfo.name}
+              </span>
+              <button
+                onClick={() => setClientPickerOpen(true)}
+                className="text-emerald-700 hover:text-emerald-900 px-1"
+                title="Сменить клиента"
+              >
+                ⇄
+              </button>
+              <button
+                onClick={() => {
+                  if (confirm(`Отвязать проект от клиента «${clientInfo.name}»?`)) {
+                    store.setClientId(null);
+                  }
+                }}
+                className="text-red-500 hover:text-red-700 px-1"
+                title="Отвязать от клиента"
+              >
+                <UserX className="w-3.5 h-3.5" />
               </button>
             </div>
-            {sections.map((section, i) => (
-              <div key={section.id} className="flex items-center gap-2 p-2 rounded-lg bg-surface-50">
-                <span className="text-xs text-gray-400 w-5">{i + 1}.</span>
-                <select
-                  value={section.type}
-                  onChange={(e) => updateSection(section.id, { type: e.target.value as SectionType })}
-                  className="input py-1.5 text-xs flex-1"
-                >
-                  {Object.entries(SECTION_LABELS).map(([val, label]) => (
-                    <option key={val} value={val}>{label}</option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  value={section.width}
-                  onChange={(e) => updateSection(section.id, { width: Number(e.target.value) })}
-                  className="input py-1.5 text-xs w-24"
-                  min={200}
-                  max={2000}
-                />
-                <span className="text-xs text-gray-400">мм</span>
-                <button
-                  onClick={() => removeSection(section.id)}
-                  className="p-1 text-gray-400 hover:text-red-500 transition-colors"
-                  disabled={sections.length <= 1}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Config panel */}
-        <div className="space-y-4">
-          <div className="card p-4">
-            <h3 className="text-sm font-semibold text-gray-900 mb-3">Профиль</h3>
-            <div className="space-y-2">
-              {PROFILES.map((p) => (
-                <label
-                  key={p.value}
-                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                    profile === p.value
-                      ? 'border-brand-500 bg-brand-50'
-                      : 'border-surface-200 hover:border-surface-300'
-                  }`}
-                >
-                  <input
-                    type="radio" name="profile"
-                    checked={profile === p.value}
-                    onChange={() => setProfile(p.value)}
-                    className="sr-only"
-                  />
-                  <PanelTop className={`w-4 h-4 ${profile === p.value ? 'text-brand-600' : 'text-gray-400'}`} />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900">{p.label}</p>
-                    <p className="text-xs text-gray-500">{p.price}</p>
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className="card p-4">
-            <h3 className="text-sm font-semibold text-gray-900 mb-3">Стеклопакет</h3>
-            <select
-              value={glass}
-              onChange={(e) => setGlass(e.target.value as GlassType)}
-              className="input text-sm"
+          ) : (
+            <button
+              onClick={() => setClientPickerOpen(true)}
+              className="text-xs py-1.5 px-3 rounded-lg bg-amber-50 text-amber-700
+                         border border-amber-200 hover:bg-amber-100 flex items-center gap-1"
+              title="Привязать проект к клиенту из CRM"
             >
-              {GLASS_TYPES.map(g => (
-                <option key={g.value} value={g.value}>{g.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="card p-4 bg-brand-50 border-brand-200">
-            <p className="text-sm text-brand-700 font-medium">Предварительная стоимость</p>
-            <p className="text-3xl font-bold text-brand-800 mt-1">42 500 ₽</p>
-            <p className="text-xs text-brand-600 mt-2">
-              Профиль + стеклопакет + фурнитура + монтаж
-            </p>
-          </div>
+              <UserCircle className="w-3.5 h-3.5" />
+              Привязать к клиенту
+            </button>
+          )}
+          <button
+            onClick={handleSave}
+            disabled={!store.dirty || store.isSaving}
+            className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1
+                       disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Save className="w-3.5 h-3.5" />
+            Сохранить
+          </button>
+          <ConfigGearButton
+            onClick={() => setConfigOpen(true)}
+            disabled={!project}
+          />
         </div>
       </div>
+
+      {/* ── Селектор активного сегмента ──────────────────────── */}
+      {project.segments.length > 1 && (
+        <div className="card p-2 flex items-center gap-1.5 flex-wrap text-xs">
+          <span className="text-gray-500 px-1">Сегменты:</span>
+          {project.segments.map((seg, i) => {
+            const isActive = seg.id === activeSegment.id;
+            return (
+              <button
+                key={seg.id}
+                onClick={() => store.setActive(seg.id, null, null)}
+                className={`px-2.5 py-1 rounded font-medium ${
+                  isActive
+                    ? 'bg-brand-500 text-white'
+                    : 'bg-surface-100 text-gray-700 hover:bg-surface-200'
+                }`}
+              >
+                #{i + 1} ({seg.frames.length} рам)
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Тулбар ──────────────────────────────────────────── */}
+      <div className="card p-3 flex items-center gap-2 flex-wrap text-sm">
+        {/* Кнопка добавления нового проекта остекления */}
+        <button
+          onClick={() => setNewProjectOpen(true)}
+          className="text-xs py-1.5 px-3 rounded-lg bg-brand-500 text-white hover:bg-brand-600
+                     font-semibold flex items-center gap-1"
+        >
+          + Добавить проект
+        </button>
+
+        {/* Кнопка сохранения текущего проекта как шаблона */}
+        <button
+          onClick={() => setSaveTemplateOpen(true)}
+          disabled={!project}
+          className="text-xs py-1.5 px-3 rounded-lg bg-lime-500 text-white hover:bg-lime-600
+                     font-semibold flex items-center gap-1
+                     disabled:opacity-40 disabled:cursor-not-allowed"
+          title="Сохранить геометрию текущего проекта как шаблон"
+        >
+          + Шаблон
+        </button>
+
+        <span className="text-xs text-gray-300 mx-1">·</span>
+
+        <span className="text-xs text-gray-500 mr-1">В сегмент:</span>
+        <button onClick={handleRemoveFrame}
+          disabled={!activeFrame || activeSegment.frames.length <= 1}
+          className="text-xs py-1.5 px-2.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed">
+          <Trash2 className="w-3 h-3 inline mr-0.5" /> рама
+        </button>
+
+        {project.segments.length > 1 && (
+          <button onClick={handleRemoveSegment}
+            className="text-xs py-1.5 px-2.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">
+            <Trash2 className="w-3 h-3 inline mr-0.5" /> сегмент
+          </button>
+        )}
+      </div>
+
+      {/* ── Канвас ──────────────────────────────────────────── */}
+      <div className="card overflow-hidden" style={{ height: 520 }}>
+        <WindowCanvas
+          project={project}
+          activeCellId={store.activeCellId}
+          activeFrameId={store.activeFrameId}
+          onCellClick={handleCellClick}
+          onCellEditClick={handleCellEditClick}
+          onImpostClick={handleImpostClick}
+          onBoneClick={handleBoneClick}
+          onCornerClick={handleCornerClick}
+          onAddBoneAt={handleJoinClick}
+          onAddFrameToSide={handleAddFrameToSide}
+          onChangeSection={(segId, frId, orientation, sectionIdx, newSize, rowIdx) => {
+            const result = store.setSectionWidth(project.id, segId, frId, orientation, sectionIdx, newSize, rowIdx);
+            if (result === 'too_small') {
+              alert(
+                'Невозможно установить такой размер секции: остальным секциям не хватит места ' +
+                '(минимум 200 мм на секцию).'
+              );
+            } else if (result === 'overflow') {
+              alert(
+                'Все секции зафиксированы и сумма не сходится. ' +
+                'Сначала увеличьте размер рамы или нажмите "Выровнять", ' +
+                'чтобы сбросить ручные размеры и распределить заново.'
+              );
+            }
+          }}
+          onResetSectionLocks={(segId, frId, orientation, rowIdx) => {
+            store.resetSectionLocks(project.id, segId, frId, orientation, rowIdx);
+          }}
+          onChangeFrameBottomOffset={(segId, frId, offset) => {
+            store.setFrameBottomOffset(project.id, segId, frId, offset);
+          }}
+          onChangeFrameTopOffset={(segId, frId, offset) => {
+            store.setFrameTopOffset(project.id, segId, frId, offset);
+          }}
+          onChangeFrameWidth={(segId, frId, w) => {
+            // Рама независима — меняем только её ширину, общий размер сегмента
+            // пересчитывается автоматически (он = сумма ширин всех рам + кости).
+            const seg = project.segments.find((s) => s.id === segId);
+            const fr = seg?.frames.find((f) => f.id === frId);
+            if (!fr) return;
+            if (w < 300) {
+              alert('Минимальная ширина рамы — 300 мм.');
+              return;
+            }
+            store.setFrameSize(project.id, segId, frId, w, fr.height);
+          }}
+          onChangeSegmentTotalWidth={(segId, totalW) => {
+            const ok = store.setSegmentTotalWidth(project.id, segId, totalW);
+            if (!ok) {
+              alert('Невозможно установить такую ширину: рам слишком много для этого размера.');
+            }
+          }}
+          onChangeSegmentHeight={(segId, side, value) => {
+            store.setSegmentHeight(project.id, segId, side, value);
+            // Дополнительно подгоняем высоту всех рам сегмента под новое значение
+            const seg = project.segments.find((s) => s.id === segId);
+            if (seg) {
+              const newH = side === 'both'
+                ? value
+                : Math.max(value, side === 'left' ? seg.heightRight : seg.heightLeft);
+              for (const f of seg.frames) {
+                store.setFrameSize(project.id, segId, f.id, f.width, newH);
+              }
+            }
+          }}
+        />
+      </div>
+
+      <p className="text-xs text-gray-400 px-1">
+        💡 Тап на ячейку → активация. Тап на синий «+» в центре → попап (Открывание / Импост / Сетка / Фурнитура).
+        Большие 🟦+ по краям → новая рама. ⊕ между рамами → выбор «Кость» или «Поворот».
+      </p>
+
+      {/* ── Лента проектов ───────────────────────────────────── */}
+      <WindowsStrip
+        projects={store.data.projects}
+        activeProjectId={store.data.activeProjectId}
+        onSelectProject={(id) => store.setActiveProject(id)}
+        onAddProject={() => setNewProjectOpen(true)}
+        onDeleteProject={(id) => store.removeProject(id)}
+      />
+
+      {/* ── Таблица сметы PVC-style ─────────────────────────── */}
+      <ResultsTable
+        data={store.data}
+        activeProjectId={store.data.activeProjectId}
+        projectTotals={Object.fromEntries(
+          store.data.projects.map((p) => [
+            p.id,
+            calcProject(p, materials ?? new Map()).total,
+          ])
+        )}
+      />
+
+      {/* ── Детализация сметы + валидация ───────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="card p-3">
+          <h3 className="text-sm font-semibold mb-2">Смета</h3>
+          {estimate && estimate.lines.length > 0 ? (
+            <table className="w-full text-xs">
+              <tbody>
+                {estimate.lines.map((l, i) => (
+                  <tr key={i} className="border-b border-surface-100 last:border-0">
+                    <td className="py-1.5 text-gray-700">{l.name}</td>
+                    <td className="py-1.5 text-right text-gray-500">
+                      {l.quantity} {l.unit}
+                    </td>
+                    <td className="py-1.5 text-right font-medium whitespace-nowrap">
+                      {l.total.toLocaleString('ru-RU')} ₽
+                    </td>
+                  </tr>
+                ))}
+                <tr className="border-t-2 border-gray-300">
+                  <td colSpan={2} className="py-2 font-bold">Итого:</td>
+                  <td className="py-2 text-right font-bold text-brand-700">
+                    {estimate.total.toLocaleString('ru-RU')} ₽
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-xs text-gray-400">Пусто</p>
+          )}
+        </div>
+
+        <div className="card p-3">
+          <h3 className="text-sm font-semibold mb-2">
+            Проверка по ГОСТ
+            {warnings.length > 0 && (
+              <span className="ml-2 text-xs">
+                {hasErrors(warnings) && (
+                  <span className="text-red-600">{countErrors(warnings)} ошибок</span>
+                )}
+                {countWarns(warnings) > 0 && (
+                  <span className="text-orange-600 ml-2">{countWarns(warnings)} замечаний</span>
+                )}
+              </span>
+            )}
+          </h3>
+          {warnings.length === 0 ? (
+            <p className="text-xs text-green-600">✓ Замечаний нет</p>
+          ) : (
+            <ul className="space-y-1.5 max-h-64 overflow-y-auto">
+              {warnings.map((w, i) => (
+                <li key={i} className={`text-xs px-2 py-1.5 rounded ${
+                  w.level === 'error' ? 'bg-red-50 text-red-700' : 'bg-orange-50 text-orange-700'
+                }`}>
+                  {w.message}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {/* ── ПОПАПЫ ──────────────────────────────────────────── */}
+
+      {cellEditPopup && (() => {
+        const seg = project.segments.find((s) => s.id === cellEditPopup.segmentId);
+        const fr = seg?.frames.find((f) => f.id === cellEditPopup.frameId);
+        const cell = fr?.cells.find((c) => c.id === cellEditPopup.cellId);
+        if (!seg || !fr || !cell) return null;
+
+        // Определяем активную полосу по активной ячейке
+        const cy = cell.y + cell.height / 2;
+        const horImposts = fr.imposts
+          .filter((i) => i.orientation === 'horizontal')
+          .sort((a, b) => a.position - b.position);
+        let activeRowIdx = 0;
+        for (let i = 0; i < horImposts.length; i++) {
+          if (cy > horImposts[i]!.position) activeRowIdx = i + 1;
+        }
+
+        // Сколько импостов уже есть (для расчёта помещается ли N новых)
+        const verticalsInRow = fr.imposts.filter(
+          (i) => i.orientation === 'vertical' && (i.belongsToRow ?? 0) === activeRowIdx
+        ).length;
+        const horizontalsInFrame = fr.imposts.filter(
+          (i) => i.orientation === 'horizontal'
+        ).length;
+
+        return (
+          <CellEditPopup
+            cellSubtitle={cellEditPopup.subtitle}
+            currentSash={cell.sash}
+            currentMosquito={cell.mosquito ?? null}
+            currentHardware={cell.hardware ?? []}
+            rowWidth={fr.width}
+            frameHeight={fr.height}
+            existingVerticalsInRow={verticalsInRow}
+            existingHorizontalsInFrame={horizontalsInFrame}
+            onClose={() => setCellEditPopup(null)}
+            onChangeSash={(s) => {
+              store.setCellSash(project.id, cellEditPopup.segmentId, cellEditPopup.frameId, cellEditPopup.cellId, s);
+            }}
+            onChangeMosquito={(m) => {
+              store.setCellMosquito(project.id, cellEditPopup.segmentId, cellEditPopup.frameId, cellEditPopup.cellId, m);
+            }}
+            onChangeHardware={(h) => {
+              store.setCellHardware(project.id, cellEditPopup.segmentId, cellEditPopup.frameId, cellEditPopup.cellId, h);
+            }}
+            onAddImposts={(orientation, count) => {
+              const targetRow = orientation === 'vertical' ? activeRowIdx : undefined;
+              const ok = store.addImpostsEven(
+                project.id, cellEditPopup.segmentId, cellEditPopup.frameId,
+                orientation, count, targetRow
+              );
+              if (!ok) {
+                alert('Не удалось добавить импосты — недостаточно места.');
+              }
+            }}
+          />
+        );
+      })()}
+
+      {cornerPopup && (
+        <CornerEditPopup
+          current={cornerPopup.current}
+          canDelete={!cornerPopup.isCreate && project.segments.length > 1}
+          onClose={() => setCornerPopup(null)}
+          onSave={(v) => {
+            store.setCorner(project.id, cornerPopup.cornerIdx, v.type, defaultCornerMaterialId, v.customAngle);
+          }}
+          onDelete={() => {
+            // Удаление угла = удаление сегмента справа от него
+            const segToRemove = project.segments[cornerPopup.cornerIdx + 1];
+            if (segToRemove) {
+              store.removeSegment(project.id, segToRemove.id);
+            }
+          }}
+        />
+      )}
+
+      {joinPicker && (
+        <JoinPickerPopup
+          onClose={() => setJoinPicker(null)}
+          onChooseBone={handleChooseBone}
+          onChooseConnector={handleChooseConnector}
+          onChooseCorner={handleChooseCorner}
+        />
+      )}
+
+      {newProjectOpen && (
+        <NewProjectPopup
+          suggestedName={suggestProjectName(store.data.projects)}
+          userTemplates={store.userTemplates}
+          onClose={() => setNewProjectOpen(false)}
+          onCreateEmpty={(constructionType, name) => {
+            store.addProjectByType(name, constructionType);
+          }}
+          onCreateFromTemplate={(templateId, name) => {
+            store.addProjectFromUserTemplate(templateId, name);
+          }}
+          onDeleteTemplate={async (templateId) => {
+            await store.deleteUserTemplate(templateId);
+          }}
+        />
+      )}
+
+      {saveTemplateOpen && project && (
+        <SaveTemplatePopup
+          defaultName={project.name}
+          defaultType={project.constructionType ?? 'window'}
+          onClose={() => setSaveTemplateOpen(false)}
+          onSave={async (name, constructionType) => {
+            const result = await store.saveAsTemplate(project.id, name, constructionType);
+            if (!result) {
+              throw new Error('Не удалось сохранить шаблон');
+            }
+          }}
+        />
+      )}
+
+      {clientPickerOpen && (
+        <ClientPicker
+          onSelect={(id) => {
+            store.setClientId(id);
+            setClientPickerOpen(false);
+          }}
+          onClose={() => setClientPickerOpen(false)}
+        />
+      )}
+
+      {configOpen && project && reference && (
+        <ConfigPopup
+          current={project.config}
+          reference={reference}
+          onClose={() => setConfigOpen(false)}
+          onSave={(patch) => store.setProjectConfig(project.id, patch)}
+        />
+      )}
     </div>
   );
+}
+
+/**
+ * Предлагаемое название следующего проекта — на основе уже существующих.
+ * Например, если есть «Балкон 1», предлагаем «Балкон 2».
+ */
+function suggestProjectName(projects: { name: string }[]): string {
+  // Базовое имя — первое слово существующих ("Балкон", "Окно") + следующий номер
+  if (projects.length === 0) return 'Балкон 1';
+  // Извлекаем базы и максимальный номер
+  const counts: Record<string, number> = {};
+  for (const p of projects) {
+    const m = p.name.match(/^(.+?)\s*(\d+)?$/);
+    if (m) {
+      const base = m[1]!.trim();
+      const n = m[2] ? parseInt(m[2], 10) : 1;
+      counts[base] = Math.max(counts[base] ?? 0, n);
+    }
+  }
+  // Возьмём самую частую "базу"
+  const lastBase = projects[projects.length - 1]!.name.match(/^(.+?)\s*\d*$/)?.[1]?.trim() ?? 'Окно';
+  const next = (counts[lastBase] ?? 0) + 1;
+  return `${lastBase} ${next}`;
 }

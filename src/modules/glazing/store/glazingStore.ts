@@ -21,6 +21,12 @@ import {
   deleteUserTemplate as apiDeleteUserTemplate,
   type UserTemplate, type ConstructionType,
 } from '../api/glazingTemplatesApi';
+import {
+  loadGlazingById,
+  createGlazing,
+  saveGlazing as saveGlazingApi,
+} from '../api/glazingProjectApi';
+import { calcProject } from '../api/doGlazing';
 
 // ═══════════════════════════════════════════════════════════════════
 // glazingStore — состояние редактора остекления.
@@ -34,7 +40,8 @@ import {
 // со страницы без сохранения. При загрузке заказа draft перезаписывается.
 // ═══════════════════════════════════════════════════════════════════
 
-const DRAFT_KEY = 'k2_glazing_draft';
+// Старая логика черновиков localStorage удалена — в новой архитектуре
+// проекты привязаны к клиенту в таблице glazings. Черновиков больше нет.
 
 // ── Утилиты ────────────────────────────────────────────────────────
 
@@ -76,21 +83,9 @@ function reIdSegment(seg: Segment): Segment {
   };
 }
 
-function loadDraft(): GlazingFormData | null {
-  try {
-    const raw = localStorage.getItem(DRAFT_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as GlazingFormData;
-    // Мигрируем старые конфиги к актуальной форме
-    return migrateFormData(parsed);
-  } catch {
-    return null;
-  }
-}
-
 /**
- * Заполняет недостающие поля в config — делает старые черновики
- * совместимыми с новой версией структуры. Не теряет существующие данные.
+ * Заполняет недостающие поля в config — делает старые сохранённые
+ * проекты совместимыми с новой версией структуры. Не теряет существующие данные.
  *
  * Когда добавляются новые поля в ProjectConfig, нужно дополнить эту
  * функцию, иначе старые сохранённые проекты могут падать в UI.
@@ -130,14 +125,6 @@ function migrateFormData(data: GlazingFormData): GlazingFormData {
       corners:  Array.isArray(p.corners) ? p.corners : [],
     })),
   };
-}
-
-function saveDraft(data: GlazingFormData) {
-  try {
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
-  } catch {
-    // Quota exceeded или приватный режим — игнорируем.
-  }
 }
 
 // ── Иммутабельные апдейтеры (без structuredClone — поддерживаем старые браузеры) ─
@@ -190,7 +177,19 @@ function updCell(
 
 interface GlazingState {
   data: GlazingFormData;
-  orderId: string | null;
+  /**
+   * ID текущего проекта в таблице `glazings`. null означает что страница
+   * открыта в "режиме создания" (ещё не сохранён первый раз).
+   */
+  glazingId: string | null;
+  /**
+   * Привязка к клиенту CRM. Используется при первом сохранении нового
+   * проекта (createGlazing). Передаётся через query-параметр ?client_id=XXX
+   * либо берётся из info уже сохранённого проекта.
+   */
+  clientId: string | null;
+  /** Имя проекта (отображается в шапке, редактируется). */
+  glazingName: string;
   // Активные сущности (для UI редактора)
   activeSegmentId: string | null;
   activeFrameId: string | null;
@@ -199,27 +198,71 @@ interface GlazingState {
   isLoading: boolean;
   isSaving: boolean;
   error: string | null;
+  /**
+   * Есть ли в текущем состоянии несохранённые изменения.
+   * Сбрасывается в false после успешного save или load.
+   * Ставится в true при любой мутации data/glazingName.
+   */
+  dirty: boolean;
+  /** Время последнего успешного сохранения (для индикатора в UI). */
+  lastSavedAt: Date | null;
 
   // ── Пользовательские шаблоны (Supabase) ──────────────────────
   userTemplates: UserTemplate[];
   templatesLoading: boolean;
   templatesError: string | null;
-  /** Загрузить список шаблонов организации. */
   loadUserTemplates: () => Promise<void>;
-  /** Сохранить текущий проект как новый шаблон (без config). */
   saveAsTemplate: (
     projectId: string,
     name: string,
     constructionType: ConstructionType,
   ) => Promise<UserTemplate | null>;
-  /** Удалить шаблон по id. */
   deleteUserTemplate: (templateId: string) => Promise<void>;
-  /** Создать проект из пользовательского шаблона (применить геометрию). */
   addProjectFromUserTemplate: (templateId: string, projectName: string) => string | null;
 
-  // ── Инициализация ────────────────────────────────────────────
-  initFromDraft: () => void;
-  initFromOrder: (orderId: string, data: GlazingFormData | null) => void;
+  // ── Инициализация / загрузка / сохранение ────────────────────
+
+  /**
+   * Открыть страницу для создания нового проекта-черновика (без клиента).
+   * Используется при заходе в /glazing напрямую из меню.
+   * client_id остаётся null до того момента как менеджер привяжет к клиенту.
+   */
+  initNewDraft: () => void;
+
+  /**
+   * Открыть страницу для создания НОВОГО проекта (привязанного к клиенту).
+   * Создаёт пустой проект в локальном сторе. Запись в БД произойдёт
+   * только при первом нажатии «Сохранить».
+   */
+  initNewForClient: (clientId: string) => void;
+
+  /**
+   * Привязать (или отвязать) текущий проект к клиенту.
+   * При сохранении client_id запишется в БД.
+   */
+  setClientId: (clientId: string | null) => void;
+
+  /**
+   * Загрузить существующий проект остекления из таблицы `glazings`.
+   * Используется на странице /glazing/:glazingId.
+   */
+  loadGlazing: (glazingId: string) => Promise<void>;
+
+  /**
+   * Сохранить текущее состояние:
+   *   • Если glazingId = null — создаёт новую запись в `glazings`,
+   *     присваивает stored.glazingId
+   *   • Если glazingId не null — обновляет существующую запись
+   *
+   * @param materials — справочник для расчёта total_cost (опционально)
+   * @returns id сохранённого проекта (нужен при первом save для редиректа)
+   */
+  saveGlazing: (materials?: import('../api/doGlazing').MaterialMap) => Promise<string | null>;
+
+  /** Изменить имя проекта (помечает dirty). */
+  setGlazingName: (name: string) => void;
+
+  /** Очистить состояние (например при выходе со страницы). */
   reset: () => void;
 
   // ── Проекты ──────────────────────────────────────────────────
@@ -333,53 +376,162 @@ interface GlazingState {
 
 export const useGlazingStore = create<GlazingState>((set, get) => ({
   data: emptyFormData(),
-  orderId: null,
+  glazingId: null,
+  clientId: null,
+  glazingName: 'Без названия',
   activeSegmentId: null,
   activeFrameId: null,
   activeCellId: null,
   isLoading: false,
   isSaving: false,
   error: null,
+  dirty: false,
+  lastSavedAt: null,
 
   // Пользовательские шаблоны (Supabase)
   userTemplates: [],
   templatesLoading: false,
   templatesError: null,
 
-  // ── Инициализация ──────────────────────────────────────────────
+  // ── Инициализация / загрузка / сохранение ───────────────────────
 
-  initFromDraft: () => {
-    const draft = loadDraft();
-    if (draft && draft.projects.length > 0) {
-      set({ data: draft, orderId: null });
-    } else {
-      set({ data: emptyFormData(), orderId: null });
+  initNewDraft: () => {
+    set({
+      data: emptyFormData(),
+      glazingId: null,
+      clientId: null,
+      glazingName: 'Без названия',
+      activeSegmentId: null,
+      activeFrameId: null,
+      activeCellId: null,
+      isLoading: false,
+      isSaving: false,
+      error: null,
+      dirty: true,
+      lastSavedAt: null,
+    });
+  },
+
+  initNewForClient: (clientId) => {
+    set({
+      data: emptyFormData(),
+      glazingId: null,
+      clientId,
+      glazingName: 'Без названия',
+      activeSegmentId: null,
+      activeFrameId: null,
+      activeCellId: null,
+      isLoading: false,
+      isSaving: false,
+      error: null,
+      dirty: true,           // сразу dirty — есть локальные данные но нет в БД
+      lastSavedAt: null,
+    });
+  },
+
+  setClientId: (clientId) => {
+    set({ clientId, dirty: true });
+  },
+
+  loadGlazing: async (glazingId) => {
+    set({ isLoading: true, error: null });
+    try {
+      const full = await loadGlazingById(glazingId);
+      const data = full.data && full.data.projects?.length > 0
+        ? migrateFormData(full.data)
+        : emptyFormData();
+      set({
+        data,
+        glazingId: full.id,
+        clientId: full.client_id,
+        glazingName: full.name,
+        activeSegmentId: null,
+        activeFrameId: null,
+        activeCellId: null,
+        isLoading: false,
+        error: null,
+        dirty: false,
+        lastSavedAt: new Date(full.updated_at),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Не удалось загрузить проект';
+      set({ isLoading: false, error: msg });
     }
   },
 
-  initFromOrder: (orderId, data) => {
-    if (data && data.projects.length > 0) {
-      set({ data, orderId, error: null });
-    } else {
-      // Заказ найден, но glazing-данных нет — создаём пустой проект
-      const fresh = emptyFormData();
-      set({ data: fresh, orderId, error: null });
+  saveGlazing: async (materials) => {
+    set({ isSaving: true, error: null });
+    try {
+      const { data, glazingId, clientId, glazingName } = get();
+      // Считаем общую сумму
+      let totalCost = 0;
+      if (materials) {
+        for (const p of data.projects) {
+          try {
+            const res = calcProject(p, materials);
+            totalCost += res.total;
+          } catch (e) {
+            console.warn('[glazing] не удалось посчитать проект для total_cost', e);
+          }
+        }
+      }
+      let savedId: string;
+      if (glazingId) {
+        // UPDATE существующего
+        const updated = await saveGlazingApi(glazingId, {
+          name: glazingName,
+          data,
+          total_cost: totalCost,
+        });
+        savedId = updated.id;
+        set({
+          isSaving: false,
+          error: null,
+          dirty: false,
+          lastSavedAt: new Date(updated.updated_at),
+        });
+      } else {
+        // CREATE нового
+        const created = await createGlazing({
+          clientId,
+          name: glazingName,
+          data,
+          totalCost,
+        });
+        savedId = created.id;
+        set({
+          glazingId: created.id,
+          isSaving: false,
+          error: null,
+          dirty: false,
+          lastSavedAt: new Date(created.updated_at),
+        });
+      }
+      return savedId;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Ошибка сохранения';
+      set({ isSaving: false, error: msg });
+      return null;
     }
-    // При работе с заказом отдельный draft не нужен
-    try { localStorage.removeItem(DRAFT_KEY); } catch {}
+  },
+
+  setGlazingName: (name) => {
+    set({ glazingName: name, dirty: true });
   },
 
   reset: () => {
-    const fresh = emptyFormData();
     set({
-      data: fresh,
-      orderId: null,
+      data: emptyFormData(),
+      glazingId: null,
+      clientId: null,
+      glazingName: 'Без названия',
       activeSegmentId: null,
       activeFrameId: null,
       activeCellId: null,
       error: null,
+      dirty: false,
+      lastSavedAt: null,
     });
-    try { localStorage.removeItem(DRAFT_KEY); } catch {}
   },
 
   // ── Проекты ────────────────────────────────────────────────────
@@ -391,8 +543,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       projects: [...get().data.projects, project],
       activeProjectId: project.id,
     };
-    set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ data, dirty: true });
     return project.id;
   },
 
@@ -409,7 +560,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       activeProjectId: project.id,
     };
     set({ data, activeSegmentId: null, activeFrameId: null, activeCellId: null });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
     return project.id;
   },
 
@@ -421,7 +572,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       activeProjectId: project.id,
     };
     set({ data, activeSegmentId: null, activeFrameId: null, activeCellId: null });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
     return project.id;
   },
 
@@ -494,7 +645,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       activeProjectId: project.id,
     };
     set({ data, activeSegmentId: null, activeFrameId: null, activeCellId: null });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
     return project.id;
   },
 
@@ -505,7 +656,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       const fresh = createEmptyProject('Балкон');
       const data = { projects: [fresh], activeProjectId: fresh.id };
       set({ data });
-      if (!get().orderId) saveDraft(data);
+      set({ dirty: true });
       return;
     }
     let activeProjectId = get().data.activeProjectId;
@@ -514,19 +665,19 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
     }
     const data = { ...get().data, projects, activeProjectId };
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   setActiveProject: (projectId) => {
     const data = { ...get().data, activeProjectId: projectId };
     set({ data, activeSegmentId: null, activeFrameId: null, activeCellId: null });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   renameProject: (projectId, name) => {
     const data = updProject(get().data, projectId, (p) => ({ ...p, name }));
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   duplicateProject: (projectId) => {
@@ -554,7 +705,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       activeProjectId: clone.id,
     };
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
     return clone.id;
   },
 
@@ -572,7 +723,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
         : p.corners,
     }));
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
     return segment.id;
   },
 
@@ -630,7 +781,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       return { ...p, segments: newSegments, corners: newCorners };
     });
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
     return newSegmentId;
   },
 
@@ -655,7 +806,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       return { ...p, segments, corners };
     });
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   setSegmentHeight: (projectId, segmentId, side, value) => {
@@ -667,7 +818,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       }))
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   // ── Рамы ───────────────────────────────────────────────────────
@@ -712,7 +863,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       })
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
     return newFrameId;
   },
 
@@ -737,7 +888,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       })
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   setFrameSize: (projectId, segmentId, frameId, width, height) => {
@@ -820,7 +971,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       )
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   setFrameBottomOffset: (projectId, segmentId, frameId, offset) => {
@@ -854,7 +1005,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       )
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   setFrameTopOffset: (projectId, segmentId, frameId, offset) => {
@@ -883,7 +1034,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       )
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   setFrameWidthRedistribute: (projectId, segmentId, frameId, width) => {
@@ -920,7 +1071,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       }))
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
     return true;
   },
 
@@ -948,7 +1099,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       }))
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
     return true;
   },
 
@@ -959,7 +1110,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       )
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   // ── Импосты ────────────────────────────────────────────────────
@@ -1009,7 +1160,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       )
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   removeImpost: (projectId, segmentId, frameId, impostId) => {
@@ -1043,7 +1194,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       )
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   moveImpost: (projectId, segmentId, frameId, impostId, position) => {
@@ -1059,7 +1210,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       )
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   addImpostsEven: (projectId, segmentId, frameId, orientation, count, targetRowIdx) => {
@@ -1115,7 +1266,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
         )
       );
       set({ data });
-      if (!get().orderId) saveDraft(data);
+      set({ dirty: true });
       return true;
     }
 
@@ -1161,7 +1312,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       )
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
     return true;
   },
 
@@ -1215,7 +1366,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
         )
       );
       set({ data });
-      if (!get().orderId) saveDraft(data);
+      set({ dirty: true });
       return 'ok';
     }
 
@@ -1274,7 +1425,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       )
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
     return 'ok';
   },
 
@@ -1352,7 +1503,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       )
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   // ── Ячейки ─────────────────────────────────────────────────────
@@ -1366,7 +1517,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       )
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   setCellMosquito: (projectId, segmentId, frameId, cellId, mosquito) => {
@@ -1378,7 +1529,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       )
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   setCellHardware: (projectId, segmentId, frameId, cellId, hardware) => {
@@ -1393,7 +1544,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       )
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   rebuildCells: (projectId, segmentId, frameId) => {
@@ -1403,7 +1554,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       )
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   // ── Кости ──────────────────────────────────────────────────────
@@ -1414,7 +1565,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       updSegment(p, segmentId, (s) => ({ ...s, bones: [...s.bones, bone] }))
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   removeBone: (projectId, segmentId, boneId) => {
@@ -1425,7 +1576,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       }))
     );
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   // ── Угловые соединители ────────────────────────────────────────
@@ -1439,7 +1590,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       return { ...p, corners };
     });
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   removeCorner: (projectId, index) => {
@@ -1449,7 +1600,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       return { ...p, corners };
     });
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   // ── Конфиг проекта ─────────────────────────────────────────────
@@ -1460,7 +1611,7 @@ export const useGlazingStore = create<GlazingState>((set, get) => ({
       config: { ...p.config, ...patch },
     }));
     set({ data });
-    if (!get().orderId) saveDraft(data);
+    set({ dirty: true });
   },
 
   // ── Активные сущности ──────────────────────────────────────────

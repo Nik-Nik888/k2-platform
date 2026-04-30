@@ -24,7 +24,6 @@ const NAV_ITEMS = [
   { label: 'CRM', path: '/crm', icon: Users },
   { label: '3D Визуализатор', path: '/visualizer', icon: Box },
   { label: 'Остекление', path: '/glazing', icon: PanelTop },
-  { label: '• Тест канваса', path: '/glazing-test', icon: PanelTop },
   { label: 'Калькулятор', path: '/calculator', icon: Calculator },
   { label: 'Сметы', path: '/estimates', icon: FileText },
   { label: 'Материалы', path: '/materials', icon: Database },

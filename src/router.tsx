@@ -14,7 +14,7 @@ import { CrmPage } from '@modules/crm/pages/CrmPage';
 // ═════════════════════════════════════════════════════════════════
 const VisualizerPage = lazy(() => import('@modules/visualizer3d/pages/VisualizerPage').then(m => ({ default: m.VisualizerPage })));
 const GlazingPage = lazy(() => import('@modules/glazing/pages/GlazingPage').then(m => ({ default: m.GlazingPage })));
-const GlazingTestPage = lazy(() => import('@modules/glazing/pages/GlazingTestPage').then(m => ({ default: m.GlazingTestPage })));
+const GlazingListPage = lazy(() => import('@modules/glazing/pages/GlazingListPage').then(m => ({ default: m.GlazingListPage })));
 const CalculatorPage = lazy(() => import('@modules/calculator/pages/CalculatorPage').then(m => ({ default: m.CalculatorPage })));
 const EstimatesPage = lazy(() => import('@modules/estimates/pages/EstimatesPage').then(m => ({ default: m.EstimatesPage })));
 const WarehousePage = lazy(() => import('@modules/warehouse/pages/WarehousePage').then(m => ({ default: m.WarehousePage })));
@@ -55,7 +55,8 @@ export const router = createBrowserRouter([
       { path: 'crm', element: <CrmPage /> },
       { path: 'visualizer', element: L(<VisualizerPage />) },
       { path: 'glazing', element: L(<GlazingPage />) },
-      { path: 'glazing-test', element: L(<GlazingTestPage />) },
+      { path: 'glazing/list', element: L(<GlazingListPage />) },
+      { path: 'glazing/:glazingId', element: L(<GlazingPage />) },
       { path: 'calculator', element: L(<CalculatorPage />) },
       { path: 'calculator/:orderId', element: L(<CalculatorPage />) },
       { path: 'estimates', element: L(<EstimatesPage />) },

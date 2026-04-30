@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import ClientInstallments from '@modules/installments/components/ClientInstallments';
 import ClientCabinets from '../components/ClientCabinets';
+import ClientGlazings from '../components/ClientGlazings';
 import OrderDuplicatesWarning from '../components/OrderDuplicatesWarning';
 
 // ─── Этапы канбана ──────────────────────────────────────
@@ -269,6 +270,10 @@ function OrderDetail({
             <ClientCabinets clientId={client.id} onClose={onClose} />
           )}
 
+          {client && (
+            <ClientGlazings clientId={client.id} onClose={onClose} />
+          )}
+
           <div>
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Объект</h3>
             <div className="rounded-xl p-4 space-y-2" style={{ backgroundColor: currentStage?.bg }}>
@@ -332,6 +337,8 @@ function OrderDetail({
             )}
             <button onClick={() => { onClose(); navigate('/calculator/' + order.id); }}
               className="btn-secondary w-full">Открыть в калькуляторе</button>
+            <button onClick={() => { onClose(); navigate('/glazing/' + order.id); }}
+              className="btn-secondary w-full">Открыть в остеклении</button>
           </div>
         </div>
 
