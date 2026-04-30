@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useCalcStore } from '@store/calcStore';
 import { TABS } from '@modules/calculator/api/calcApi';
 import { doCalc, exportPDF } from '@modules/calculator/api/doCalc';
@@ -23,6 +23,10 @@ export function CalculatorPage() {
   const store = useCalcStore();
   const { db, isLoading, error, activeTab, setActiveTab, loadData, sel } = store;
   const { orderId: urlOrderId } = useParams<{ orderId?: string }>();
+  const [searchParams] = useSearchParams();
+  // ?client_id=XXX в URL — для случая когда новый расчёт создаётся
+  // из карточки клиента в CRM. Только для нового (без orderId).
+  const initialClientId = !urlOrderId ? searchParams.get('client_id') : null;
   const navigate = useNavigate();
   const [results, setResults] = useState<CalcResults | null>(null);
   const [showResults, setShowResults] = useState(false);
@@ -84,6 +88,30 @@ export function CalculatorPage() {
       } catch {}
     })();
   }, [urlOrderId]);
+
+  // Если новый расчёт открыт из CRM с ?client_id=XXX — сразу подставляем клиента.
+  // Имя загружаем чтобы показать в шапке («Иван Иванов»).
+  useEffect(() => {
+    if (!initialClientId || urlOrderId) return;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('clients').select('name, phone, address').eq('id', initialClientId).single();
+        if (data) {
+          setClientId(initialClientId);
+          setClientName(data.name);
+          setOrderInfo((p) => ({
+            ...p,
+            address: data.address || p.address,
+            phone: data.phone || p.phone,
+          }));
+        }
+      } catch {
+        console.warn('[calc] не удалось загрузить клиента по client_id из URL');
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialClientId]);
 
   // localStorage — сохранение
   useEffect(() => {
