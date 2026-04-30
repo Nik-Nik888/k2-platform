@@ -18,6 +18,7 @@ export const GLAZING_CATEGORY_NAMES = {
   profiles:      'Профильные системы',
   glass:         'Стеклопакеты',
   hardware:      'Фурнитура',
+  cellHardware:  'Доп. фурнитура (по ячейкам)',
   sills:         'Подоконники',
   ebbs:          'Отливы',
   mosquito:      'Москитные сетки',

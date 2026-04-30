@@ -2,6 +2,7 @@ import type {
   GlazingProject, Frame, Cell, ProjectConfig,
   EstimateLine, ProjectEstimate, ProjectMetrics,
   GlazingEstimate, GlazingFormData, FrameConfig,
+  MosquitoType, HardwareItem,
 } from '../types';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -138,6 +139,113 @@ function round(n: number, digits = 2): number {
  * @param project — проект с геометрией и конфигом
  * @param materials — карта материалов из справочника (id → material)
  */
+
+// ═══════════════════════════════════════════════════════════════════
+// Матчинг типов москиток/фурнитуры с материалами справочника.
+//
+// В коде ячейки хранят логические типы:
+//   • MosquitoType: 'standard' | 'plug' | 'antiсat' | 'antidust'
+//   • HardwareItem: 'child_lock' | 'comb' | 'air_box'
+//
+// А в БД material справочника лежат именованными строками («Сетка
+// антипыль», «Детские замки», ...). Матчим их по подстроке в названии,
+// без учёта регистра. Если ничего не нашлось — возвращаем undefined,
+// и в смету эта позиция не попадает (с предупреждением в console).
+//
+// Подстроки специально написаны в нижнем регистре и в русской
+// транслитерации соответствующей seed-данным.
+// ═══════════════════════════════════════════════════════════════════
+
+const MOSQUITO_NAME_PATTERNS: Record<MosquitoType, string[]> = {
+  // Сетка стандартная: «сетка» + «стандарт» (двойной фильтр чтобы не
+  // спутать с «Кость стандарт» из категории костей)
+  standard: ['сетка стандарт', 'сетка белая стандарт'],
+  // Вкладная (без рамки) — «вкладная» или «плунжер»
+  plug:     ['вкладн', 'плунжер'],
+  // Антикошка — содержит «антикошка» или просто «кошк»
+  antiсat:  ['антикошк', 'кошк'],
+  // Антипыль — «антипыль» или «пыл»
+  antidust: ['антипыл'],
+};
+
+const HARDWARE_NAME_PATTERNS: Record<HardwareItem, string[]> = {
+  child_lock: ['детские замки', 'детский замок', 'child lock'],
+  comb:       ['гребёнк', 'гребенк'],
+  air_box:    ['эйрбокс', 'air box', 'клапан'],
+};
+
+/**
+ * Найти CalcMaterial для москитки заданного типа.
+ * Сначала пробуем точное совпадение по подстрокам, иначе undefined.
+ */
+function matchMosquitoMaterial(
+  type: MosquitoType,
+  materials: MaterialMap,
+): CalcMaterial | undefined {
+  const patterns = MOSQUITO_NAME_PATTERNS[type] ?? [];
+  for (const pattern of patterns) {
+    for (const mat of materials.values()) {
+      if (mat.name.toLowerCase().includes(pattern.toLowerCase())) {
+        return mat;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Найти CalcMaterial для дополнительной фурнитуры заданного типа.
+ */
+function matchHardwareMaterial(
+  item: HardwareItem,
+  materials: MaterialMap,
+): CalcMaterial | undefined {
+  const patterns = HARDWARE_NAME_PATTERNS[item] ?? [];
+  for (const pattern of patterns) {
+    for (const mat of materials.values()) {
+      if (mat.name.toLowerCase().includes(pattern.toLowerCase())) {
+        return mat;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Пройти по всем ячейкам проекта и посчитать сколько раз встречается
+ * каждый тип москитки и каждый тип фурнитуры. На выходе — две карты:
+ *   • mosquitoCounts: {standard: 3, antidust: 1, ...}
+ *   • hardwareCounts: {child_lock: 2, comb: 1, ...}
+ *
+ * Используется в calcProject для добавления соответствующих строк в смету.
+ */
+function aggregateCellExtras(project: GlazingProject): {
+  mosquitoCounts: Partial<Record<MosquitoType, number>>;
+  hardwareCounts: Partial<Record<HardwareItem, number>>;
+} {
+  const mosquitoCounts: Partial<Record<MosquitoType, number>> = {};
+  const hardwareCounts: Partial<Record<HardwareItem, number>> = {};
+
+  for (const seg of project.segments) {
+    for (const frame of seg.frames) {
+      for (const cell of frame.cells) {
+        // Москитка — может быть только одного типа (или null) на ячейку
+        if (cell.mosquito) {
+          mosquitoCounts[cell.mosquito] = (mosquitoCounts[cell.mosquito] ?? 0) + 1;
+        }
+        // Фурнитура — массив, на одной ячейке может быть несколько
+        if (cell.hardware) {
+          for (const item of cell.hardware) {
+            hardwareCounts[item] = (hardwareCounts[item] ?? 0) + 1;
+          }
+        }
+      }
+    }
+  }
+
+  return { mosquitoCounts, hardwareCounts };
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Геометрические метрики проекта (без участия материалов).
 // Используются для столбцов «площадь / рамы / импосты / штапики / ...»
@@ -342,6 +450,40 @@ export function calcProject(
     const ln = line('mosquito', mat, item.quantity);
     if (ln) lines.push(ln);
   }
+
+  // ── Доп. москитки и фурнитура из ячеек проекта ───────────────
+  // Менеджер ставит на конкретные открывающиеся створки в попапе ячейки
+  // (вкладки «Сетка» и «Фурнитура»). Тут собираем их в смету.
+  const { mosquitoCounts, hardwareCounts } = aggregateCellExtras(project);
+
+  for (const [type, count] of Object.entries(mosquitoCounts)) {
+    if (!count) continue;
+    const mat = matchMosquitoMaterial(type as MosquitoType, materials);
+    if (mat) {
+      const ln = line('mosquito', mat, count);
+      if (ln) lines.push(ln);
+    } else {
+      console.warn(
+        `[glazing] Не найден материал для москитки типа "${type}". ` +
+        `Проверьте, что в справочнике есть подходящая позиция (Сетка стандартная/антипыль/вкладная/антикошка).`
+      );
+    }
+  }
+
+  for (const [item, count] of Object.entries(hardwareCounts)) {
+    if (!count) continue;
+    const mat = matchHardwareMaterial(item as HardwareItem, materials);
+    if (mat) {
+      const ln = line('hardware', mat, count);
+      if (ln) lines.push(ln);
+    } else {
+      console.warn(
+        `[glazing] Не найден материал для фурнитуры "${item}". ` +
+        `Проверьте, что в справочнике есть позиция (Детские замки/Гребёнка/Эйрбокс).`
+      );
+    }
+  }
+
   for (const item of cfg.addons) {
     const mat = materials.get(item.materialId);
     const ln = line('addon', mat, item.length);

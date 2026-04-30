@@ -406,3 +406,153 @@ describe('calcProjectMetrics', () => {
     expect(m.sashCount).toBe(0);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// Москитки и доп. фурнитура из ячеек (часть Б)
+// ═══════════════════════════════════════════════════════════════════
+
+describe('calcProject — москитки из ячеек', () => {
+  // Расширенный справочник с разными типами москиток
+  const MATS_EXT: CalcMaterial[] = [
+    ...MATS,
+    { id: 'mosq-standard', name: 'Сетка стандартная',  unit: 'шт.', price: 1200 },
+    { id: 'mosq-antidust', name: 'Сетка антипыль',     unit: 'шт.', price: 1900 },
+    { id: 'mosq-anticat',  name: 'Сетка антикошка',    unit: 'шт.', price: 2400 },
+    { id: 'mosq-plug',     name: 'Сетка вкладная',     unit: 'шт.', price: 1100 },
+    { id: 'hw-child',      name: 'Детские замки',      unit: 'шт.', price: 450 },
+    { id: 'hw-comb',       name: 'Гребёнка',           unit: 'шт.', price: 180 },
+    { id: 'hw-airbox',     name: 'Эйрбокс',            unit: 'шт.', price: 2800 },
+  ];
+  const matMapExt: MaterialMap = new Map(MATS_EXT.map((m) => [m.id, m]));
+
+  it('одна ячейка с москиткой antidust → строка сметы 1×1900', () => {
+    const p = standardProject();
+    p.segments[0]!.frames[0]!.cells = [
+      { id: 'c1', x: 0, y: 0, width: 3000, height: 1400,
+        sash: 'turn_left', mosquito: 'antidust' },
+    ];
+    const result = calcProject(p, matMapExt);
+    const mosq = result.lines.filter((l) => l.scope === 'mosquito');
+    expect(mosq).toHaveLength(1);
+    expect(mosq[0]!.name).toBe('Сетка антипыль');
+    expect(mosq[0]!.quantity).toBe(1);
+    expect(mosq[0]!.total).toBe(1900);
+  });
+
+  it('две ячейки с одинаковой москиткой → одна строка с количеством 2', () => {
+    const p = standardProject();
+    p.segments[0]!.frames[0]!.cells = [
+      { id: 'c1', x: 0,    y: 0, width: 1500, height: 1400,
+        sash: 'turn_left', mosquito: 'standard' },
+      { id: 'c2', x: 1500, y: 0, width: 1500, height: 1400,
+        sash: 'turn_right', mosquito: 'standard' },
+    ];
+    const result = calcProject(p, matMapExt);
+    const mosq = result.lines.filter((l) => l.scope === 'mosquito');
+    expect(mosq).toHaveLength(1);
+    expect(mosq[0]!.name).toBe('Сетка стандартная');
+    expect(mosq[0]!.quantity).toBe(2);
+    expect(mosq[0]!.total).toBe(2400);
+  });
+
+  it('разные типы москиток → разные строки', () => {
+    const p = standardProject();
+    p.segments[0]!.frames[0]!.cells = [
+      { id: 'c1', x: 0,    y: 0, width: 1500, height: 1400,
+        sash: 'turn_left',  mosquito: 'standard' },
+      { id: 'c2', x: 1500, y: 0, width: 1500, height: 1400,
+        sash: 'turn_right', mosquito: 'antiсat' },
+    ];
+    const result = calcProject(p, matMapExt);
+    const mosq = result.lines.filter((l) => l.scope === 'mosquito');
+    expect(mosq).toHaveLength(2);
+    const names = mosq.map((l) => l.name).sort();
+    expect(names).toEqual(['Сетка антикошка', 'Сетка стандартная']);
+  });
+
+  it('москитка без подходящего материала → строка не добавляется (warning)', () => {
+    const p = standardProject();
+    // справочник БЕЗ москиток
+    const minimalMap: MaterialMap = new Map([
+      ['profile-rehau', MATS_EXT[0]!],
+      ['glass-1', MATS_EXT[1]!],
+    ] as [string, CalcMaterial][]);
+    p.segments[0]!.frames[0]!.cells = [
+      { id: 'c1', x: 0, y: 0, width: 3000, height: 1400,
+        sash: 'turn_left', mosquito: 'antidust' },
+    ];
+    const result = calcProject(p, minimalMap);
+    const mosq = result.lines.filter((l) => l.scope === 'mosquito');
+    expect(mosq).toHaveLength(0);
+  });
+});
+
+describe('calcProject — фурнитура из ячеек', () => {
+  const MATS_EXT: CalcMaterial[] = [
+    ...MATS,
+    { id: 'hw-child',  name: 'Детские замки', unit: 'шт.', price: 450 },
+    { id: 'hw-comb',   name: 'Гребёнка',      unit: 'шт.', price: 180 },
+    { id: 'hw-airbox', name: 'Эйрбокс',       unit: 'шт.', price: 2800 },
+  ];
+  const matMapExt: MaterialMap = new Map(MATS_EXT.map((m) => [m.id, m]));
+
+  // Хелпер: проект без общей фурнитуры (чтобы scope='hardware' содержал
+  // только cell-уровневую фурнитуру)
+  function projectNoHardware(): GlazingProject {
+    const p = standardProject();
+    p.config.hardwareId = '';  // отключаем общую фурнитуру
+    return p;
+  }
+
+  it('ячейка с одной фурнитурой → одна строка', () => {
+    const p = projectNoHardware();
+    p.segments[0]!.frames[0]!.cells = [
+      { id: 'c1', x: 0, y: 0, width: 3000, height: 1400,
+        sash: 'turn_left', hardware: ['child_lock'] },
+    ];
+    const result = calcProject(p, matMapExt);
+    const hw = result.lines.filter((l) => l.scope === 'hardware');
+    expect(hw).toHaveLength(1);
+    expect(hw[0]!.name).toBe('Детские замки');
+    expect(hw[0]!.total).toBe(450);
+  });
+
+  it('две ячейки разные фурнитуры → две строки', () => {
+    const p = projectNoHardware();
+    p.segments[0]!.frames[0]!.cells = [
+      { id: 'c1', x: 0,    y: 0, width: 1500, height: 1400,
+        sash: 'turn_left',  hardware: ['child_lock', 'comb'] },
+      { id: 'c2', x: 1500, y: 0, width: 1500, height: 1400,
+        sash: 'turn_right', hardware: ['comb'] },
+    ];
+    const result = calcProject(p, matMapExt);
+    const hw = result.lines.filter((l) => l.scope === 'hardware');
+    // child_lock = 1, comb = 2
+    expect(hw).toHaveLength(2);
+    const byName = Object.fromEntries(hw.map((l) => [l.name, l]));
+    expect(byName['Детские замки']!.quantity).toBe(1);
+    expect(byName['Гребёнка']!.quantity).toBe(2);
+    expect(byName['Гребёнка']!.total).toBe(360);  // 2 × 180
+  });
+
+  it('москитка + фурнитура на одной ячейке → обе попадают в смету', () => {
+    const matsAll: CalcMaterial[] = [
+      ...MATS,
+      { id: 'mosq-standard', name: 'Сетка стандартная', unit: 'шт.', price: 1200 },
+      { id: 'hw-child',      name: 'Детские замки',     unit: 'шт.', price: 450 },
+    ];
+    const matsMap = new Map(matsAll.map((m) => [m.id, m]));
+    const p = projectNoHardware();
+    p.segments[0]!.frames[0]!.cells = [
+      { id: 'c1', x: 0, y: 0, width: 3000, height: 1400,
+        sash: 'turn_left',
+        mosquito: 'standard',
+        hardware: ['child_lock'] },
+    ];
+    const result = calcProject(p, matsMap);
+    const mosq = result.lines.filter((l) => l.scope === 'mosquito');
+    const hw = result.lines.filter((l) => l.scope === 'hardware');
+    expect(mosq).toHaveLength(1);
+    expect(hw).toHaveLength(1);
+  });
+});
